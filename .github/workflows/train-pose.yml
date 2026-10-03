@@ -82,6 +82,13 @@ jobs:
         if: steps.state.outputs.done == 'false'
         with:
           python-version: "3.11"
+      - name: Machine
+        if: steps.state.outputs.done == 'false'
+        # runners differ: one leg measured 3100 s an epoch, the next 1500 s
+        run: |
+          lscpu | grep -E "Model name|^CPU\(s\)"
+          echo "vector units: $(grep -oE 'avx512[a-z0-9_]*|amx[a-z0-9_]*' /proc/cpuinfo | sort -u | tr '\n' ' ')"
+          free -g | head -2
       - name: Make room for COCO
         if: steps.state.outputs.done == 'false'
         run: |

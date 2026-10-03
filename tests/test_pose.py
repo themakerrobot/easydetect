@@ -4,6 +4,8 @@ network's training step and export, and the plumbing into Detector."""
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
@@ -245,3 +247,68 @@ def test_frozen_stages_keep_their_weights_and_statistics():
     assert not stem_bn.training and torch.equal(stem_bn.running_mean, before)
     assert torch.equal(next(net.backbone.stages[1].parameters()), frozen_w)
     assert net.backbone.stages[2].training and net.lateral4.training
+
+
+def test_half_body_skips_halves_too_small_to_see():
+    from easydetect.data.keypoints import HALF_BODY_MIN_SIZE, KeypointDataset
+
+    def person(spread):
+        k = np.zeros((17, 3))
+        k[:, 0] = 100 + np.linspace(0, spread, 17)
+        k[:, 1] = 200 + np.linspace(0, spread, 17)
+        k[:, 2] = 2
+        return k
+
+    # every labelled keypoint within a few pixels: blown up 150x, a blur
+    assert KeypointDataset._half_body(None, person(6.0)) is None
+    box = KeypointDataset._half_body(None, person(4 * HALF_BODY_MIN_SIZE))
+    assert box is not None and (box[2:] - box[:2]).max() >= HALF_BODY_MIN_SIZE
+
+
+def _tool():
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "train_pose", Path(__file__).resolve().parent.parent / "tools" / "train_pose.py")
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    return tool
+
+
+def test_results_csv_from_an_older_run_gains_the_new_columns(tmp_path):
+    import csv
+
+    tool = _tool()
+    path = tmp_path / "results.csv"
+    path.write_text("epoch,loss,lr,seconds,ap,ap50,ap75\n1,3.4,0.001,3313.5,,,\n"
+                    "5,2.5,0.0009,3205.9,0.4915,0.818,0.5198\n")
+    tool.append_row(path, {"epoch": 6, "loss": 2.4, "lr": 0.0009, "seconds": 3000.0,
+                           "ap": 0.53, "ap50": 0.84, "ap75": 0.58, "ap_ema": 0.51,
+                           "ap_net": 0.53, "weights": "net"})
+    rows = list(csv.DictReader(path.open()))
+    assert [r["epoch"] for r in rows] == ["1", "5", "6"]
+    assert rows[1]["ap"] == "0.4915" and rows[1]["ap_net"] == ""
+    assert rows[2]["weights"] == "net" and rows[2]["ap_ema"] == "0.51"
+
+
+@needs_torch
+def test_training_scores_the_ema_and_the_network_and_keeps_the_better(toy, tmp_path):
+    import csv
+
+    import torch
+
+    tool = _tool()
+    out = tmp_path / "runs"
+    assert tool.main(["--coco", str(toy), "--size", "s", "--init", "none", "--epochs", "2",
+                      "--batch", "4", "--workers", "0", "--val-every", "1", "--warmup", "2",
+                      "--freeze", "2", "--out", str(out), "--device", "cpu"]) == 0
+    rows = list(csv.DictReader((out / "s" / "results.csv").open()))
+    assert len(rows) == 2
+    for r in rows:
+        assert r["weights"] in ("ema", "net")
+        assert float(r["ap"]) == max(float(r["ap_ema"]), float(r["ap_net"]))
+    best = torch.load(out / "s" / "best.pt", map_location="cpu", weights_only=False)
+    assert best["weights"] in ("ema", "net")
+    assert json.loads((out / "s" / "run.json").read_text())["clip"] == 3.0
+    assert (out / "s" / "pose-s.onnx").exists() and (out / "s" / "finished").exists()

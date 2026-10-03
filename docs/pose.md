@@ -70,9 +70,17 @@ python tools/train_pose.py --coco ~/datasets/coco --workers 16
 `tools/coco2yolo.py` reads the same folder, so a COCO copy made for it works
 as it is. The run writes to `runs/pose/s/`: `results.csv` (loss each epoch,
 OKS AP every `--val-every` epochs), `run.json` (the settings), `last.pt`
-(everything needed to go on: `--resume runs/pose/s`) and `best.pt` (the EMA
+(everything needed to go on: `--resume runs/pose/s`) and `best.pt` (the
 weights with the best AP). At the end `best.pt` is exported to
 `pose-s.onnx` and checked against PyTorch on ONNX Runtime.
+
+Each scoring rates both the EMA of the weights and the network itself
+(`ap_ema`, `ap_net` in `results.csv`) and keeps the better. They usually agree
+within a point, but the first CPU run had a short loss spike at epoch 14, and
+for a few epochs after it the EMA, still averaging weights from both sides of
+the spike, scored 0.518 where the network scored 0.534. Gradients are capped
+at norm 3 (`--clip`): ordinary steps measured 1.4–3.4 on COCO at batch 64, so
+the cap only trims spikes.
 
 The AP printed during training is scored with COCO's own person boxes, which
 measures the keypoint network alone. What a user gets depends on the detector

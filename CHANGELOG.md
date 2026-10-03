@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Keypoint training (`tools/train_pose.py`): each scoring rates the EMA and the
+  network itself and keeps the better as `best.pt` (`ap_ema`, `ap_net`,
+  `weights` in `results.csv`; an older file gains the columns on resume);
+  gradients are capped at norm 3 (`--clip`, was a fixed 10 that never bit);
+  half-body crops smaller than 32 px are skipped (they were blown up to 150×);
+  `train-pose.yml` logs each runner's CPU. From an audit of the first CPU run,
+  whose EMA scored 0.32 after a loss spike while the network was fine.
 - docs/training.md: the measured recipe comparison — on a 40-epoch VOC
   fine-tune, multi-scale, mosaic and mixup did not beat the default (mixup a
   tie, all three together −0.05 mAP50-95), so they stay off.

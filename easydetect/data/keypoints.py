@@ -28,13 +28,15 @@ from .augment import photometric
 SCALE = (0.7, 1.3)  # crop size factor
 ROTATE, ROTATE_P = 60.0, 0.6  # degrees either way, how often
 HALF_BODY_P, HALF_BODY_MIN = 0.3, 8  # only with this many keypoints labelled
+HALF_BODY_MIN_SIZE = 32.0  # pixels: a smaller half is blown up past recognition
 ERASE_P, ERASE_MAX = 0.5, 0.4  # a blanked patch up to this share of each side
 UPPER = set(range(11))  # face, shoulders, arms
 KEPT = ("image_id", "bbox", "keypoints", "num_keypoints", "area", "iscrowd")
 
 DESCRIPTION = [
     f"crop scale ×{SCALE[0]:g}–{SCALE[1]:g}, rotation ±{ROTATE:g}° (p={ROTATE_P})",
-    f"half body: upper or lower keypoints only (p={HALF_BODY_P})",
+    f"half body: upper or lower keypoints only (p={HALF_BODY_P}, "
+    f"at least {HALF_BODY_MIN_SIZE:g} px)",
     "horizontal flip with left/right swapped (p=0.5)",
     "photometric jitter (the detector's)",
     f"one blanked patch up to {ERASE_MAX:g} of each side (p={ERASE_P})",
@@ -97,7 +99,12 @@ class KeypointDataset:
         if len(chosen) < 2:
             return None
         pts = kpts[chosen, :2]
-        return np.concatenate([pts.min(0), pts.max(0)])
+        lo, hi = pts.min(0), pts.max(0)
+        # a few keypoints a handful of pixels apart would fill the crop at up
+        # to 150x (measured on COCO train): a blur with keypoints in it
+        if (hi - lo).max() < HALF_BODY_MIN_SIZE:
+            return None
+        return np.concatenate([lo, hi])
 
     def __getitem__(self, i: int):
         image_id, ann = self.items[i]

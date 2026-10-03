@@ -63,6 +63,30 @@ def param_groups(net, weight_decay: float):
             {"params": no_decay, "weight_decay": 0.0}]
 
 
+CSV_FIELDS = ["epoch", "loss", "lr", "seconds", "ap", "ap50", "ap75", "ap_ema", "ap_net",
+              "weights"]
+
+
+def append_row(path: Path, row: dict) -> None:
+    """Add an epoch to results.csv; a file from before ap_ema/ap_net (a run
+    resumed across the change) is rewritten with the wider header first."""
+    if path.exists():
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames != CSV_FIELDS:
+                rows = list(reader)
+                with path.open("w", newline="") as out:
+                    w = csv.DictWriter(out, fieldnames=CSV_FIELDS)
+                    w.writeheader()
+                    w.writerows(rows)
+    new = not path.exists()
+    with path.open("a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        if new:
+            w.writeheader()
+        w.writerow(row)
+
+
 def lr_at(step: int, total: int, warmup: int, lr: float, final: float = 0.05) -> float:
     if step < warmup:
         return lr * (step + 1) / warmup
@@ -222,7 +246,8 @@ def train(args) -> None:
         (out / "run.json").write_text(json.dumps({
             "task": "pose", "size": args.size, "init": args.init, "epochs": args.epochs,
             "batch": args.batch, "lr": args.lr, "weight_decay": args.weight_decay,
-            "warmup_steps": args.warmup, "freeze": args.freeze, "train_people": len(train_ds),
+            "warmup_steps": args.warmup, "clip": args.clip, "freeze": args.freeze,
+            "train_people": len(train_ds),
             "val_people": len(val_ds), "augment": DESCRIPTION,
             "keypoints": list(KEYPOINT_NAMES), "device": str(device)}, indent=2))
     ema.module.to(device)
@@ -252,7 +277,7 @@ def train(args) -> None:
             loss = simcc_loss(x, y, xy, weight)
             opt.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(net.parameters(), 10.0)
+            torch.nn.utils.clip_grad_norm_(net.parameters(), args.clip)
             opt.step()
             ema.update(net)
             running += loss.item() * len(crops)
@@ -263,22 +288,27 @@ def train(args) -> None:
         row = {"epoch": epoch + 1, "loss": round(running / max(seen, 1), 5),
                "lr": opt.param_groups[0]["lr"], "seconds": round(time.time() - started, 1)}
         if (epoch + 1) % args.val_every == 0 or epoch + 1 == args.epochs:
-            metrics = evaluate(ema.module, val_ds, device, workers=min(args.workers, 8))
+            # both the EMA and the network itself: after a loss spike the EMA
+            # still holds weights from both sides of it and can score well below
+            # the network for a couple of epochs (0.518 vs 0.534 measured)
+            workers = min(args.workers, 8)
+            scored = {"ema": evaluate(ema.module, val_ds, device, workers=workers),
+                      "net": evaluate(net, val_ds, device, workers=workers)}
+            net.train()
+            which = max(scored, key=lambda k: scored[k]["ap"])
+            metrics = scored[which]
             row.update({k: round(v, 4) for k, v in metrics.items()})
+            row.update(ap_ema=round(scored["ema"]["ap"], 4), ap_net=round(scored["net"]["ap"], 4),
+                       weights=which)
             if metrics["ap"] > best:
                 best = metrics["ap"]
-                torch.save({"kind": "pose", "size": args.size, "model": ema.module.state_dict(),
-                            "keypoints": list(KEYPOINT_NAMES), "epoch": epoch + 1, "ap": best},
-                           out / "best.pt")
+                chosen = ema.module if which == "ema" else net
+                torch.save({"kind": "pose", "size": args.size, "model": chosen.state_dict(),
+                            "weights": which, "keypoints": list(KEYPOINT_NAMES),
+                            "epoch": epoch + 1, "ap": best}, out / "best.pt")
         print(f"epoch {epoch + 1}: " + ", ".join(f"{k} {v}" for k, v in row.items()
                                                   if k != "epoch"), flush=True)
-        new = not csv_path.exists()
-        with csv_path.open("a", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=["epoch", "loss", "lr", "seconds",
-                                              "ap", "ap50", "ap75"])
-            if new:
-                w.writeheader()
-            w.writerow(row)
+        append_row(csv_path, row)
         torch.save({"net": net.state_dict(), "model": ema.module.state_dict(),
                     "ema_updates": ema.updates, "optimizer": opt.state_dict(),
                     "epoch": epoch, "best": best, "size": args.size}, last)
@@ -300,6 +330,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lr", type=float, default=2e-3)
     p.add_argument("--weight-decay", type=float, default=0.05)
     p.add_argument("--warmup", type=int, default=1000, help="steps")
+    p.add_argument("--clip", type=float, default=3.0,
+                   help="gradient norm cap: typical steps measure 1.4-3.4 (COCO, batch 64), "
+                        "so 3 trims the rare spikes and leaves ordinary steps alone")
     p.add_argument("--workers", type=int, default=12)
     p.add_argument("--val-every", type=int, default=10)
     p.add_argument("--freeze", type=int, default=0,

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Keypoints decode between the network's half-pixel bins (a parabola through
+  each peak; `KeypointEstimator(subpixel=True)`, the default), and can average
+  each crop with its mirror image (`flip=True`, twice the work).
+  `train_pose.py --eval` scores either way and with the labelled boxes
+  (`--detector gt`); `eval-pose.yml` runs those on an earlier run's model.
+- `train_pose.py --init` takes a keypoint `best.pt` to train further, and
+  `train-pose.yml` starts from an earlier run's with `init_run`.
 - Fixed: scoring the whole keypoint pipeline (`train_pose.py --eval`) failed
   on pictures with nobody in them — about half of COCO val2017. In
   `train-pose.yml` the error was hidden by a pipe (now `pipefail`), a finished

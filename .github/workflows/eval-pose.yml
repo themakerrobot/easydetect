@@ -1,0 +1,67 @@
+name: eval-pose
+
+# Scores a trained keypoint model (an earlier train-pose run's pose-run
+# artifact) on COCO val2017 through the exported ONNX model and the runtime's
+# decoding: with the labelled person boxes (the keypoint model alone), with
+# and without flip averaging and sub-pixel decoding, and behind a detector.
+# Nothing is uploaded.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "train-pose run id whose pose-run artifact to score"
+        required: true
+      size:
+        description: "s or m"
+        default: "s"
+      detector:
+        description: "Detector for the whole-pipeline rows"
+        default: "dfine-s"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      PYTHONUNBUFFERED: "1"
+      ONNX: run/${{ inputs.size }}/pose-${{ inputs.size }}.onnx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pose-run
+          path: run
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[train]"
+      - name: COCO val2017 and annotations
+        run: |
+          mkdir -p coco/images && cd coco
+          for zip in zips/val2017.zip annotations/annotations_trainval2017.zip; do
+            curl -sSL --retry 5 -o part.zip "http://images.cocodataset.org/$zip"
+            case "$zip" in zips/*) unzip -q part.zip -d images ;; *) unzip -q part.zip ;; esac
+            rm part.zip
+          done
+      - name: Score
+        run: |
+          set -o pipefail
+          score() { python tools/train_pose.py --coco coco --eval "$ONNX" --device CPU "$@" \
+                      | tail -n 1 | tee -a scores.txt; }
+          score --detector gt --no-subpixel
+          score --detector gt
+          score --detector gt --no-subpixel --flip
+          score --detector gt --flip
+          score --detector ${{ inputs.detector }} --no-subpixel
+          score --detector ${{ inputs.detector }} --flip
+          { echo '```'; cat scores.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

@@ -103,13 +103,46 @@ def _softmax(x: np.ndarray) -> np.ndarray:
     return e / e.sum(-1, keepdims=True)
 
 
-def decode(x_logits: np.ndarray, y_logits: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _refine(logits: np.ndarray) -> np.ndarray:
+    """The peak bin, moved by a parabola through the log-probabilities of it and
+    its two neighbours: exact for the Gaussian the network is trained to put
+    out, and never more than half a bin from the peak."""
+    peak = logits.argmax(-1)
+    n = logits.shape[-1]
+    inner = np.clip(peak, 1, n - 2)
+    left = np.take_along_axis(logits, (inner - 1)[..., None], -1)[..., 0]
+    mid = np.take_along_axis(logits, inner[..., None], -1)[..., 0]
+    right = np.take_along_axis(logits, (inner + 1)[..., None], -1)[..., 0]
+    curve = left - 2 * mid + right
+    with np.errstate(divide="ignore", invalid="ignore"):
+        offset = np.where(curve < 0, 0.5 * (left - right) / curve, 0.0)
+    offset = np.where((peak == inner), np.clip(offset, -0.5, 0.5), 0.0)
+    return peak + offset
+
+
+def decode(x_logits: np.ndarray, y_logits: np.ndarray,
+           subpixel: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """Network output → keypoints in crop pixels ``(N, K, 2)`` and confidences
-    ``(N, K)`` in 0-1: how close each distribution is to a confident one."""
-    px, py = _softmax(x_logits.astype(np.float32)), _softmax(y_logits.astype(np.float32))
-    xy = np.stack([px.argmax(-1), py.argmax(-1)], -1).astype(np.float32) / SPLIT
+    ``(N, K)`` in 0-1: how close each distribution is to a confident one.
+    ``subpixel`` places each keypoint between bins (a parabola through the
+    peak) rather than on the peak's bin, half a crop pixel wide."""
+    x_logits, y_logits = x_logits.astype(np.float32), y_logits.astype(np.float32)
+    px, py = _softmax(x_logits), _softmax(y_logits)
+    if subpixel:
+        xy = np.stack([_refine(x_logits), _refine(y_logits)], -1).astype(np.float32) / SPLIT
+    else:
+        xy = np.stack([px.argmax(-1), py.argmax(-1)], -1).astype(np.float32) / SPLIT
     conf = np.minimum(px.max(-1) / _PEAK_X, py.max(-1) / _PEAK_Y)
     return xy, np.clip(conf, 0.0, 1.0).astype(np.float32)
+
+
+def unflip(x_logits: np.ndarray, y_logits: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Output for a mirrored crop → output in the original crop's terms: left
+    and right keypoints swap, and x bin ``b`` of the mirror is the original's
+    ``(W - 1) * SPLIT - b`` (pixel centres, as training flips them)."""
+    x = x_logits[:, list(FLIP)][..., ::-1]
+    x = np.concatenate([x[..., 1:], x[..., -1:]], -1)  # reversed is one bin off
+    return x, y_logits[:, list(FLIP)]
 
 
 # ---------------------------------------------------------------- the runtime
@@ -118,11 +151,14 @@ class KeypointEstimator:
     """``estimator(img, xyxy) -> (keypoints (N, 17, 2) picture pixels, conf (N, 17))``."""
 
     def __init__(self, model: str | Path, device: str = "CPU", backend: str | None = None,
-                 batch: int = 16) -> None:
+                 batch: int = 16, flip: bool = False, subpixel: bool = True) -> None:
+        """``flip`` also reads each crop mirrored and averages the two (twice the
+        work); ``subpixel`` decodes finer than the network's half-pixel bins."""
         from .predictor import installed
 
         self.backend = backend or ("openvino" if installed("openvino") else "onnxruntime")
         self.batch = batch
+        self.flip, self.subpixel = flip, subpixel
         self._local = threading.local()
         if self.backend == "openvino":
             import openvino as ov
@@ -160,10 +196,14 @@ class KeypointEstimator:
         crops, maps = self.preprocess(img, xyxy)
         xs, ys = [], []
         for i in range(0, len(crops), self.batch):
-            x, y = self._infer(np.ascontiguousarray(crops[i:i + self.batch]))
+            part = crops[i:i + self.batch]
+            x, y = self._infer(np.ascontiguousarray(part))
+            if self.flip:
+                fx, fy = unflip(*self._infer(np.ascontiguousarray(part[..., ::-1])))
+                x, y = (x + fx) / 2, (y + fy) / 2
             xs.append(x)
             ys.append(y)
-        xy, conf = decode(np.concatenate(xs), np.concatenate(ys))
+        xy, conf = decode(np.concatenate(xs), np.concatenate(ys), subpixel=self.subpixel)
         back = [apply(invert(m), p) for m, p in zip(maps, xy, strict=True)]
         return np.stack(back).astype(np.float32), conf
 

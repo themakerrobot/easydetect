@@ -28,6 +28,12 @@ on:
       freeze:
         description: "Backbone stages kept as the detector trained them (CPU speed)"
         default: "2"
+      init_run:
+        description: "Start a new run from the best.pt of this earlier run id (blank: from the detector)"
+        default: ""
+      warmup:
+        description: "Warm-up steps"
+        default: "1000"
       resume_run:
         description: "Continue the pose-run artifact of this earlier run id (blank: start or continue this run)"
         default: ""
@@ -63,6 +69,14 @@ jobs:
           name: pose-run
           path: run
           run-id: ${{ inputs.resume_run }}
+          github-token: ${{ github.token }}
+      - name: The model to start from (an earlier run's best.pt)
+        if: ${{ inputs.init_run != '' && inputs.resume_run == '' && matrix.leg == 1 }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pose-run
+          path: init
+          run-id: ${{ inputs.init_run }}
           github-token: ${{ github.token }}
       - name: Finished already?
         id: state
@@ -130,10 +144,14 @@ jobs:
       - name: Train for about five hours
         if: steps.state.outputs.train == 'true'
         run: |
+          init=()
+          if [ -f "init/${{ inputs.size }}/best.pt" ]; then
+            init=(--init "init/${{ inputs.size }}/best.pt")
+          fi
           python src/tools/train_pose.py --coco coco --size ${{ inputs.size }} \
             --epochs ${{ inputs.epochs }} --batch ${{ inputs.batch }} --lr ${{ inputs.lr }} \
-            --freeze ${{ inputs.freeze }} --workers 2 --val-every 5 \
-            --resume "$RUN" --hours 4.8
+            --freeze ${{ inputs.freeze }} --warmup ${{ inputs.warmup }} --workers 2 \
+            --val-every 5 "${init[@]}" --resume "$RUN" --hours 4.8
       - name: Score the whole pipeline
         if: steps.state.outputs.done == 'false'
         run: |

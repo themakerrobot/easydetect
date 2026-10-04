@@ -47,9 +47,13 @@ def build(size: str, init: str):
         import torch
 
         path = Path(init) if init.endswith(".pt") else downloads.download_checkpoint(init)
-        taken = net.load_detector_backbone(torch.load(path, map_location="cpu",
-                                                      weights_only=False)["model"])
-        print(f"backbone from {path.name}: {taken} tensors")
+        state = torch.load(path, map_location="cpu", weights_only=False)
+        if state.get("kind") == "pose":  # a keypoint model: carry on from all of it
+            net.load_state_dict(state["model"])
+            print(f"every weight from {path} (epoch {state.get('epoch')}, AP {state.get('ap')})")
+        else:
+            taken = net.load_detector_backbone(state["model"])
+            print(f"backbone from {path.name}: {taken} tensors")
     return net
 
 
@@ -127,10 +131,15 @@ def evaluate(net, ds, device, batch: int = 256, workers: int = 4) -> dict:
 
 
 def evaluate_pipeline(coco: str, onnx: Path, detector: str, device: str = "AUTO",
-                      limit: int | None = None) -> dict:
+                      limit: int | None = None, flip: bool = False,
+                      subpixel: bool = True) -> dict:
     """OKS AP on val2017 the way it is used: the detector's person boxes, then
     keypoints in each — every picture, people missed and false boxes included.
-    A person's score is its box confidence times its mean keypoint confidence."""
+    A person's score is its box confidence times its mean keypoint confidence.
+
+    ``detector="gt"`` takes the labelled boxes instead (confidence 1): the
+    keypoint model alone, as training scores it, but through the exported
+    model and the runtime's decoding (``flip``, ``subpixel``)."""
     import cv2
 
     from easydetect import Detector
@@ -138,27 +147,40 @@ def evaluate_pipeline(coco: str, onnx: Path, detector: str, device: str = "AUTO"
     from easydetect.pose import KeypointAP, KeypointEstimator, person_rows
 
     images, people = load_coco(Path(coco), "val")
-    model = Detector(detector, device=device, verbose=False)
-    estimator = KeypointEstimator(onnx, device="CPU" if device == "AUTO" else device)
+    gt_boxes = detector == "gt"
+    model = None if gt_boxes else Detector(detector, device=device, verbose=False)
+    estimator = KeypointEstimator(onnx, device="CPU" if device == "AUTO" else device,
+                                  flip=flip, subpixel=subpixel)
     ap = KeypointAP()
     ids = sorted(images)[:limit] if limit else sorted(images)
     started = time.time()
     for k, image_id in enumerate(ids):
-        img = cv2.imread(str(images[image_id]))
-        r = model(img, conf=0.05, iou=0.7, max_det=100, verbose=False)[0]
-        rows = person_rows(r.names, r.boxes.cls)
-        boxes, box_conf = r.boxes.xyxy[rows], r.boxes.conf[rows]
+        anns = people.get(image_id, [])
+        if gt_boxes:
+            labelled = [a for a in anns if not a.get("iscrowd") and a.get("num_keypoints", 0) > 0
+                        and a["bbox"][2] > 1 and a["bbox"][3] > 1]
+            if not labelled:
+                continue
+            img = cv2.imread(str(images[image_id]))
+            boxes = np.array([[x, y, x + w, y + h] for x, y, w, h in
+                              (a["bbox"] for a in labelled)], np.float32)
+            box_conf = np.ones(len(boxes), np.float32)
+        else:
+            img = cv2.imread(str(images[image_id]))
+            r = model(img, conf=0.05, iou=0.7, max_det=100, verbose=False)[0]
+            rows = person_rows(r.names, r.boxes.cls)
+            boxes, box_conf = r.boxes.xyxy[rows], r.boxes.conf[rows]
         xy, conf = estimator(img, boxes)
         score = np.array([b * (c[c > 0.2].mean() if (c > 0.2).any() else 0.0)
                           for b, c in zip(box_conf, conf, strict=True)])
-        anns = people.get(image_id, [])
         gt = np.array([a["keypoints"] for a in anns], np.float64).reshape(len(anns), 17, 3)
         ap.add(xy, score, gt, np.array([a["area"] for a in anns]),
                np.array([a.get("iscrowd", 0) for a in anns], bool))
         if (k + 1) % 500 == 0:
             print(f"  {k + 1}/{len(ids)}  {time.time() - started:.0f}s", flush=True)
     result = ap.compute()
-    print(f"{onnx.name} on {detector} boxes, {len(ids)} pictures: "
+    how = ("flip, " if flip else "") + ("sub-pixel" if subpixel else "argmax")
+    print(f"{onnx.name} on {detector} boxes ({how}), {len(ids)} pictures: "
           + ", ".join(f"{k} {v:.4f}" for k, v in result.items()))
     return result
 
@@ -324,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--coco", help="COCO 2017 folder (images/, annotations/)")
     p.add_argument("--size", default="s", choices=["s", "m"])
     p.add_argument("--init", help="dfine-s / dfine-m (default: same size), imagenet, none, "
-                                  "or a D-FINE .pt")
+                                  "a D-FINE .pt, or a keypoint best.pt to train further")
     p.add_argument("--epochs", type=int, default=210)
     p.add_argument("--batch", type=int, default=256)
     p.add_argument("--lr", type=float, default=2e-3)
@@ -348,7 +370,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--val-limit", type=int, help="score on the first N people")
     p.add_argument("--export", type=Path, help="only export this best.pt to ONNX")
     p.add_argument("--eval", type=Path, help="only score this .onnx behind a detector")
-    p.add_argument("--detector", default="dfine-m", help="the detector --eval runs first")
+    p.add_argument("--detector", default="dfine-m",
+                   help="the detector --eval runs first; gt: the labelled boxes")
+    p.add_argument("--flip", action="store_true",
+                   help="--eval: average each crop with its mirror image")
+    p.add_argument("--no-subpixel", action="store_true",
+                   help="--eval: decode to the peak bin only")
     args = p.parse_args(argv)
     if args.export:
         export(args.export)
@@ -357,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.coco:
             p.error("--coco is required to evaluate")
         evaluate_pipeline(args.coco, args.eval, args.detector, args.device or "AUTO",
-                          args.val_limit)
+                          args.val_limit, flip=args.flip, subpixel=not args.no_subpixel)
         return 0
     if not args.coco:
         p.error("--coco is required to train")

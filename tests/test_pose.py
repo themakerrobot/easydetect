@@ -314,3 +314,78 @@ def test_training_scores_the_ema_and_the_network_and_keeps_the_better(toy, tmp_p
     assert best["weights"] in ("ema", "net")
     assert json.loads((out / "s" / "run.json").read_text())["clip"] == 3.0
     assert (out / "s" / "pose-s.onnx").exists() and (out / "s" / "finished").exists()
+
+
+def _peaked(xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Logits whose softmax is the training target around crop positions ``xy``."""
+    from easydetect.pose import SIGMA, SPLIT
+
+    bx = np.arange(INPUT[1] * SPLIT)
+    by = np.arange(INPUT[0] * SPLIT)
+    x = -((bx - xy[..., :1] * SPLIT) ** 2) / (2 * SIGMA[1] ** 2)
+    y = -((by - xy[..., 1:] * SPLIT) ** 2) / (2 * SIGMA[0] ** 2)
+    return x.astype(np.float32), y.astype(np.float32)
+
+
+def test_subpixel_decoding_lands_between_bins():
+    from easydetect.pose import decode
+
+    rng = np.random.default_rng(0)
+    xy = rng.uniform(20, 170, (3, 17, 2))
+    sub, _ = decode(*_peaked(xy))
+    peak, _ = decode(*_peaked(xy), subpixel=False)
+    assert np.abs(sub - xy).max() < 0.02  # the bins alone are off by up to 0.25 px
+    assert np.abs(peak - xy).max() > 0.1
+
+
+def test_a_mirrored_crop_reads_back_to_the_same_keypoints():
+    """What the network says for a mirrored crop: keypoint k there is the
+    mirrored position of keypoint FLIP[k] here (as training flips them)."""
+    from easydetect.pose import FLIP, decode, unflip
+
+    rng = np.random.default_rng(1)
+    xy = rng.uniform(10, 180, (2, 17, 2))
+    mirrored = xy[:, list(FLIP)].copy()
+    mirrored[..., 0] = INPUT[1] - 1 - mirrored[..., 0]
+    back, _ = decode(*unflip(*_peaked(mirrored)))
+    assert np.abs(back - xy).max() < 0.02
+
+
+@needs_torch
+def test_the_estimator_can_average_each_crop_with_its_mirror(toy, tmp_path):
+    import torch
+
+    from easydetect.nn.posenet import PoseNet
+    from easydetect.pose import KeypointEstimator
+
+    torch.manual_seed(0)
+    ckpt = tmp_path / "best.pt"
+    torch.save({"kind": "pose", "size": "s", "model": PoseNet("s").eval().state_dict()}, ckpt)
+    onnx_path = _tool().export(ckpt)
+    img = np.zeros((240, 320, 3), np.uint8)
+    img[40:200, 120:200] = 200
+    box = np.array([[100, 30, 220, 210]], np.float32)
+    plain = KeypointEstimator(onnx_path, backend="onnxruntime")(img, box)
+    both = KeypointEstimator(onnx_path, backend="onnxruntime", flip=True)(img, box)
+    assert both[0].shape == plain[0].shape == (1, 17, 2)
+    assert not np.allclose(both[0], plain[0])  # the mirror changed the reading
+
+    scores = _tool().evaluate_pipeline(str(toy), onnx_path, "gt", "CPU", flip=True)
+    assert set(scores) == {"ap", "ap50", "ap75"}
+
+
+@needs_torch
+def test_training_can_carry_on_from_a_keypoint_model(tmp_path, capsys):
+    import torch
+
+    from easydetect.nn.posenet import PoseNet
+
+    torch.manual_seed(0)
+    start = PoseNet("s").eval()
+    ckpt = tmp_path / "best.pt"
+    torch.save({"kind": "pose", "size": "s", "model": start.state_dict(), "epoch": 40,
+                "ap": 0.59}, ckpt)
+    net = _tool().build("s", str(ckpt))
+    assert "every weight from" in capsys.readouterr().out
+    for (k, a), b in zip(start.state_dict().items(), net.state_dict().values(), strict=True):
+        assert torch.equal(a, b), k

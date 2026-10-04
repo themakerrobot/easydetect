@@ -58,10 +58,10 @@ jobs:
           set -o pipefail
           score() { python tools/train_pose.py --coco coco --eval "$ONNX" --device CPU "$@" \
                       | tail -n 1 | tee -a scores.txt; }
+          score --detector gt --no-flip --no-subpixel
+          score --detector gt --no-flip
           score --detector gt --no-subpixel
           score --detector gt
-          score --detector gt --no-subpixel --flip
-          score --detector gt --flip
-          score --detector ${{ inputs.detector }} --no-subpixel
-          score --detector ${{ inputs.detector }} --flip
+          score --detector ${{ inputs.detector }} --no-flip --no-subpixel
+          score --detector ${{ inputs.detector }}
           { echo '```'; cat scores.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

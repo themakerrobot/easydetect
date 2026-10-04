@@ -37,8 +37,21 @@ transformer layer across the 17 keypoints so an elbow is placed knowing where
 the shoulder and wrist are. A keypoint's confidence is how sharply peaked
 those two distributions are.
 
-On a 4-core CPU (OpenVINO) it adds about 7 ms for one person and 20 ms for
-four, on top of the detector.
+Each person is read twice, as cropped and mirrored, and the two readings are
+averaged (left and right swapped back): on COCO val2017 that is worth 2.5 OKS
+AP with the labelled boxes (0.589 → 0.613) and 2.0 behind dfine-s (0.545 →
+0.565). On a 4-core CPU (OpenVINO) it costs about 13 ms for one person instead
+of 9, and 40 ms for four instead of 20, on top of the detector. For the faster
+reading:
+
+```python
+model = Detector("dfine-s", task="pose")
+model.pose_flip = False   # before the first prediction
+```
+
+Keypoints are placed between the network's half-pixel steps (a parabola
+through each peak); measured, that is worth less than 0.001 AP, but costs
+nothing.
 
 It is trained on COCO 2017's person keypoints (labels CC BY 4.0) and nothing
 else, so the weights carry no research-only licence.

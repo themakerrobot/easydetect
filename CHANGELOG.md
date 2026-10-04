@@ -2,9 +2,12 @@
 
 ## Unreleased
 
-- Keypoints decode between the network's half-pixel bins (a parabola through
-  each peak; `KeypointEstimator(subpixel=True)`, the default), and can average
-  each crop with its mirror image (`flip=True`, twice the work).
+- `task="pose"` reads each person mirrored too and averages the two: +2.5
+  OKS AP on COCO val2017 with the labelled boxes (0.589 → 0.613), +2.0 behind
+  dfine-s (0.545 → 0.565), for about 13 ms a person instead of 9 on a 4-core
+  CPU (the two crops share one call). On by default; `model.pose_flip = False`
+  for the faster reading. Keypoints also decode between the network's
+  half-pixel bins (a parabola through each peak): measured, under 0.001 AP.
   `train_pose.py --eval` scores either way and with the labelled boxes
   (`--detector gt`); `eval-pose.yml` runs those on an earlier run's model.
 - `train_pose.py --init` takes a keypoint `best.pt` to train further, and

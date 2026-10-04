@@ -100,6 +100,9 @@ class Detector:
         self.task = task
         self.segmenter = None  # BoxSegmenter for task="segment" (lazy)
         self.pose = None  # KeypointEstimator for task="pose" (lazy)
+        #: task="pose" reads each person mirrored too and averages: +2.5 OKS AP,
+        #: about 65% more keypoint time. False before the first prediction: faster.
+        self.pose_flip = True
         self.names: dict[int, str] = {}
         self.net = None  # torch DFINENet (lazy)
         self.ckpt: dict | None = None
@@ -231,7 +234,8 @@ class Detector:
             from .pose import default_estimator
 
             backend = self.predictor.backend if self.predictor is not None else self.backend
-            self.pose = default_estimator(device=device or self.device, backend=backend)
+            self.pose = default_estimator(device=device or self.device, backend=backend,
+                                          flip=self.pose_flip)
         return self.pose
 
     def _keypoints(self, img, det, names, device):

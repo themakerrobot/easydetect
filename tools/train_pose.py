@@ -131,7 +131,7 @@ def evaluate(net, ds, device, batch: int = 256, workers: int = 4) -> dict:
 
 
 def evaluate_pipeline(coco: str, onnx: Path, detector: str, device: str = "AUTO",
-                      limit: int | None = None, flip: bool = False,
+                      limit: int | None = None, flip: bool = True,
                       subpixel: bool = True) -> dict:
     """OKS AP on val2017 the way it is used: the detector's person boxes, then
     keypoints in each — every picture, people missed and false boxes included.
@@ -372,8 +372,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--eval", type=Path, help="only score this .onnx behind a detector")
     p.add_argument("--detector", default="dfine-m",
                    help="the detector --eval runs first; gt: the labelled boxes")
-    p.add_argument("--flip", action="store_true",
-                   help="--eval: average each crop with its mirror image")
+    p.add_argument("--no-flip", action="store_true",
+                   help="--eval: read each crop once, not also mirrored (as pose_flip=False)")
     p.add_argument("--no-subpixel", action="store_true",
                    help="--eval: decode to the peak bin only")
     args = p.parse_args(argv)
@@ -384,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.coco:
             p.error("--coco is required to evaluate")
         evaluate_pipeline(args.coco, args.eval, args.detector, args.device or "AUTO",
-                          args.val_limit, flip=args.flip, subpixel=not args.no_subpixel)
+                          args.val_limit, flip=not args.no_flip, subpixel=not args.no_subpixel)
         return 0
     if not args.coco:
         p.error("--coco is required to train")

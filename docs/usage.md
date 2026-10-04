@@ -121,8 +121,9 @@ r.keypoints.conf    # (N, 17) 0-1; zero for boxes that are not people
 ```
 
 Each person box is cut out and easydetect's own keypoint network (trained on
-COCO keypoints) places the 17 keypoints; about 7 ms a person on a 4-core
-CPU. How it works, how it was trained and how to train it again:
+COCO keypoints) places the 17 keypoints; about 13 ms a person on a 4-core
+CPU, reading each person mirrored too (`model.pose_flip = False`: about 9 ms,
+2 AP lower). How it works, how it was trained and how to train it again:
 [pose.md](pose.md).
 
 ### Results

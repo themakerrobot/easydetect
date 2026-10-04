@@ -365,7 +365,7 @@ def test_the_estimator_can_average_each_crop_with_its_mirror(toy, tmp_path):
     img = np.zeros((240, 320, 3), np.uint8)
     img[40:200, 120:200] = 200
     box = np.array([[100, 30, 220, 210]], np.float32)
-    plain = KeypointEstimator(onnx_path, backend="onnxruntime")(img, box)
+    plain = KeypointEstimator(onnx_path, backend="onnxruntime", flip=False)(img, box)
     both = KeypointEstimator(onnx_path, backend="onnxruntime", flip=True)(img, box)
     assert both[0].shape == plain[0].shape == (1, 17, 2)
     assert not np.allclose(both[0], plain[0])  # the mirror changed the reading
@@ -389,3 +389,17 @@ def test_training_can_carry_on_from_a_keypoint_model(tmp_path, capsys):
     assert "every weight from" in capsys.readouterr().out
     for (k, a), b in zip(start.state_dict().items(), net.state_dict().values(), strict=True):
         assert torch.equal(a, b), k
+
+
+def test_pose_flip_reaches_the_estimator(tiny_ir, monkeypatch):
+    from easydetect import pose
+
+    asked = []
+    monkeypatch.setattr(pose, "default_estimator",
+                        lambda **kw: asked.append(kw["flip"]) or _FakeEstimator())
+    for flip in (True, False):
+        model = Detector(str(tiny_ir), task="pose", verbose=False)
+        assert model.pose_flip is True
+        model.pose_flip = flip
+        model(draw(), conf=0.0)
+    assert asked == [True, False]

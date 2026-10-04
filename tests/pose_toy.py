@@ -42,7 +42,9 @@ def draw(img, kpts) -> None:
         cv2.circle(img, (int(x), int(y)), 4, (255 - 14 * k, 40 + 12 * k, 200), -1)
 
 
-def make(root: Path, train: int = 40, val: int = 10, seed: int = 0) -> Path:
+def make(root: Path, train: int = 40, val: int = 10, seed: int = 0, empty: int = 0) -> Path:
+    """A COCO-shaped keypoint set of drawn stick figures; ``empty`` more val
+    pictures have nobody in them (about half of COCO's val2017 does)."""
     import cv2
 
     rng = np.random.default_rng(seed)
@@ -61,6 +63,10 @@ def make(root: Path, train: int = 40, val: int = 10, seed: int = 0) -> Path:
             anns.append({"id": len(anns) + 1, "image_id": i + 1, "category_id": 1,
                          "bbox": box, "area": box[2] * box[3] * 0.6, "iscrowd": 0,
                          "num_keypoints": 17, "keypoints": kpts.reshape(-1).tolist()})
+        for i in range(count, count + (empty if split == "val" else 0)):
+            name = f"{i:06d}.jpg"
+            cv2.imwrite(str(folder / name), np.full((240, 320, 3), 60, np.uint8))
+            images.append({"id": i + 1, "file_name": name, "width": 320, "height": 240})
         (root / "annotations").mkdir(exist_ok=True)
         (root / "annotations" / f"person_keypoints_{split}2017.json").write_text(json.dumps(
             {"images": images, "annotations": anns,

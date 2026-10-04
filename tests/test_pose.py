@@ -154,7 +154,7 @@ def test_the_command_line_takes_task_pose(tiny_ir, tmp_path, monkeypatch):
 
 @pytest.fixture(scope="module")
 def toy(tmp_path_factory):
-    return pose_toy.make(tmp_path_factory.mktemp("pose"), train=12, val=4)
+    return pose_toy.make(tmp_path_factory.mktemp("pose"), train=12, val=4, empty=2)
 
 
 def test_a_crop_carries_its_keypoints(toy):
@@ -223,8 +223,10 @@ def test_a_training_step_lowers_the_loss_and_the_export_matches(toy, tmp_path, t
         empty = est(img, np.zeros((0, 4), np.float32))
         assert empty[0].shape == (0, 17, 2)
 
-    # the whole pipeline scores: detector boxes, then keypoints in each
-    scores = tool.evaluate_pipeline(str(toy), onnx_path, str(tiny_ir), "CPU", limit=2)
+    # the whole pipeline scores: detector boxes, then keypoints in each — on
+    # every picture, the ones with nobody in them too (the first CPU run's
+    # scoring failed on those)
+    scores = tool.evaluate_pipeline(str(toy), onnx_path, str(tiny_ir), "CPU")
     assert set(scores) == {"ap", "ap50", "ap75"} and 0.0 <= scores["ap"] <= 1.0
 
 

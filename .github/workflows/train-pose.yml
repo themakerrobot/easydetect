@@ -67,11 +67,23 @@ jobs:
       - name: Finished already?
         id: state
         run: |
-          if [ -f "$RUN/finished" ]; then
+          if [ ! -d "$RUN" ] && [ ${{ matrix.leg }} -gt 1 ]; then
+            # an earlier leg failed before handing the run on: stop here
+            # rather than start the training over from scratch
+            echo "::error::no run to continue (leg ${{ matrix.leg }})"; exit 1
+          fi
+          # done: trained and scored. A finished run without a (non-empty)
+          # eval.txt is only scored: resume_run=<its run id> does that.
+          if [ -f "$RUN/finished" ] && [ -s "$RUN/eval.txt" ]; then
             echo "done=true" >> "$GITHUB_OUTPUT"
-            echo "finished: best OKS AP $(cat "$RUN/finished")"
+            echo "finished: best OKS AP $(cat "$RUN/finished")"; cat "$RUN/eval.txt"
+          elif [ -f "$RUN/finished" ]; then
+            echo "done=false" >> "$GITHUB_OUTPUT"
+            echo "train=false" >> "$GITHUB_OUTPUT"
+            echo "trained (best OKS AP $(cat "$RUN/finished")), not yet scored"
           else
             echo "done=false" >> "$GITHUB_OUTPUT"
+            echo "train=true" >> "$GITHUB_OUTPUT"
             tail -n 3 "$RUN/results.csv" 2>/dev/null || echo "starting a new run"
           fi
       - uses: actions/checkout@v4
@@ -104,14 +116,19 @@ jobs:
         if: steps.state.outputs.done == 'false'
         run: |
           mkdir -p coco/images && cd coco
-          for zip in zips/train2017.zip zips/val2017.zip annotations/annotations_trainval2017.zip; do
+          zips="zips/val2017.zip annotations/annotations_trainval2017.zip"
+          # scoring alone needs no training pictures (18 GB)
+          if [ "${{ steps.state.outputs.train }}" = "true" ]; then
+            zips="zips/train2017.zip $zips"
+          fi
+          for zip in $zips; do
             curl -sSL --retry 5 -o part.zip "http://images.cocodataset.org/$zip"
             case "$zip" in zips/*) unzip -q part.zip -d images ;; *) unzip -q part.zip ;; esac
             rm part.zip
           done
           ls images; ls annotations; df -h .
       - name: Train for about five hours
-        if: steps.state.outputs.done == 'false'
+        if: steps.state.outputs.train == 'true'
         run: |
           python src/tools/train_pose.py --coco coco --size ${{ inputs.size }} \
             --epochs ${{ inputs.epochs }} --batch ${{ inputs.batch }} --lr ${{ inputs.lr }} \
@@ -120,7 +137,9 @@ jobs:
       - name: Score the whole pipeline
         if: steps.state.outputs.done == 'false'
         run: |
-          if [ -f "$RUN/finished" ] && [ ! -f "$RUN/eval.txt" ]; then
+          set -o pipefail  # a failed scoring must fail the job, not vanish into tail
+          if [ -f "$RUN/finished" ] && [ ! -s "$RUN/eval.txt" ]; then
+            rm -f "$RUN/eval.txt"
             for det in dfine-s dfine-m; do
               python src/tools/train_pose.py --coco coco --eval "$RUN/pose-${{ inputs.size }}.onnx" \
                 --detector $det --device CPU | tail -n 1 | tee -a "$RUN/eval.txt"

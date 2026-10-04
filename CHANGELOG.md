@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fixed: scoring the whole keypoint pipeline (`train_pose.py --eval`) failed
+  on pictures with nobody in them — about half of COCO val2017. In
+  `train-pose.yml` the error was hidden by a pipe (now `pipefail`), a finished
+  but unscored run is scored when resumed (`resume_run`), and a later leg that
+  finds nothing to continue stops instead of starting over.
 - Keypoint training (`tools/train_pose.py`): each scoring rates the EMA and the
   network itself and keeps the better as `best.pt` (`ap_ema`, `ap_net`,
   `weights` in `results.csv`; an older file gains the columns on resume);

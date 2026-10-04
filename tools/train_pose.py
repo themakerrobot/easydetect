@@ -119,7 +119,7 @@ def evaluate(net, ds, device, batch: int = 256, workers: int = 4) -> dict:
     for image_id in sorted({image_id for image_id, _ in ds.items}):
         anns = ds.people[image_id]
         found = per_image.get(image_id, [])
-        gt = np.array([a["keypoints"] for a in anns], np.float64).reshape(len(anns), -1, 3)
+        gt = np.array([a["keypoints"] for a in anns], np.float64).reshape(len(anns), 17, 3)
         ap.add(np.array([f[0] for f in found]).reshape(len(found), -1, 2),
                np.array([f[1] for f in found]), gt,
                np.array([a["area"] for a in anns]), np.array([a.get("iscrowd", 0) for a in anns]))
@@ -152,7 +152,7 @@ def evaluate_pipeline(coco: str, onnx: Path, detector: str, device: str = "AUTO"
         score = np.array([b * (c[c > 0.2].mean() if (c > 0.2).any() else 0.0)
                           for b, c in zip(box_conf, conf, strict=True)])
         anns = people.get(image_id, [])
-        gt = np.array([a["keypoints"] for a in anns], np.float64).reshape(len(anns), -1, 3)
+        gt = np.array([a["keypoints"] for a in anns], np.float64).reshape(len(anns), 17, 3)
         ap.add(xy, score, gt, np.array([a["area"] for a in anns]),
                np.array([a.get("iscrowd", 0) for a in anns], bool))
         if (k + 1) % 500 == 0:

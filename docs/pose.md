@@ -1,9 +1,5 @@
 # Keypoints: `task="pose"`
 
-> **Not usable yet in 0.4.1:** the keypoint model is still training, and its
-> weights arrive on the mirror with 0.5.0. Until then `task="pose"` stops
-> with an error that says so, unless you train one with `tools/train_pose.py`.
-
 ```python
 from easydetect import Detector
 
@@ -18,6 +14,30 @@ The 17 keypoints are COCO's, in COCO's order
 (`easydetect.pose.KEYPOINT_NAMES`: nose, eyes, ears, shoulders, elbows,
 wrists, hips, knees, ankles). `r.summary()` lists them by name for every
 person. `predict`, `track` and the CLI (`task=pose`) all take it.
+
+## Accuracy
+
+OKS AP on COCO val2017 (5,000 pictures), through the exported model the
+package downloads, with easydetect's scorer (written to COCO's definition;
+it can differ from pycocotools in the third decimal):
+
+| | AP | AP50 | AP75 |
+| --- | --- | --- | --- |
+| the labelled person boxes (the keypoint model alone) | 0.637 | 0.890 | 0.708 |
+| behind dfine-s (what you get) | 0.588 | 0.801 | 0.655 |
+| behind dfine-s, `model.pose_flip = False` | 0.571 | 0.795 | 0.637 |
+
+For scale, Ultralytics publishes 50.4 for YOLOv8n-pose and 60.0 for
+YOLOv8s-pose (their own end-to-end models, scored with pycocotools). Behind
+dfine-m instead of dfine-s the score is the same (0.571 either way, without
+mirroring), so the faster detector is enough.
+
+The released model was trained on GitHub's CPU runners in two runs: 40 epochs
+with the stem and first two backbone stages kept from the detector (0.589
+with the labelled boxes), then 20 more epochs from there with every layer
+training, the learning rate starting again at 4e-4 (0.619). Both runs, their
+logs and their scores are in the repository's Actions history
+(`train-pose.yml`, `eval-pose.yml`).
 
 ## How it works
 
@@ -126,7 +146,10 @@ run train-pose.yml`); a run cut short continues from its artifact with
 ## Publishing it
 
 `Detector(..., task="pose")` downloads `pose/pose-s.onnx` from the mirror.
-After a run, upload it from the machine that trained it:
+A model trained by `train-pose.yml` goes there with `mirror.yml` and
+`pose_run=<that run id>`: it checks the model puts keypoints on the people in
+a test picture on both runtimes, uploads `pose/pose-s.onnx` alone, and
+downloads it back the way users will. From a machine that trained one:
 
 ```bash
 pip install -U huggingface_hub

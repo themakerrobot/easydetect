@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
+- **`task="pose"` works: easydetect's keypoint model is on the mirror**
+  (`pose/pose-s.onnx`). OKS AP on COCO val2017: 0.637 with the labelled boxes,
+  0.588 behind dfine-s; about 13 ms a person on a 4-core CPU. Trained on
+  GitHub's CPU runners: 40 epochs with the early backbone kept from the
+  detector, then 20 more with every layer training. docs/pose.md has the table.
+- `mirror.yml` takes `pose_run=<train-pose run id>`: checks that model on both
+  runtimes, uploads `pose/pose-s.onnx` alone, downloads it back.
 - `task="pose"` reads each person mirrored too and averages the two: +2.5
   OKS AP on COCO val2017 with the labelled boxes (0.589 → 0.613), +2.0 behind
   dfine-s (0.545 → 0.565), for about 13 ms a person instead of 9 on a 4-core

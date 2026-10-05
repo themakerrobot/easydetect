@@ -19,6 +19,9 @@ on:
         description: "Only (re)build the MobileSAM segmenter (mobile_sam/)"
         type: boolean
         default: false
+      pose_run:
+        description: "Only upload pose/pose-s.onnx from this train-pose run id's pose-run artifact"
+        default: ""
 
 jobs:
   upload:
@@ -35,11 +38,44 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[train]" "huggingface_hub>=0.25"
+      - name: The keypoint model (a train-pose run's pose-run artifact)
+        if: ${{ inputs.pose_run != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pose-run
+          path: pose-run
+          run-id: ${{ inputs.pose_run }}
+          github-token: ${{ github.token }}
+      - name: Check the keypoint model before uploading it
+        if: ${{ inputs.pose_run != '' }}
+        run: |
+          mkdir -p mirror/pose
+          cp pose-run/s/pose-s.onnx mirror/pose/pose-s.onnx
+          cat pose-run/s/eval.txt
+          cp tools/hub_README.md mirror/README.md
+          python - <<'PY'
+          import os, shutil, tempfile, urllib.request
+          import numpy as np
+          from easydetect import Detector, downloads
+          urllib.request.urlretrieve(
+              "https://raw.githubusercontent.com/opencv/opencv/4.x/samples/data/basketball1.png", "b.png")
+          os.environ["EASYDETECT_HOME"] = tempfile.mkdtemp()
+          (downloads.cache_dir() / "pose").mkdir(parents=True)
+          shutil.copy("mirror/pose/pose-s.onnx", downloads.cache_dir() / "pose" / "pose-s.onnx")
+          got = {}
+          for backend in ("openvino", "onnxruntime"):
+              r = Detector("dfine-s", backend=backend, task="pose", verbose=False)("b.png")[0]
+              people = r.keypoints.conf.max(1) > 0
+              print("pose", backend, int(people.sum()), "people,", r.keypoints.conf[people].mean())
+              assert people.any() and r.keypoints.conf[people].mean() > 0.2  # a broken model reads ~0
+              got[backend] = r.keypoints.xy
+          assert np.abs(got["openvino"] - got["onnxruntime"]).max() < 1.0, "the runtimes disagree"
+          PY
       - name: Build the weights
-        if: ${{ !inputs.readme_only && !inputs.segmenter_only }}
+        if: ${{ !inputs.readme_only && !inputs.segmenter_only && inputs.pose_run == '' }}
         run: python tools/build_mirror.py --out mirror --sizes ${{ inputs.sizes }}
       - name: Build the segmenter
-        if: ${{ !inputs.readme_only }}
+        if: ${{ !inputs.readme_only && inputs.pose_run == '' }}
         run: |
           pip install timm
           python tools/convert_sam.py --out mirror
@@ -48,7 +84,7 @@ jobs:
         if: ${{ inputs.readme_only }}
         run: mkdir -p mirror && cp tools/hub_README.md mirror/README.md
       - name: Check the IRs and ONNX files predict before uploading them
-        if: ${{ !inputs.readme_only }}
+        if: ${{ !inputs.readme_only && inputs.pose_run == '' }}
         run: |
           python - <<'PY'
           import glob, os, shutil, tempfile, urllib.request
@@ -89,13 +125,26 @@ jobs:
               folder_path="mirror",
               repo_id=os.environ["HF_REPO"],
               repo_type="model",
-              commit_message="easydetect weights (${{ inputs.sizes }}) from ${{ github.sha }}",
+              commit_message=("easydetect keypoint model from train-pose run ${{ inputs.pose_run }}"
+                              if "${{ inputs.pose_run }}" else
+                              "easydetect weights (${{ inputs.sizes }}) from ${{ github.sha }}"),
               delete_patterns=["rtdetr-*/*"],   # the retired RT-DETR folders
           )
           print(info)
           PY
+      - name: Download the keypoint model back, the way users will
+        if: ${{ inputs.pose_run != '' }}
+        run: |
+          python - <<'PY'
+          import os, tempfile
+          os.environ["EASYDETECT_HOME"] = tempfile.mkdtemp()
+          from easydetect import Detector
+          r = Detector("dfine-s", task="pose", verbose=False)("b.png")[0]
+          print("dfine-s + keypoints from the hub:", r, r.keypoints.conf.max(1))
+          assert (r.keypoints.conf.max(1) > 0).any()
+          PY
       - name: Download one back, the way users will
-        if: ${{ !inputs.readme_only }}
+        if: ${{ !inputs.readme_only && inputs.pose_run == '' }}
         run: |
           python - <<'PY'
           import os, tempfile

@@ -128,9 +128,11 @@ models/
 to ONNX by `tools/convert_sam.py`: given the boxes a detector found, it outlines
 what is inside each.
 
-`pose/` is easydetect's own keypoint network (Apache-2.0), trained by
-`tools/train_pose.py` on COCO 2017 person keypoints (CC BY 4.0) from the
-dfine-s backbone: given a person box, it places COCO's 17 body keypoints.
+`pose/` is easydetect's own keypoint network (Apache-2.0, 3.7 M parameters),
+trained by `tools/train_pose.py` on COCO 2017 person keypoints (CC BY 4.0) from
+the dfine-s backbone: given a person box, it places COCO's 17 body keypoints.
+OKS AP on COCO val2017, reading each person mirrored too (the package's
+default): 0.637 with the labelled boxes, 0.588 behind dfine-s.
 
 Keep these names: the package builds its download URLs from them
 (`<repo>/resolve/main/<name>/<name>.xml`). To host a copy elsewhere, mirror the

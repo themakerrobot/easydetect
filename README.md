@@ -168,7 +168,9 @@ Read it plainly:
   AGPL-3.0: a product that ships it, or serves it over a network, must publish
   its source or buy a commercial license. Everything here is Apache-2.0 — code
   and weights — so it goes into closed products as it is.
-* **Where YOLO fits better:** segmentation and pose in the same tool, and a far
+* **Where YOLO fits better:** segmentation and pose trained end to end in one
+  model (here they ride on the detector's boxes: `task="segment"` with
+  MobileSAM, `task="pose"` with easydetect's own keypoint network), and a far
   larger ecosystem.
 
 COCO is a guide, not your answer. Fine-tune both on your own data, then compare
@@ -196,7 +198,9 @@ easydetect export  model=best.pt format=openvino half=true
 
 ## What it does not do
 
-Boxes only — no segmentation, pose or classification. One training process, one
+Masks and keypoints come from separate models on the detector's boxes: masks
+are not trained on your data, and keypoints are COCO's 17 for people only. No
+classification. One training process, one
 machine; multi-GPU and distributed training are out of scope. Inference runs on
 OpenVINO or ONNX Runtime; for a CUDA deployment, take the exported ONNX to
 TensorRT from there.

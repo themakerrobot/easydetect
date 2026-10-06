@@ -17,6 +17,8 @@ from pathlib import Path
 import numpy as np
 
 INPUT = (256, 192)  # crop height, width
+#: keypoint model sizes, on the backbones of dfine-s, dfine-m and dfine-l
+SIZES = ("s", "m", "l")
 SPLIT = 2  # the network places a keypoint to 1/SPLIT of a crop pixel
 SIGMA = (5.66, 4.9)  # spread of the training targets in those bins (y, x)
 PAD = 1.25  # margin around the box: limbs often stick out of it
@@ -214,8 +216,8 @@ class KeypointEstimator:
 
 def default_estimator(device: str = "CPU", backend: str | None = None,
                       flip: bool = True, size: str = "s") -> KeypointEstimator:
-    """The mirror's keypoint model of ``size`` ("s" or "m"), downloaded once
-    into the cache."""
+    """The mirror's keypoint model of ``size`` (one of ``SIZES``), downloaded
+    once into the cache."""
     from .downloads import download_pose
 
     return KeypointEstimator(download_pose(size), device=device, backend=backend, flip=flip)

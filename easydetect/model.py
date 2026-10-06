@@ -104,8 +104,8 @@ class Detector:
         #: about 65% more keypoint time. False before the first prediction: faster.
         self.pose_flip = True
         #: the keypoint model for task="pose": "s" (HGNetv2-B0, the default), "m"
-        #: (B2: larger, slower), or the path of a pose .onnx of your own. Set it
-        #: before the first prediction.
+        #: (B2), "l" (B4) — larger and slower in turn — or the path of a pose
+        #: .onnx of your own. Set it before the first prediction.
         self.pose_model = "s"
         self.names: dict[int, str] = {}
         self.net = None  # torch DFINENet (lazy)
@@ -238,8 +238,10 @@ class Detector:
             from .pose import default_estimator
 
             backend = self.predictor.backend if self.predictor is not None else self.backend
+            from .pose import SIZES
+
             model = str(self.pose_model)
-            if model in ("s", "m"):
+            if model in SIZES:
                 self.pose = default_estimator(device=device or self.device, backend=backend,
                                               flip=self.pose_flip, size=model)
             elif model.endswith(".onnx") and Path(model).is_file():
@@ -248,8 +250,8 @@ class Detector:
                 self.pose = KeypointEstimator(model, device=device or self.device,
                                               backend=backend, flip=self.pose_flip)
             else:
-                raise ValueError(f"pose_model must be 's', 'm' or a pose .onnx file, "
-                                 f"not {self.pose_model!r}")
+                raise ValueError(f"pose_model must be one of {', '.join(SIZES)} or a pose "
+                                 f".onnx file, not {self.pose_model!r}")
         return self.pose
 
     def _keypoints(self, img, det, names, device):

@@ -13,7 +13,7 @@ on:
         description: "train-pose run id whose pose-run artifact to score"
         required: true
       size:
-        description: "s or m"
+        description: "s, m or l"
         default: "s"
       detector:
         description: "Detector for the whole-pipeline rows"

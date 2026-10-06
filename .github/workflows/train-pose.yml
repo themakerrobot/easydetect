@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       size:
-        description: "s (HGNetv2-B0) or m (B2)"
+        description: "s (HGNetv2-B0), m (B2) or l (B4)"
         default: "s"
       epochs:
         description: "Epochs"

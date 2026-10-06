@@ -23,7 +23,7 @@ on:
         description: "Only upload pose/pose-<size>.onnx from this train-pose run id's pose-run artifact"
         default: ""
       pose_size:
-        description: "Its size: s or m"
+        description: "Its size: s, m or l"
         default: "s"
 
 jobs:

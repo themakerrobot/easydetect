@@ -78,11 +78,17 @@ nothing.
 ```python
 model = Detector("dfine-s", task="pose")
 model.pose_model = "m"                          # HGNetv2-B2 instead of B0
+model.pose_model = "l"                          # HGNetv2-B4
 model.pose_model = "runs/pose/m/pose-m.onnx"    # or one you trained
 ```
 
-`"m"` has 8.1 M parameters to `"s"`'s 3.7 M and takes about 1.6× as long a
-person; it is downloaded as `pose/pose-m.onnx` once that is on the mirror
+| | backbone (from) | parameters | time a person, relative |
+| --- | --- | --- | --- |
+| `"s"` | HGNetv2-B0 (dfine-s) | 3.7 M | 1× |
+| `"m"` | HGNetv2-B2 (dfine-m) | 8.1 M | about 2× |
+| `"l"` | HGNetv2-B4 (dfine-l) | 15.8 M | about 4× |
+
+Each is downloaded as `pose/pose-<size>.onnx` once that is on the mirror
 (until then it says so). On the command line and in `easydetect serve`:
 `pose_model=m`, `pose_flip=false`.
 
@@ -153,15 +159,16 @@ backward pass is skipped, which makes a CPU step about 1.5× as fast; with
 run train-pose.yml`); a run cut short continues from its artifact with
 `resume_run=<run id>`. Nothing is uploaded to the mirror by it.
 
-`--size m` trains a larger one on HGNetv2-B2 (from dfine-m's backbone),
-written as `runs/pose/m/pose-m.onnx`.
+`--size m` and `--size l` train the larger ones on HGNetv2-B2 and B4, from
+dfine-m's and dfine-l's backbones, written as `runs/pose/<size>/pose-<size>.onnx`.
+On a CPU a training step of m costs about 2×, and of l about 4×, one of s.
 `--limit 2000 --epochs 3` is a quick check that everything runs.
 
 ## Publishing it
 
 `Detector(..., task="pose")` downloads `pose/pose-s.onnx` from the mirror.
 A model trained by `train-pose.yml` goes there with `mirror.yml` and
-`pose_run=<that run id>` (and `pose_size=m` for the larger one): it checks the
+`pose_run=<that run id>` (and `pose_size=m` or `l` for the larger ones): it checks the
 model puts keypoints on the people in a test picture on both runtimes, uploads
 `pose/pose-<size>.onnx` alone, and downloads it back the way users will. From
 a machine that trained one:
@@ -171,6 +178,7 @@ pip install -U huggingface_hub
 hf auth login                       # a write token for the mirror's account
 hf upload leeyunjai/easydetect runs/pose/s/pose-s.onnx pose/pose-s.onnx
 hf upload leeyunjai/easydetect runs/pose/m/pose-m.onnx pose/pose-m.onnx
+hf upload leeyunjai/easydetect runs/pose/l/pose-l.onnx pose/pose-l.onnx
 ```
 
 A model already downloaded stays in the cache (`~/.easydetect/pose/`): delete

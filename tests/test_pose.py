@@ -428,7 +428,7 @@ def test_pose_model_picks_the_size_or_a_file(tiny_ir, tmp_path, monkeypatch):
     assert made == [(str(own), False)]
 
     model = Detector(str(tiny_ir), task="pose", verbose=False)
-    model.pose_model = "l"
+    model.pose_model = "xl"
     with pytest.raises(ValueError, match="pose_model"):
         model(draw(), conf=0.0)
 
@@ -447,3 +447,23 @@ def test_the_command_line_takes_pose_model_and_pose_flip(tiny_ir, tmp_path, monk
                      "pose_model=m", "pose_flip=false", "conf=0.0", "save=false",
                      f"project={tmp_path}"]) == 0
     assert asked == [("m", False)]
+
+
+@needs_torch
+@pytest.mark.parametrize("size, detector", [("s", "s"), ("m", "m"), ("l", "l")])
+def test_each_keypoint_size_takes_its_detectors_whole_backbone(size, detector):
+    """dfine-l's backbone has no lab layers where s and m have them: every
+    backbone tensor of the detector of that size must carry over."""
+    from easydetect.nn import DFINENet
+    from easydetect.nn.posenet import SIZE_CFG, PoseNet
+    from easydetect.pose import SIZES
+
+    assert tuple(SIZE_CFG) == SIZES
+    det = {k: v for k, v in DFINENet(detector, 80, pretrained_backbone=False).state_dict().items()
+           if k.startswith("backbone.")}
+    net = PoseNet(size)
+    assert net.load_detector_backbone(det) == len(det)
+    # all of it: what the detector lacks is only BatchNorm's step counters
+    # (dfine-l freezes its norms, which keeps none)
+    missing = set(net.backbone.state_dict()) - {k[len("backbone."):] for k in det}
+    assert all(k.endswith("num_batches_tracked") for k in missing)

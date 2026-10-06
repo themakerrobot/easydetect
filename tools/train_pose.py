@@ -344,7 +344,8 @@ def train(args) -> None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--coco", help="COCO 2017 folder (images/, annotations/)")
-    p.add_argument("--size", default="s", choices=["s", "m"])
+    p.add_argument("--size", default="s", choices=["s", "m", "l"],
+                   help="backbone and starting weights of dfine-s, dfine-m or dfine-l")
     p.add_argument("--init", help="dfine-s / dfine-m (default: same size), imagenet, none, "
                                   "a D-FINE .pt, or a keypoint best.pt to train further")
     p.add_argument("--epochs", type=int, default=210)

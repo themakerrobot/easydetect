@@ -26,9 +26,11 @@ from .hgnetv2 import HGNetv2
 NUM_KEYPOINTS = len(KEYPOINT_NAMES)
 
 #: Per-size settings: the backbone, and which of its stages feed the head.
+#: ``use_lab`` as the detector of that size has it, so its weights carry over.
 SIZE_CFG = {
-    "s": {"backbone": "B0", "channels": (512, 1024)},
-    "m": {"backbone": "B2", "channels": (768, 1536)},
+    "s": {"backbone": "B0", "channels": (512, 1024), "use_lab": True},    # dfine-s
+    "m": {"backbone": "B2", "channels": (768, 1536), "use_lab": True},    # dfine-m
+    "l": {"backbone": "B4", "channels": (1024, 2048), "use_lab": False},  # dfine-l
 }
 
 
@@ -73,7 +75,8 @@ class PoseNet(nn.Module):
         cfg = SIZE_CFG[size]
         self.size = size
         self.num_keypoints = num_keypoints
-        self.backbone = HGNetv2(cfg["backbone"], use_lab=True, return_idx=[2, 3], freeze_at=-1,
+        self.backbone = HGNetv2(cfg["backbone"], use_lab=cfg["use_lab"], return_idx=[2, 3],
+                                freeze_at=-1,
                                 freeze_norm=False, pretrained=pretrained_backbone)
         c4, c5 = cfg["channels"]
         self.lateral4 = ConvBN(c4, dim)

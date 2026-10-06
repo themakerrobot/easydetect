@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-- `Detector.pose_model`: `"s"` (default), `"m"` (HGNetv2-B2, 8.1 M parameters,
-  about 1.6× the time a person) or the path of a pose `.onnx` of your own; the
-  CLI and `easydetect serve` take `pose_model=` and `pose_flip=`. `"m"` is
-  fetched as `pose/pose-m.onnx` once it is on the mirror; `mirror.yml` uploads
-  either size (`pose_size`).
+- `Detector.pose_model`: `"s"` (default), `"m"` (HGNetv2-B2, 8.1 M parameters),
+  `"l"` (HGNetv2-B4, 15.8 M, from dfine-l, whose backbone has no lab layers) or
+  the path of a pose `.onnx` of your own; the CLI and `easydetect serve` take
+  `pose_model=` and `pose_flip=`. Each is fetched as `pose/pose-<size>.onnx`;
+  `train_pose.py --size l` trains the new one, and `mirror.yml` uploads any
+  size (`pose_size`).
 
 ## 0.5.0
 

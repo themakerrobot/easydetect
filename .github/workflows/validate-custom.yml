@@ -31,4 +31,4 @@ jobs:
             rm part.zip
           done
       - name: Validate
-        run: python .github/validate_custom.py coco work
+        run: MASKS=0 python .github/validate_custom.py coco work

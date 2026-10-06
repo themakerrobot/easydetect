@@ -73,6 +73,19 @@ Keypoints are placed between the network's half-pixel steps (a parabola
 through each peak); measured, that is worth less than 0.001 AP, but costs
 nothing.
 
+### A larger keypoint model, or your own
+
+```python
+model = Detector("dfine-s", task="pose")
+model.pose_model = "m"                          # HGNetv2-B2 instead of B0
+model.pose_model = "runs/pose/m/pose-m.onnx"    # or one you trained
+```
+
+`"m"` has 8.1 M parameters to `"s"`'s 3.7 M and takes about 1.6× as long a
+person; it is downloaded as `pose/pose-m.onnx` once that is on the mirror
+(until then it says so). On the command line and in `easydetect serve`:
+`pose_model=m`, `pose_flip=false`.
+
 It is trained on COCO 2017's person keypoints (labels CC BY 4.0) and nothing
 else, so the weights carry no research-only licence.
 
@@ -140,22 +153,28 @@ backward pass is skipped, which makes a CPU step about 1.5× as fast; with
 run train-pose.yml`); a run cut short continues from its artifact with
 `resume_run=<run id>`. Nothing is uploaded to the mirror by it.
 
-`--size m` trains a larger one on HGNetv2-B2 (from dfine-m's backbone).
+`--size m` trains a larger one on HGNetv2-B2 (from dfine-m's backbone),
+written as `runs/pose/m/pose-m.onnx`.
 `--limit 2000 --epochs 3` is a quick check that everything runs.
 
 ## Publishing it
 
 `Detector(..., task="pose")` downloads `pose/pose-s.onnx` from the mirror.
 A model trained by `train-pose.yml` goes there with `mirror.yml` and
-`pose_run=<that run id>`: it checks the model puts keypoints on the people in
-a test picture on both runtimes, uploads `pose/pose-s.onnx` alone, and
-downloads it back the way users will. From a machine that trained one:
+`pose_run=<that run id>` (and `pose_size=m` for the larger one): it checks the
+model puts keypoints on the people in a test picture on both runtimes, uploads
+`pose/pose-<size>.onnx` alone, and downloads it back the way users will. From
+a machine that trained one:
 
 ```bash
 pip install -U huggingface_hub
 hf auth login                       # a write token for the mirror's account
 hf upload leeyunjai/easydetect runs/pose/s/pose-s.onnx pose/pose-s.onnx
+hf upload leeyunjai/easydetect runs/pose/m/pose-m.onnx pose/pose-m.onnx
 ```
+
+A model already downloaded stays in the cache (`~/.easydetect/pose/`): delete
+the file there to fetch a newer upload.
 
 Until it is there, `task="pose"` says so and where to put the file instead
 (`~/.easydetect/pose/pose-s.onnx`).

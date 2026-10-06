@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `Detector.pose_model`: `"s"` (default), `"m"` (HGNetv2-B2, 8.1 M parameters,
+  about 1.6× the time a person) or the path of a pose `.onnx` of your own; the
+  CLI and `easydetect serve` take `pose_model=` and `pose_flip=`. `"m"` is
+  fetched as `pose/pose-m.onnx` once it is on the mirror; `mirror.yml` uploads
+  either size (`pose_size`).
+
 ## 0.5.0
 
 - **`task="pose"` works: easydetect's keypoint model is on the mirror**

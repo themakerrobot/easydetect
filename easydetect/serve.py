@@ -120,12 +120,13 @@ def make_handler(model, name: str):
 
 def serve(model: str = "dfine-s", host: str = "127.0.0.1", port: int = 8000,
           device: str = "AUTO", task: str = "detect", backend: str | None = None,
-          ready=None) -> None:
+          ready=None, pose_model: str = "s", pose_flip: bool = True) -> None:
     """Load ``model`` once and answer requests until interrupted. ``ready`` is
     called with the bound ``(host, port)`` once it listens (port 0: any free)."""
     from .model import Detector
 
     detector = Detector(model, device=device, task=task, backend=backend, verbose=False)
+    detector.pose_model, detector.pose_flip = pose_model, pose_flip
     # load (and, for a named model, download) now, not on the first request
     detector(np.zeros((32, 32, 3), np.uint8), verbose=False)
     server = ThreadingHTTPServer((host, int(port)), make_handler(detector, str(model)))

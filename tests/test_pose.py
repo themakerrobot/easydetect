@@ -403,3 +403,47 @@ def test_pose_flip_reaches_the_estimator(tiny_ir, monkeypatch):
         model.pose_flip = flip
         model(draw(), conf=0.0)
     assert asked == [True, False]
+
+
+def test_pose_model_picks_the_size_or_a_file(tiny_ir, tmp_path, monkeypatch):
+    from easydetect import pose
+
+    sizes = []
+    monkeypatch.setattr(pose, "default_estimator",
+                        lambda **kw: sizes.append(kw["size"]) or _FakeEstimator())
+    for size in ("s", "m"):
+        model = Detector(str(tiny_ir), task="pose", verbose=False)
+        model.pose_model = size
+        model(draw(), conf=0.0)
+    assert sizes == ["s", "m"]
+
+    made = []
+    monkeypatch.setattr(pose, "KeypointEstimator",
+                        lambda path, **kw: made.append((path, kw["flip"])) or _FakeEstimator())
+    own = tmp_path / "mine.onnx"
+    own.write_bytes(b"onnx")
+    model = Detector(str(tiny_ir), task="pose", verbose=False)
+    model.pose_model, model.pose_flip = str(own), False
+    model(draw(), conf=0.0)
+    assert made == [(str(own), False)]
+
+    model = Detector(str(tiny_ir), task="pose", verbose=False)
+    model.pose_model = "l"
+    with pytest.raises(ValueError, match="pose_model"):
+        model(draw(), conf=0.0)
+
+
+def test_the_command_line_takes_pose_model_and_pose_flip(tiny_ir, tmp_path, monkeypatch):
+    import cv2
+
+    from easydetect import cli, pose
+
+    asked = []
+    monkeypatch.setattr(pose, "default_estimator",
+                        lambda **kw: asked.append((kw["size"], kw["flip"])) or _FakeEstimator())
+    picture = tmp_path / "p.jpg"
+    cv2.imwrite(str(picture), draw())
+    assert cli.main(["predict", f"model={tiny_ir}", "task=pose", f"source={picture}",
+                     "pose_model=m", "pose_flip=false", "conf=0.0", "save=false",
+                     f"project={tmp_path}"]) == 0
+    assert asked == [("m", False)]

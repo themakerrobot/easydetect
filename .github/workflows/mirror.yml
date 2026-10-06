@@ -20,8 +20,11 @@ on:
         type: boolean
         default: false
       pose_run:
-        description: "Only upload pose/pose-s.onnx from this train-pose run id's pose-run artifact"
+        description: "Only upload pose/pose-<size>.onnx from this train-pose run id's pose-run artifact"
         default: ""
+      pose_size:
+        description: "Its size: s or m"
+        default: "s"
 
 jobs:
   upload:
@@ -49,9 +52,10 @@ jobs:
       - name: Check the keypoint model before uploading it
         if: ${{ inputs.pose_run != '' }}
         run: |
+          size="${{ inputs.pose_size }}"
           mkdir -p mirror/pose
-          cp pose-run/s/pose-s.onnx mirror/pose/pose-s.onnx
-          cat pose-run/s/eval.txt
+          cp "pose-run/$size/pose-$size.onnx" "mirror/pose/pose-$size.onnx"
+          cat "pose-run/$size/eval.txt"
           cp tools/hub_README.md mirror/README.md
           python - <<'PY'
           import os, shutil, tempfile, urllib.request
@@ -61,10 +65,13 @@ jobs:
               "https://raw.githubusercontent.com/opencv/opencv/4.x/samples/data/basketball1.png", "b.png")
           os.environ["EASYDETECT_HOME"] = tempfile.mkdtemp()
           (downloads.cache_dir() / "pose").mkdir(parents=True)
-          shutil.copy("mirror/pose/pose-s.onnx", downloads.cache_dir() / "pose" / "pose-s.onnx")
+          size = "${{ inputs.pose_size }}"
+          shutil.copy(f"mirror/pose/pose-{size}.onnx", downloads.cache_dir() / "pose" / f"pose-{size}.onnx")
           got = {}
           for backend in ("openvino", "onnxruntime"):
-              r = Detector("dfine-s", backend=backend, task="pose", verbose=False)("b.png")[0]
+              model = Detector("dfine-s", backend=backend, task="pose", verbose=False)
+              model.pose_model = size
+              r = model("b.png")[0]
               people = r.keypoints.conf.max(1) > 0
               print("pose", backend, int(people.sum()), "people,", r.keypoints.conf[people].mean())
               assert people.any() and r.keypoints.conf[people].mean() > 0.2  # a broken model reads ~0
@@ -125,7 +132,7 @@ jobs:
               folder_path="mirror",
               repo_id=os.environ["HF_REPO"],
               repo_type="model",
-              commit_message=("easydetect keypoint model from train-pose run ${{ inputs.pose_run }}"
+              commit_message=("easydetect keypoint model (${{ inputs.pose_size }}) from train-pose run ${{ inputs.pose_run }}"
                               if "${{ inputs.pose_run }}" else
                               "easydetect weights (${{ inputs.sizes }}) from ${{ github.sha }}"),
               delete_patterns=["rtdetr-*/*"],   # the retired RT-DETR folders
@@ -139,7 +146,9 @@ jobs:
           import os, tempfile
           os.environ["EASYDETECT_HOME"] = tempfile.mkdtemp()
           from easydetect import Detector
-          r = Detector("dfine-s", task="pose", verbose=False)("b.png")[0]
+          model = Detector("dfine-s", task="pose", verbose=False)
+          model.pose_model = "${{ inputs.pose_size }}"
+          r = model("b.png")[0]
           print("dfine-s + keypoints from the hub:", r, r.keypoints.conf.max(1))
           assert (r.keypoints.conf.max(1) > 0).any()
           PY

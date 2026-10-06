@@ -213,11 +213,12 @@ class KeypointEstimator:
 
 
 def default_estimator(device: str = "CPU", backend: str | None = None,
-                      flip: bool = True) -> KeypointEstimator:
-    """The mirror's keypoint model, downloaded once into the cache."""
+                      flip: bool = True, size: str = "s") -> KeypointEstimator:
+    """The mirror's keypoint model of ``size`` ("s" or "m"), downloaded once
+    into the cache."""
     from .downloads import download_pose
 
-    return KeypointEstimator(download_pose(), device=device, backend=backend, flip=flip)
+    return KeypointEstimator(download_pose(size), device=device, backend=backend, flip=flip)
 
 
 def person_rows(names: dict[int, str], cls: np.ndarray) -> np.ndarray:

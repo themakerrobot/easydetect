@@ -32,6 +32,7 @@ Common keys:
   model=dfine-n|s|m|l|x|best.pt|model.xml   source=bus.jpg|dir|video.mp4|0|url
   data=data.yaml  epochs=100  imgsz=640  batch=8  conf=0.5  iou=0.7|none  device=0|cpu|AUTO
   contain=0.8  task=segment|pose  project=runs  name=predict  save=true  show=false
+  pose_model=s|m|my.onnx  pose_flip=false
   format=openvino  half=true  int8=true  layers=1  queries=100
 
 Examples:
@@ -106,15 +107,17 @@ def main(argv: list[str] | None = None) -> int:
     if mode == "serve":
         from .serve import serve
 
-        unknown = set(overrides) - {"model", "host", "port", "device", "task", "backend"}
+        keys = ("model", "host", "port", "device", "task", "backend", "pose_model", "pose_flip")
+        unknown = set(overrides) - set(keys)
         if unknown:
-            print(f"serve takes model, host, port, device, task, backend — not "
-                  f"{', '.join(sorted(unknown))}", file=sys.stderr)
+            print(f"serve takes {', '.join(keys)} — not {', '.join(sorted(unknown))}",
+                  file=sys.stderr)
             return 2
         serve(model=str(overrides.get("model", "dfine-s")),
               host=str(overrides.get("host", "127.0.0.1")), port=int(overrides.get("port", 8000)),
               device=str(overrides.get("device", "AUTO")), task=overrides.get("task", "detect"),
-              backend=overrides.get("backend"))
+              backend=overrides.get("backend"), pose_model=str(overrides.get("pose_model", "s")),
+              pose_flip=bool(overrides.get("pose_flip", True)))
         return 0
 
     from .model import Detector
@@ -126,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     if mode in ("predict", "track"):
         task = _take(overrides, "task", "detect")
         model = Detector(model_name, device=device or "AUTO", verbose=verbose, task=task)
+        model.pose_model = _take(overrides, "pose_model", model.pose_model)
+        model.pose_flip = bool(_take(overrides, "pose_flip", model.pose_flip))
         source = _take(overrides, "source")
         if source is None:
             print(

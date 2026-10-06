@@ -42,6 +42,91 @@ SKELETON = (
 OKS_SIGMAS = np.array([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62,
                        1.07, 1.07, .87, .87, .89, .89], np.float64) / 10.0
 
+#: the ONNX metadata key a keypoint model keeps its KeypointSpec under
+ONNX_SPEC_KEY = "easydetect.keypoints"
+
+
+class KeypointSpec:
+    """What a keypoint model places: the names of its keypoints, which swap on
+    a horizontal flip, the lines drawn between them, how far off each may be
+    for OKS, and which detector classes get them (``None``: boxes named
+    "person", or every box when there is no such class).
+
+    COCO's 17 body keypoints are ``COCO``; a model trained on a dataset of its
+    own carries its spec inside its ``.onnx``."""
+
+    def __init__(self, names, flip=None, skeleton=(), sigmas=None, classes=None) -> None:
+        self.names = tuple(str(n) for n in names)
+        k = len(self.names)
+        self.flip = tuple(int(i) for i in (flip if flip is not None else range(k)))
+        if sorted(self.flip) != list(range(k)):
+            raise ValueError(f"flip_idx must reorder all {k} keypoints, not {list(self.flip)}")
+        self.skeleton = tuple((int(a), int(b)) for a, b in skeleton)
+        if any(not (0 <= a < k and 0 <= b < k) for a, b in self.skeleton):
+            raise ValueError(f"skeleton names keypoints outside 0-{k - 1}")
+        # without COCO's measured falloffs every keypoint gets the same: what
+        # Ultralytics uses for a keypoint set of its own
+        self.sigmas = np.asarray(sigmas if sigmas is not None else np.full(k, 1.0 / k),
+                                 np.float64)
+        if len(self.sigmas) != k:
+            raise ValueError(f"{len(self.sigmas)} OKS sigmas for {k} keypoints")
+        self.classes = None if classes is None else tuple(int(c) for c in classes)
+
+    def __len__(self) -> int:
+        return len(self.names)
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, KeypointSpec) and self.to_dict() == other.to_dict()
+
+    def __repr__(self) -> str:
+        return f"KeypointSpec({len(self)} keypoints: {', '.join(self.names[:4])}…)"
+
+    @property
+    def is_coco(self) -> bool:
+        return self.names == KEYPOINT_NAMES
+
+    def to_dict(self) -> dict:
+        return {"names": list(self.names), "flip": list(self.flip),
+                "skeleton": [list(e) for e in self.skeleton],
+                "sigmas": [round(float(v), 6) for v in self.sigmas],
+                "classes": None if self.classes is None else list(self.classes)}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> KeypointSpec:
+        return cls(d["names"], d.get("flip"), d.get("skeleton", ()), d.get("sigmas"),
+                   d.get("classes"))
+
+    @classmethod
+    def from_data(cls, cfg: dict) -> KeypointSpec:
+        """The spec a keypoint data.yaml describes (``load_data_yaml``'s dict):
+        ``kpt_shape``, ``flip_idx``, and optionally ``kpt_names`` (a list, or
+        Ultralytics' ``{class: [names]}``) and ``skeleton``. Keypoints go on
+        the dataset's classes."""
+        k = int(cfg["kpt_shape"][0])
+        names = cfg.get("kpt_names")
+        if isinstance(names, dict):  # one list per class: they share a keypoint set here
+            names = next(iter(names.values()), None)
+        if not names or len(names) != k:
+            names = [f"kp{i}" for i in range(k)]
+        if k == len(KEYPOINT_NAMES) and tuple(names) == KEYPOINT_NAMES:
+            return cls(KEYPOINT_NAMES, FLIP, SKELETON, OKS_SIGMAS, sorted(cfg["names"]))
+        return cls(names, cfg.get("flip_idx"), cfg.get("skeleton") or (), None,
+                   sorted(cfg["names"]))
+
+
+#: COCO's 17 body keypoints, on boxes named "person"
+COCO = KeypointSpec(KEYPOINT_NAMES, FLIP, SKELETON, OKS_SIGMAS)
+
+
+def spec_of(onnx_path: str | Path) -> KeypointSpec:
+    """The keypoint set a model's ``.onnx`` carries; COCO's for one without."""
+    import json
+
+    from .predictor import onnx_metadata
+
+    raw = onnx_metadata(onnx_path).get(ONNX_SPEC_KEY)
+    return KeypointSpec.from_dict(json.loads(raw)) if raw else COCO
+
 
 # ---------------------------------------------------------------- crop geometry
 
@@ -138,13 +223,15 @@ def decode(x_logits: np.ndarray, y_logits: np.ndarray,
     return xy, np.clip(conf, 0.0, 1.0).astype(np.float32)
 
 
-def unflip(x_logits: np.ndarray, y_logits: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def unflip(x_logits: np.ndarray, y_logits: np.ndarray,
+           flip=FLIP) -> tuple[np.ndarray, np.ndarray]:
     """Output for a mirrored crop → output in the original crop's terms: left
-    and right keypoints swap, and x bin ``b`` of the mirror is the original's
-    ``(W - 1) * SPLIT - b`` (pixel centres, as training flips them)."""
-    x = x_logits[:, list(FLIP)][..., ::-1]
+    and right keypoints swap (``flip``, the model's), and x bin ``b`` of the
+    mirror is the original's ``(W - 1) * SPLIT - b`` (pixel centres, as
+    training flips them)."""
+    x = x_logits[:, list(flip)][..., ::-1]
     x = np.concatenate([x[..., 1:], x[..., -1:]], -1)  # reversed is one bin off
-    return x, y_logits[:, list(FLIP)]
+    return x, y_logits[:, list(flip)]
 
 
 # ---------------------------------------------------------------- the runtime
@@ -162,6 +249,8 @@ class KeypointEstimator:
         self.backend = backend or ("openvino" if installed("openvino") else "onnxruntime")
         self.batch = batch
         self.flip, self.subpixel = flip, subpixel
+        #: the keypoint set this model places (its names, flip pairs, skeleton)
+        self.spec = spec_of(model)
         self._local = threading.local()
         if self.backend == "openvino":
             import openvino as ov
@@ -194,8 +283,8 @@ class KeypointEstimator:
     def __call__(self, img: np.ndarray, xyxy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         xyxy = np.asarray(xyxy, np.float32).reshape(-1, 4)
         if not len(xyxy):
-            return np.zeros((0, len(KEYPOINT_NAMES), 2), np.float32), \
-                np.zeros((0, len(KEYPOINT_NAMES)), np.float32)
+            return np.zeros((0, len(self.spec), 2), np.float32), \
+                np.zeros((0, len(self.spec)), np.float32)
         crops, maps = self.preprocess(img, xyxy)
         xs, ys = [], []
         step = max(self.batch // 2, 1) if self.flip else self.batch
@@ -203,7 +292,7 @@ class KeypointEstimator:
             part = crops[i:i + step]
             if self.flip:  # each crop and its mirror in one call: one call's overhead
                 x, y = self._infer(np.ascontiguousarray(np.concatenate([part, part[..., ::-1]])))
-                fx, fy = unflip(x[len(part):], y[len(part):])
+                fx, fy = unflip(x[len(part):], y[len(part):], self.spec.flip)
                 x, y = (x[:len(part)] + fx) / 2, (y[:len(part)] + fy) / 2
             else:
                 x, y = self._infer(np.ascontiguousarray(part))
@@ -232,16 +321,24 @@ def person_rows(names: dict[int, str], cls: np.ndarray) -> np.ndarray:
     return np.isin(cls.astype(int), person)
 
 
+def keypoint_rows(spec: KeypointSpec, names: dict[int, str], cls: np.ndarray) -> np.ndarray:
+    """Which boxes get keypoints: the classes the model was trained for, or, for
+    COCO's model, the people (``person_rows``)."""
+    if spec.classes is None:
+        return person_rows(names, cls)
+    return np.isin(cls.astype(int), spec.classes)
+
+
 # ---------------------------------------------------------------- evaluation
 
-def oks(pred: np.ndarray, gt: np.ndarray, area: float) -> float:
+def oks(pred: np.ndarray, gt: np.ndarray, area: float, sigmas=OKS_SIGMAS) -> float:
     """Object keypoint similarity of one prediction ``(K, 2)`` to one labelled
     person ``(K, 3)`` (x, y, visibility) of segment ``area``, as COCO defines it."""
     vis = gt[:, 2] > 0
     if not vis.any():
         return 0.0
     d2 = ((pred[:, :2] - gt[:, :2]) ** 2).sum(1)
-    e = d2 / ((2 * OKS_SIGMAS) ** 2) / (area + np.spacing(1)) / 2
+    e = d2 / ((2 * np.asarray(sigmas)) ** 2) / (area + np.spacing(1)) / 2
     return float(np.exp(-e[vis]).mean())
 
 
@@ -253,8 +350,9 @@ class KeypointAP:
 
     THRESHOLDS = np.linspace(0.5, 0.95, 10)
 
-    def __init__(self, max_det: int = 20) -> None:
+    def __init__(self, max_det: int = 20, sigmas=OKS_SIGMAS) -> None:
         self.max_det = max_det
+        self.sigmas = np.asarray(sigmas, np.float64)
         self.scores: list[np.ndarray] = []
         self.matched: list[np.ndarray] = []  # (thresholds, dets): 1 tp, 0 fp, -1 ignored
         self.positives = 0
@@ -264,7 +362,7 @@ class KeypointAP:
         """One picture: ``pred (D, K, 2)``, ``scores (D,)``, ``gt (G, K, 3)``,
         ``areas (G,)``; ``ignore`` marks crowds (and people with no keypoints
         labelled are ignored anyway)."""
-        gt = np.asarray(gt, np.float64).reshape(-1, len(OKS_SIGMAS), 3)
+        gt = np.asarray(gt, np.float64).reshape(-1, len(self.sigmas), 3)
         ig = (gt[:, :, 2] > 0).sum(1) == 0
         if ignore is not None:
             ig |= np.asarray(ignore, bool)
@@ -272,7 +370,8 @@ class KeypointAP:
         gt, areas, ig = gt[order_g], np.asarray(areas)[order_g], ig[order_g]
         order = np.argsort(-np.asarray(scores), kind="stable")[: self.max_det]
         pred, scores = np.asarray(pred)[order], np.asarray(scores)[order]
-        sims = np.array([[oks(p, g, a) for g, a in zip(gt, areas, strict=True)] for p in pred]) \
+        sims = np.array([[oks(p, g, a, self.sigmas) for g, a in zip(gt, areas, strict=True)]
+                         for p in pred]) \
             .reshape(len(pred), len(gt))
         out = np.zeros((len(self.THRESHOLDS), len(pred)), np.int8)
         for t, thr in enumerate(self.THRESHOLDS):

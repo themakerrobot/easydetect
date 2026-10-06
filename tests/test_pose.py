@@ -116,7 +116,10 @@ def test_a_result_draws_and_lists_keypoints():
 
 class _FakeEstimator:
     def __init__(self):
+        from easydetect.pose import COCO
+
         self.calls = []
+        self.spec = COCO
 
     def __call__(self, img, xyxy):
         self.calls.append(np.asarray(xyxy).copy())
@@ -386,7 +389,8 @@ def test_training_can_carry_on_from_a_keypoint_model(tmp_path, capsys):
     torch.save({"kind": "pose", "size": "s", "model": start.state_dict(), "epoch": 40,
                 "ap": 0.59}, ckpt)
     net = _tool().build("s", str(ckpt))
-    assert "every weight from" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert f"{len(start.state_dict())} of {len(start.state_dict())} weights from" in said
     for (k, a), b in zip(start.state_dict().items(), net.state_dict().values(), strict=True):
         assert torch.equal(a, b), k
 

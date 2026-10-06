@@ -85,6 +85,11 @@ _LIMB_COLOURS = {"face": (255, 200, 80), "arm": (80, 220, 255), "body": (120, 25
                  "leg": (255, 120, 200)}
 
 
+#: line colours (BGR) for a keypoint set of a model's own, in skeleton order
+_EDGE_COLOURS = ((255, 200, 80), (80, 220, 255), (120, 255, 120), (255, 120, 200),
+                 (80, 160, 255), (200, 120, 255), (255, 255, 120), (120, 200, 200))
+
+
 def _limb_kind(a: int, b: int) -> str:
     pair = {a, b}
     if pair in ({5, 6}, {5, 11}, {6, 12}, {11, 12}):
@@ -97,23 +102,26 @@ def _limb_kind(a: int, b: int) -> str:
 
 
 def draw_keypoints(img: np.ndarray, keypoints: np.ndarray, threshold: float = 0.3,
-                   line_width: int | None = None) -> np.ndarray:
-    """Draw each person's skeleton (``(N, 17, 3)`` x, y, conf) onto a copy of
-    ``img``, leaving out keypoints under ``threshold``."""
+                   line_width: int | None = None, spec=None) -> np.ndarray:
+    """Draw each box's keypoints (``(N, K, 3)`` x, y, conf) and the lines of
+    ``spec``'s skeleton (COCO's body by default) onto a copy of ``img``,
+    leaving out keypoints under ``threshold``."""
     import cv2
 
-    from .pose import SKELETON
+    from .pose import COCO
 
+    spec = spec or COCO
     out = np.ascontiguousarray(img.copy())
     h, w = out.shape[:2]
     lw = line_width or max(round((h + w) / 2 * 0.003), 2)
     for person in keypoints:
         seen = person[:, 2] >= threshold
-        for a, b in SKELETON:
+        for n, (a, b) in enumerate(spec.skeleton):
             if seen[a] and seen[b]:
+                colour = (_LIMB_COLOURS[_limb_kind(a, b)] if spec.is_coco
+                          else _EDGE_COLOURS[n % len(_EDGE_COLOURS)])
                 cv2.line(out, (int(person[a, 0]), int(person[a, 1])),
-                         (int(person[b, 0]), int(person[b, 1])),
-                         _LIMB_COLOURS[_limb_kind(a, b)], lw, cv2.LINE_AA)
+                         (int(person[b, 0]), int(person[b, 1])), colour, lw, cv2.LINE_AA)
         for x, y, _ in person[seen]:
             cv2.circle(out, (int(x), int(y)), lw + 1, (255, 255, 255), -1, cv2.LINE_AA)
             cv2.circle(out, (int(x), int(y)), lw + 1, (40, 40, 40), 1, cv2.LINE_AA)

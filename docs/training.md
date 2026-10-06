@@ -33,6 +33,11 @@ varifocal classification, L1 + GIoU boxes, fine-grained localisation and
 decoupled distillation, over every decoder layer and the denoising queries.
 mAP50-95 after every epoch, early stop on `patience`.
 
+A data.yaml with `kpt_shape` (Ultralytics' pose format) is a keypoint
+dataset: training learns the boxes, then a keypoint network for them —
+[pose.md](pose.md#keypoints-of-your-own). Polygon labels (segmentation
+datasets) train on their bounding boxes.
+
 ## Batch size and learning rate
 
 `lr0=None` (the default) sets the learning rate from the batch size:

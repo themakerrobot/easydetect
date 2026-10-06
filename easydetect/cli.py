@@ -116,7 +116,9 @@ def main(argv: list[str] | None = None) -> int:
         serve(model=str(overrides.get("model", "dfine-s")),
               host=str(overrides.get("host", "127.0.0.1")), port=int(overrides.get("port", 8000)),
               device=str(overrides.get("device", "AUTO")), task=overrides.get("task", "detect"),
-              backend=overrides.get("backend"), pose_model=str(overrides.get("pose_model", "s")),
+              backend=overrides.get("backend"),
+              pose_model=None if overrides.get("pose_model") is None
+              else str(overrides["pose_model"]),
               pose_flip=bool(overrides.get("pose_flip", True)))
         return 0
 

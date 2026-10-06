@@ -136,12 +136,20 @@ class Masks:
 
 
 class Keypoints:
-    """17 COCO body keypoints per box (``task="pose"``): ``data`` is ``(N, 17, 3)``
-    — x, y in pixels and a confidence in 0-1. Boxes that are not people have
-    all-zero rows; ``easydetect.pose.KEYPOINT_NAMES`` names the 17."""
+    """Keypoints per box (``task="pose"``): ``data`` is ``(N, K, 3)`` — x, y in
+    pixels and a confidence in 0-1; boxes the keypoint model is not for have
+    all-zero rows. ``spec`` says what the K are (``spec.names``, its skeleton):
+    COCO's 17 body keypoints, or a model's own."""
 
-    def __init__(self, data: np.ndarray) -> None:
+    def __init__(self, data: np.ndarray, spec=None) -> None:
+        from .pose import COCO
+
         self.data = np.asarray(data, np.float32)
+        self.spec = spec or COCO
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return self.spec.names
 
     def __len__(self) -> int:
         return len(self.data)
@@ -170,6 +178,7 @@ class Results:
         speed: dict[str, float] | None = None,
         masks: np.ndarray | None = None,
         keypoints: np.ndarray | None = None,
+        keypoint_spec=None,
     ) -> None:
         self.orig_img = orig_img
         self.orig_shape = orig_img.shape[:2]
@@ -180,7 +189,7 @@ class Results:
         )
         self.speed = speed or {"preprocess": 0.0, "inference": 0.0, "postprocess": 0.0}
         self.masks = Masks(masks) if masks is not None else None
-        self.keypoints = Keypoints(keypoints) if keypoints is not None else None
+        self.keypoints = Keypoints(keypoints, keypoint_spec) if keypoints is not None else None
 
     def __len__(self) -> int:
         return len(self.boxes)
@@ -208,7 +217,8 @@ class Results:
             line_width=line_width,
         )
         if self.keypoints is not None and len(self.keypoints):
-            image = draw_keypoints(image, self.keypoints.data, line_width=line_width)
+            image = draw_keypoints(image, self.keypoints.data, line_width=line_width,
+                                   spec=self.keypoints.spec)
         return image
 
     def save(self, filename: str | Path | None = None) -> Path:
@@ -261,12 +271,10 @@ class Results:
                 row["mask"] = {"area": int(self.masks.area[i]),
                                "polygon": self.masks.xy[i].round(1).tolist()}
             if self.keypoints is not None and self.keypoints.conf[i].any():
-                from .pose import KEYPOINT_NAMES
-
                 row["keypoints"] = {
                     name: {"x": round(float(x), 1), "y": round(float(y), 1),
                            "confidence": round(float(c), 3)}
-                    for name, (x, y, c) in zip(KEYPOINT_NAMES, self.keypoints.data[i],
+                    for name, (x, y, c) in zip(self.keypoints.names, self.keypoints.data[i],
                                                strict=True)}
             rows.append(row)
         return rows

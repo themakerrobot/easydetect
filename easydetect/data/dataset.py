@@ -41,6 +41,11 @@ def load_data_yaml(path):
     if isinstance(names, list):
         names = {i: n for i, n in enumerate(names)}
     names = {int(k): str(v) for k, v in names.items()}
+    kpt_shape = cfg.get("kpt_shape")
+    if kpt_shape is not None:
+        kpt_shape = [int(kpt_shape[0]), int(kpt_shape[1]) if len(kpt_shape) > 1 else 3]
+        if kpt_shape[1] not in (2, 3) or kpt_shape[0] < 1:
+            raise ValueError(f"{path}: kpt_shape must be [K, 2] or [K, 3], not {cfg['kpt_shape']}")
     return {
         "root": root,
         "yaml_dir": yaml_dir,
@@ -48,6 +53,12 @@ def load_data_yaml(path):
         "val": cfg.get("val"),
         "names": names,
         "nc": len(names),
+        # keypoint datasets (Ultralytics' pose format): [K, 2 or 3], the
+        # left/right swap for flips, and optionally names and a skeleton
+        "kpt_shape": kpt_shape,
+        "flip_idx": cfg.get("flip_idx"),
+        "kpt_names": cfg.get("kpt_names"),
+        "skeleton": cfg.get("skeleton"),
     }
 
 
@@ -143,6 +154,7 @@ class DetDataset(Dataset):
         self.files = list_images(cfg["root"], cfg[split], cfg["yaml_dir"])
         if not self.files:
             raise FileNotFoundError(f"no images for split '{split}'")
+        self.kpt_shape = cfg["kpt_shape"]
 
     def __len__(self):
         return len(self.files)
@@ -153,7 +165,7 @@ class DetDataset(Dataset):
             return np.zeros((0, 5), np.float32)
         rows = []
         for line in lp.read_text().splitlines():
-            row = label_row_to_box(line.split())
+            row = label_row_to_box(line.split(), self.kpt_shape)
             if row is not None:
                 rows.append(row)
         return np.asarray(rows, np.float32) if rows else np.zeros((0, 5), np.float32)

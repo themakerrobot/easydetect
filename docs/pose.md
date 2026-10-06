@@ -95,7 +95,54 @@ Each is downloaded as `pose/pose-<size>.onnx` once that is on the mirror
 It is trained on COCO 2017's person keypoints (labels CC BY 4.0) and nothing
 else, so the weights carry no research-only licence.
 
-## Training it
+## Keypoints of your own
+
+Any keypoint set — a hand's 21, an animal's, the four corners of a card —
+trains from a dataset in Ultralytics' pose format: the usual `images/` and
+`labels/`, each label line `class cx cy w h` followed by the keypoints
+(`x y visibility`, or `x y`), all 0–1, and a data.yaml that says so:
+
+```yaml
+path: datasets/cards
+train: images/train
+val: images/val
+names: {0: card}
+kpt_shape: [4, 3]                 # 4 keypoints of x, y, visibility
+flip_idx: [1, 0, 3, 2]            # which swap when the picture is flipped
+kpt_names: [top_left, top_right, bottom_right, bottom_left]   # optional
+skeleton: [[0, 1], [1, 2], [2, 3], [3, 0]]                      # optional, for drawing
+```
+
+```python
+from easydetect import Detector
+
+model = Detector("dfine-s")
+model.train(data="cards.yaml", epochs=100)        # boxes, then keypoints
+r = Detector("runs/train/weights/best.pt", task="pose")("card.jpg")[0]
+r.keypoints.xy        # (N, 4, 2)
+r.keypoints.names     # ('top_left', 'top_right', 'bottom_right', 'bottom_left')
+```
+
+Training does two things in turn: the detector learns the boxes as on any
+dataset, then a keypoint network (the one above, with your K keypoints)
+learns them on crops of the labelled boxes, started from the backbone of the
+detector it just trained. It writes its run to `runs/train/pose/` and the
+model, as `pose.onnx`, beside `best.pt` — where `task="pose"` finds it, for
+`best.pt` and for anything exported next to it. The `.onnx` carries its
+keypoint set (names, flip pairs, skeleton, the classes it is for), so
+`summary()` and `plot()` follow it.
+
+`pose_epochs` (default: `epochs`), `pose_batch` (32), `pose_lr` (from the
+batch) and `pose_size` (`s`/`m`/`l`; default: the detector's) set the keypoint
+stage; `pose=False` trains the boxes only. It is scored with OKS AP on the
+val split's labelled boxes; without COCO's measured falloffs every keypoint
+gets the same, `1/K`, as Ultralytics does.
+
+This is a two-model design, not YOLO-pose's single network: a box the
+detector misses gets no keypoints, and each found box costs one keypoint pass.
+In return the keypoint network sees every object at the same size, which
+suits small objects and fine keypoints.
+
 
 210 epochs over COCO's 150,000 labelled people. On one RTX 5090 that should
 take roughly 4–5 hours — an estimate: reading, cropping and jittering a person

@@ -17,6 +17,7 @@ halves of the workflow meet without you having to think about it.
 
 from __future__ import annotations
 
+import math
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -103,10 +104,11 @@ class Detector:
         #: task="pose" reads each person mirrored too and averages: +2.5 OKS AP,
         #: about 65% more keypoint time. False before the first prediction: faster.
         self.pose_flip = True
-        #: the keypoint model for task="pose": "s" (HGNetv2-B0, the default), "m"
-        #: (B2), "l" (B4) — larger and slower in turn — or the path of a pose
-        #: .onnx of your own. Set it before the first prediction.
-        self.pose_model = "s"
+        #: the keypoint model for task="pose": "s" (HGNetv2-B0), "m" (B2), "l"
+        #: (B4) — larger and slower in turn — or the path of a pose .onnx. None
+        #: (the default): the pose.onnx training left beside this detector's
+        #: weights, if there is one, else "s". Set it before the first prediction.
+        self.pose_model = None
         self.names: dict[int, str] = {}
         self.net = None  # torch DFINENet (lazy)
         self.ckpt: dict | None = None
@@ -240,7 +242,12 @@ class Detector:
             backend = self.predictor.backend if self.predictor is not None else self.backend
             from .pose import SIZES
 
-            model = str(self.pose_model)
+            model = self.pose_model
+            if model is None:
+                beside = Path(self.model_name).parent / "pose.onnx"
+                model = str(beside) if Path(self.model_name).is_file() and beside.is_file() \
+                    else "s"
+            model = str(model)
             if model in SIZES:
                 self.pose = default_estimator(device=device or self.device, backend=backend,
                                               flip=self.pose_flip, size=model)
@@ -255,14 +262,16 @@ class Detector:
         return self.pose
 
     def _keypoints(self, img, det, names, device):
-        """``(N, 17, 3)`` x, y, confidence for each box; zeros for boxes that are
-        not people."""
-        from .pose import KEYPOINT_NAMES, person_rows
+        """``(N, K, 3)`` x, y, confidence for each box; zeros for boxes the
+        keypoint model is not for (``KeypointSpec.classes``, or "person")."""
+        from .pose import keypoint_rows
 
-        out = np.zeros((len(det), len(KEYPOINT_NAMES), 3), np.float32)
-        rows = person_rows(names, det[:, -1]) if len(det) else np.zeros(0, bool)
+        estimator = self._ensure_pose(device)
+        out = np.zeros((len(det), len(estimator.spec), 3), np.float32)
+        rows = keypoint_rows(estimator.spec, names, det[:, -1]) if len(det) \
+            else np.zeros(0, bool)
         if rows.any():
-            xy, conf = self._ensure_pose(device)(img, det[rows, :4])
+            xy, conf = estimator(img, det[rows, :4])
             out[rows] = np.concatenate([xy, conf[..., None]], -1)
         return out
 
@@ -334,6 +343,7 @@ class Detector:
                     speed=speed,
                     masks=masks,
                     keypoints=keypoints,
+                    keypoint_spec=self.pose.spec if keypoints is not None else None,
                 )
                 if verbose:
                     total = sum(speed.values())
@@ -452,6 +462,11 @@ class Detector:
         augment: bool = True,
         on_epoch_end: Any = None,
         on_progress: Any = None,
+        pose: bool = True,
+        pose_epochs: int | None = None,
+        pose_batch: int = 32,
+        pose_lr: float | None = None,
+        pose_size: str | None = None,
         **kwargs: Any,
     ) -> Path:
         """Train on a data.yaml dataset. Returns the path of ``best.pt``.
@@ -464,6 +479,13 @@ class Detector:
         the last tenth of the epochs; ``False`` keeps only the flip.
         ``on_epoch_end`` is called with a dict of the epoch's numbers — the
         same row that lands in ``results.csv``.
+
+        A keypoint dataset (``kpt_shape`` in its data.yaml, Ultralytics' pose
+        format) also trains a keypoint network after the detector: on crops of
+        the labelled boxes, from the detector's backbone, for ``pose_epochs``
+        (default ``epochs``) at ``pose_batch``; it lands as ``pose.onnx``
+        beside ``best.pt``, which ``task="pose"`` then uses. ``pose=False``
+        trains the boxes only.
         ``on_progress`` hears about once a second inside an epoch —
         ``{"phase": "train", "epoch", "epochs", "step", "steps", "seconds"}`` —
         and once more with ``"phase": "val"`` before validation starts, so a
@@ -523,7 +545,49 @@ class Detector:
 
         best = trainer.train(val_fn=val_fn)
         self._load_checkpoint(best)
+        if cfg["kpt_shape"] is not None and pose:
+            self._train_keypoints(data, cfg, best, device=device, workers=workers, seed=seed,
+                                  amp=amp, epochs=pose_epochs or epochs, batch=pose_batch,
+                                  lr=pose_lr, size=pose_size)
         return best
+
+    def _train_keypoints(self, data, cfg, best: Path, *, device, workers, seed, amp, epochs,
+                         batch, lr, size) -> Path | None:
+        """The keypoint stage of training on a keypoint dataset: a top-down
+        network on crops of the labelled boxes, started from the backbone of
+        the detector just trained, written to ``pose/`` in the run and, as
+        ``pose.onnx``, beside ``best.pt`` — where task="pose" finds it."""
+        import shutil
+
+        from .data.keypoints import KeypointDataset
+        from .pose import KeypointSpec
+        from .pose_trainer import train_keypoints
+
+        variant = self.variant or "s"
+        size = size or {"n": "s", "s": "s", "m": "m", "l": "l"}.get(variant, "l")
+        # the detector's own backbone when it is the keypoint network's (n and
+        # s share B0); otherwise the COCO detector's of that size
+        own = {"n": "s", "s": "s", "m": "m", "l": "l"}.get(variant) == size
+        init = str(best) if own else f"dfine-{size}"
+        spec = KeypointSpec.from_data(cfg)
+        train_ds = KeypointDataset.from_yolo(data, "train", augment=True, spec=spec)
+        val_ds = KeypointDataset.from_yolo(data, "val", augment=False, spec=spec)
+        if not len(train_ds):
+            raise ValueError(f"{data}: no labelled keypoints in the train split")
+        lr = lr if lr is not None else 1e-3 * math.sqrt(batch / 64)
+        log = (lambda m: print(m, flush=True)) if self.verbose else (lambda m: None)
+        log(f"keypoints: {len(spec)} on {', '.join(cfg['names'][c] for c in spec.classes)}, "
+            f"a {size} network from {Path(init).name}")
+        onnx = train_keypoints(
+            train_ds, val_ds, best.parent.parent / "pose", size=size, init=init, epochs=epochs,
+            batch=batch, lr=lr, warmup=200, workers=workers,
+            val_every=max(1, epochs // 10), device=device, amp=amp, seed=seed, log=log)
+        if onnx is None:
+            return None
+        beside = best.parent / "pose.onnx"
+        shutil.copy(onnx, beside)
+        self.pose = None  # the next prediction reads the new one
+        return beside
 
     def _try_pretrained_start(self, nc: int) -> None:
         """Warm-start from the mirror's COCO weights, quietly falling back."""

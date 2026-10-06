@@ -22,7 +22,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from ..pose import FLIP, INPUT, box_to_crop, crop, crop_matrix
+from ..pose import COCO, INPUT, KeypointSpec, box_to_crop, crop, crop_matrix
 from .augment import photometric
 
 SCALE = (0.7, 1.3)  # crop size factor
@@ -60,13 +60,75 @@ def load_coco(root: Path, split: str) -> tuple[dict, dict]:
     return images, dict(people)
 
 
-class KeypointDataset:
-    """``ds[i] -> (crop (3, 256, 192) float RGB 0-255, keypoints (17, 2) crop
-    pixels, weight (17,), index)``; ``ds.matrix(i)`` maps the crop back."""
+def _image_size(path: Path) -> tuple[int, int]:
+    """(width, height) from the file's header where Pillow can, decoding otherwise."""
+    try:
+        from PIL import Image
 
-    def __init__(self, root: str | Path, split: str = "train", augment: bool = True,
-                 limit: int | None = None) -> None:
-        self.images, self.people = load_coco(Path(root), split)
+        with Image.open(path) as im:
+            return im.size
+    except Exception:  # noqa: BLE001 — any reader trouble: decode it
+        img = cv2.imread(str(path))
+        if img is None:
+            raise FileNotFoundError(path) from None
+        return img.shape[1], img.shape[0]
+
+
+def load_yolo(data_yaml: str | Path, split: str, spec: KeypointSpec) -> tuple[dict, dict]:
+    """A keypoint dataset in Ultralytics' pose format (``kpt_shape`` in its
+    data.yaml, ``cls cx cy w h`` then the keypoints on each label line) as the
+    same ``images {id: file}``, ``people {id: [annotation]}`` that ``load_coco``
+    gives — boxes and keypoints in pixels, so the rest is shared."""
+    from .dataset import list_images, load_data_yaml
+    from .labels import label_path, label_row_to_keypoints
+
+    cfg = load_data_yaml(data_yaml)
+    if cfg["kpt_shape"] is None:
+        raise ValueError(f"{data_yaml} has no kpt_shape: it is not a keypoint dataset")
+    if cfg[split] is None:
+        raise ValueError(f"{data_yaml} has no '{split}:' entry")
+    classes = set(spec.classes) if spec.classes is not None else None
+    images, people = {}, defaultdict(list)
+    for image_id, path in enumerate(list_images(cfg["root"], cfg[split], cfg["yaml_dir"])):
+        lp = Path(label_path(path))
+        if not lp.exists():
+            continue
+        rows = [label_row_to_keypoints(line.split(), cfg["kpt_shape"])
+                for line in lp.read_text().splitlines() if line.strip()]
+        rows = [r for r in rows if r is not None and (classes is None or int(r[0][0]) in classes)]
+        if not rows:
+            continue
+        w, h = _image_size(Path(path))
+        images[image_id] = Path(path)
+        for (cls, cx, cy, bw, bh), kpts in rows:
+            kpts = kpts.copy()
+            kpts[:, 0] *= w
+            kpts[:, 1] *= h
+            kpts[kpts[:, 2] <= 0, :2] = 0.0
+            box = [(cx - bw / 2) * w, (cy - bh / 2) * h, bw * w, bh * h]
+            people[image_id].append({
+                "image_id": image_id, "category_id": int(cls), "bbox": box,
+                "keypoints": kpts.reshape(-1).tolist(),
+                "num_keypoints": int((kpts[:, 2] > 0).sum()),
+                # OKS's scale for a box-only label: Ultralytics' 0.53 of the box
+                "area": box[2] * box[3] * 0.53, "iscrowd": 0,
+            })
+    return images, dict(people)
+
+
+class KeypointDataset:
+    """``ds[i] -> (crop (3, 256, 192) float RGB 0-255, keypoints (K, 2) crop
+    pixels, weight (K,), index)``; ``ds.matrix(i)`` maps the crop back.
+
+    ``KeypointDataset(coco_root, split)`` reads COCO's person keypoints;
+    ``KeypointDataset.from_yolo(data_yaml, split, spec=...)`` a dataset of
+    your own in Ultralytics' pose format."""
+
+    def __init__(self, root: str | Path | None, split: str = "train", augment: bool = True,
+                 limit: int | None = None, spec: KeypointSpec = COCO,
+                 loaded: tuple[dict, dict] | None = None) -> None:
+        self.images, self.people = loaded if loaded is not None else load_coco(Path(root), split)
+        self.spec = spec
         self.items = [
             (image_id, ann) for image_id, anns in sorted(self.people.items()) for ann in anns
             if not ann.get("iscrowd") and ann.get("num_keypoints", 0) > 0
@@ -75,6 +137,14 @@ class KeypointDataset:
         if limit:
             self.items = self.items[:limit]
         self.augment = augment
+
+    @classmethod
+    def from_yolo(cls, data_yaml: str | Path, split: str = "train", augment: bool = True,
+                  spec: KeypointSpec | None = None, limit: int | None = None) -> KeypointDataset:
+        from .dataset import load_data_yaml
+
+        spec = spec or KeypointSpec.from_data(load_data_yaml(data_yaml))
+        return cls(None, split, augment, limit, spec, loaded=load_yolo(data_yaml, split, spec))
 
     def __len__(self) -> int:
         return len(self.items)
@@ -115,7 +185,8 @@ class KeypointDataset:
         box = self._xyxy(ann)
         rotation, flip = 0.0, False
         if self.augment:
-            if random.random() < HALF_BODY_P:
+            # upper and lower body only mean something for COCO's 17
+            if self.spec.is_coco and random.random() < HALF_BODY_P:
                 half = self._half_body(kpts)
                 if half is not None:
                     box = half
@@ -134,7 +205,7 @@ class KeypointDataset:
         if flip:
             out = out[:, ::-1]
             xy[:, 0] = INPUT[1] - 1 - xy[:, 0]
-            xy, weight = xy[list(FLIP)], weight[list(FLIP)]
+            xy, weight = xy[list(self.spec.flip)], weight[list(self.spec.flip)]
         if self.augment:
             out = photometric(np.ascontiguousarray(out))
             if random.random() < ERASE_P:

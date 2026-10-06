@@ -120,7 +120,7 @@ def make_handler(model, name: str):
 
 def serve(model: str = "dfine-s", host: str = "127.0.0.1", port: int = 8000,
           device: str = "AUTO", task: str = "detect", backend: str | None = None,
-          ready=None, pose_model: str = "s", pose_flip: bool = True) -> None:
+          ready=None, pose_model: str | None = None, pose_flip: bool = True) -> None:
     """Load ``model`` once and answer requests until interrupted. ``ready`` is
     called with the bound ``(host, port)`` once it listens (port 0: any free)."""
     from .model import Detector

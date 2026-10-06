@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Keypoints of your own.** A data.yaml with `kpt_shape` (Ultralytics' pose
+  format, any number of keypoints, `flip_idx`, optional `kpt_names` and
+  `skeleton`) trains the detector and then a keypoint network for its boxes,
+  from the detector's own backbone; it lands as `pose.onnx` beside `best.pt`,
+  carrying its keypoint set, and `task="pose"` uses it there. `summary()` names
+  and `plot()` draws that set. `pose_epochs`, `pose_batch`, `pose_lr`,
+  `pose_size`, `pose=False`. The training loop moved from tools/train_pose.py
+  into `easydetect.pose_trainer`.
+- Fixed: a keypoint label line with an even number of keypoints (4 × 3 + 5 =
+  17 values) was read as a polygon; with `kpt_shape` in the data.yaml it is
+  read as a box and keypoints.
 - `Detector.pose_model`: `"s"` (default), `"m"` (HGNetv2-B2, 8.1 M parameters),
   `"l"` (HGNetv2-B4, 15.8 M, from dfine-l, whose backbone has no lab layers) or
   the path of a pose `.onnx` of your own; the CLI and `easydetect serve` take

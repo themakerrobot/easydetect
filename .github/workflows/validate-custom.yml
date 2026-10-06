@@ -1,0 +1,34 @@
+name: validate-custom
+
+on:
+  push:
+    branches: ["diag/custom-check"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[train]"
+      - name: COCO val2017 and annotations
+        run: |
+          mkdir -p coco/images && cd coco
+          for zip in zips/val2017.zip annotations/annotations_trainval2017.zip; do
+            curl -sSL --retry 5 -o part.zip "http://images.cocodataset.org/$zip"
+            case "$zip" in zips/*) unzip -q part.zip -d images ;; *) unzip -q part.zip ;; esac
+            rm part.zip
+          done
+      - name: Validate
+        run: python .github/validate_custom.py coco work

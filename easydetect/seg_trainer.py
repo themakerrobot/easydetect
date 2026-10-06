@@ -314,7 +314,7 @@ def train_masks(data_yaml, out: str | Path, *, segmenter=None, init: str = "mobi
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step()
-            running += float(loss) * len(items)
+            running += loss.item() * len(items)
             seen += len(items)
             if on_progress is not None and time.time() - reported >= 1.0:
                 reported = time.time()

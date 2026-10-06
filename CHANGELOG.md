@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - **Masks of your own.** A segmentation dataset (polygons, Ultralytics'
   format) trains the detector on the polygons' boxes, then fine-tunes
@@ -14,7 +14,10 @@
   `easydetect.nn.sam_decoder` (Apache-2.0, Meta), matching segment-anything's
   outputs exactly on MobileSAM's weights; those come from the mirror's
   `mobile_sam/decoder.pt`, or MobileSAM's pinned, checksummed release until
-  that is there.
+  that is there. Measured on COCO val2017's polygons (1,200 pictures to
+  train, 300 to score, every class as one): val mean IoU 0.752 as MobileSAM
+  was, 0.810 after 6 epochs; on a 4-core CPU the pictures encode once in
+  about 20 minutes and an epoch takes about 29.
 - **Keypoints of your own.** A data.yaml with `kpt_shape` (Ultralytics' pose
   format, any number of keypoints, `flip_idx`, optional `kpt_names` and
   `skeleton`) trains the detector and then a keypoint network for its boxes,
@@ -22,7 +25,12 @@
   carrying its keypoint set, and `task="pose"` uses it there. `summary()` names
   and `plot()` draws that set. `pose_epochs`, `pose_batch`, `pose_lr`,
   `pose_size`, `pose=False`. The training loop moved from tools/train_pose.py
-  into `easydetect.pose_trainer`.
+  into `easydetect.pose_trainer`. Measured on COCO's five face keypoints as
+  a dataset of their own (3,355 heads to train, 810 to score): OKS AP 0.946
+  after 10 epochs of 95 s on a 4-core CPU — with Ultralytics' default
+  per-keypoint sigma for a keypoint set of your own (1/K), more lenient than
+  COCO's, so not comparable with COCO's body AP.
+- Fixed: a mask-training warning about converting a tensor that needs grad.
 - Training's keypoint and mask stages report through `on_progress` like the
   detector's epochs (`"phase": "keypoints"` / `"masks"`, with `"ap"` /
   `"miou"` at a scored epoch's end, and `"stage": "encode"` while MobileSAM

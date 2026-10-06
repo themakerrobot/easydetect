@@ -109,6 +109,10 @@ class Detector:
         #: (the default): the pose.onnx training left beside this detector's
         #: weights, if there is one, else "s". Set it before the first prediction.
         self.pose_model = None
+        #: task="segment"'s mask decoder: None (the default) uses the
+        #: mask_decoder.onnx training left beside this detector's weights, if
+        #: there is one, else MobileSAM's; or the path of a decoder .onnx.
+        self.seg_model = None
         self.names: dict[int, str] = {}
         self.net = None  # torch DFINENet (lazy)
         self.ckpt: dict | None = None
@@ -232,7 +236,13 @@ class Detector:
 
             # the same runtime and device the detector runs on
             backend = self.predictor.backend if self.predictor is not None else self.backend
-            self.segmenter = default_segmenter(device=device or self.device, backend=backend)
+            decoder = self.seg_model
+            if decoder is None:
+                beside = Path(self.model_name).parent / "mask_decoder.onnx"
+                if Path(self.model_name).is_file() and beside.is_file():
+                    decoder = beside
+            self.segmenter = default_segmenter(device=device or self.device, backend=backend,
+                                               decoder=decoder)
         return self.segmenter
 
     def _ensure_pose(self, device: str | None = None):
@@ -467,6 +477,10 @@ class Detector:
         pose_batch: int = 32,
         pose_lr: float | None = None,
         pose_size: str | None = None,
+        seg: bool = True,
+        seg_epochs: int = 20,
+        seg_batch: int = 16,
+        seg_lr: float = 1e-4,
         **kwargs: Any,
     ) -> Path:
         """Train on a data.yaml dataset. Returns the path of ``best.pt``.
@@ -486,6 +500,12 @@ class Detector:
         (default ``epochs``) at ``pose_batch``; it lands as ``pose.onnx``
         beside ``best.pt``, which ``task="pose"`` then uses. ``pose=False``
         trains the boxes only.
+
+        A segmentation dataset (a polygon on each label line) trains the
+        detector on the polygons' boxes, then fine-tunes MobileSAM's mask
+        decoder on the polygons for ``seg_epochs`` (20); it lands as
+        ``mask_decoder.onnx`` beside ``best.pt``, which ``task="segment"``
+        then uses. ``seg=False`` trains the boxes only.
         ``on_progress`` hears about once a second inside an epoch —
         ``{"phase": "train", "epoch", "epochs", "step", "steps", "seconds"}`` —
         and once more with ``"phase": "val"`` before validation starts, so a
@@ -549,7 +569,33 @@ class Detector:
             self._train_keypoints(data, cfg, best, device=device, workers=workers, seed=seed,
                                   amp=amp, epochs=pose_epochs or epochs, batch=pose_batch,
                                   lr=pose_lr, size=pose_size)
+        if seg:
+            from .seg_trainer import has_polygons
+
+            if has_polygons(data):
+                self._train_masks(data, best, device=device, seed=seed, epochs=seg_epochs,
+                                  batch=seg_batch, lr=seg_lr)
         return best
+
+    def _train_masks(self, data, best: Path, *, device, seed, epochs, batch, lr) -> Path:
+        """The mask stage of training on a segmentation dataset: MobileSAM's
+        decoder fine-tuned on the polygons, written to ``segment/`` in the run
+        and, as ``mask_decoder.onnx``, beside ``best.pt`` — where
+        task="segment" finds it."""
+        import shutil
+
+        from .seg_trainer import train_masks
+        from .segment import default_segmenter
+
+        log = (lambda m: print(m, flush=True)) if self.verbose else (lambda m: None)
+        backend = self.predictor.backend if self.predictor is not None else self.backend
+        onnx = train_masks(data, best.parent.parent / "segment",
+                           segmenter=default_segmenter(backend=backend), epochs=epochs,
+                           batch=batch, lr=lr, device=device, seed=seed, log=log)
+        beside = best.parent / "mask_decoder.onnx"
+        shutil.copy(onnx, beside)
+        self.segmenter = None  # the next prediction reads the new one
+        return beside
 
     def _train_keypoints(self, data, cfg, best: Path, *, device, workers, seed, amp, epochs,
                          batch, lr, size) -> Path | None:

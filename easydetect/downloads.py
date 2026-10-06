@@ -166,6 +166,37 @@ def download_segmenter() -> tuple[Path, Path]:
         ) from exc
 
 
+#: MobileSAM's release, pinned and checksummed: where the decoder's PyTorch
+#: weights come from until the mirror has mobile_sam/decoder.pt
+MOBILE_SAM_PT = ("https://raw.githubusercontent.com/ChaoningZhang/MobileSAM/"
+                 "f706ad9c4eb7f219c00d9050e46328518ffb65d2/weights/mobile_sam.pt",
+                 "6dbb90523a35330fedd7f1d3dfc66f995213d81b29a5ca8108dbcdd4e37d6c2f")
+
+
+def download_sam_decoder() -> Path:
+    """MobileSAM's prompt encoder and mask decoder as PyTorch weights
+    (``mobile_sam/decoder.pt``) — what fine-tuning the segmenter starts from."""
+    try:
+        return _asset("mobile_sam", "decoder.pt")
+    except DownloadError:
+        pass
+    import hashlib
+
+    import torch
+
+    dest = cache_dir() / "mobile_sam" / "decoder.pt"
+    full = download(MOBILE_SAM_PT[0], cache_dir() / "mobile_sam" / "mobile_sam.pt")
+    digest = hashlib.sha256(full.read_bytes()).hexdigest()
+    if digest != MOBILE_SAM_PT[1]:
+        full.unlink()
+        raise DownloadError(f"mobile_sam.pt: sha256 {digest}, expected {MOBILE_SAM_PT[1]}")
+    state = torch.load(full, map_location="cpu", weights_only=True)
+    torch.save({k: v for k, v in state.items()
+                if k.startswith(("prompt_encoder.", "mask_decoder."))}, dest)
+    full.unlink()  # the image encoder's weights are not needed: its ONNX file runs it
+    return dest
+
+
 def download_pose(size: str = "s") -> Path:
     """Fetch easydetect's keypoint model, ``pose/pose-<size>.onnx`` (task="pose")."""
     try:

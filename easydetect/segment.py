@@ -82,9 +82,11 @@ class BoxSegmenter:
         return masks[:, 0] > 0.0, scores[:, 0].astype(np.float32)
 
 
-def default_segmenter(device: str = "CPU", backend: str | None = None) -> BoxSegmenter:
-    """The mirror's MobileSAM, downloaded once into the cache."""
+def default_segmenter(device: str = "CPU", backend: str | None = None,
+                      decoder: str | Path | None = None) -> BoxSegmenter:
+    """The mirror's MobileSAM, downloaded once into the cache; ``decoder``, a
+    mask decoder fine-tuned on your own masks, in place of MobileSAM's."""
     from .downloads import download_segmenter
 
-    encoder, decoder = download_segmenter()
-    return BoxSegmenter(encoder, decoder, device=device, backend=backend)
+    encoder, mirror_decoder = download_segmenter()
+    return BoxSegmenter(encoder, decoder or mirror_decoder, device=device, backend=backend)

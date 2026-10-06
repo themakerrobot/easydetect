@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Masks of your own.** A segmentation dataset (polygons, Ultralytics'
+  format) trains the detector on the polygons' boxes, then fine-tunes
+  MobileSAM's mask decoder on the polygons with jittered box prompts (SAM's
+  focal + dice loss on the best of three masks, its IoU head alongside); the
+  image encoder stays frozen and each picture's embedding is cached. Scored by
+  val mean IoU from MobileSAM as it was (epoch 0); the best lands as
+  `mask_decoder.onnx` beside `best.pt`, which `task="segment"` uses
+  (`Detector.seg_model` to choose). `seg_epochs`, `seg_batch`, `seg_lr`,
+  `seg=False`. SAM's prompt encoder and mask decoder are vendored as
+  `easydetect.nn.sam_decoder` (Apache-2.0, Meta), matching segment-anything's
+  outputs exactly on MobileSAM's weights; those come from the mirror's
+  `mobile_sam/decoder.pt`, or MobileSAM's pinned, checksummed release until
+  that is there.
 - **Keypoints of your own.** A data.yaml with `kpt_shape` (Ultralytics' pose
   format, any number of keypoints, `flip_idx`, optional `kpt_names` and
   `skeleton`) trains the detector and then a keypoint network for its boxes,

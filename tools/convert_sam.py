@@ -15,6 +15,8 @@ by hash, then writes
                               zero-padded bottom/right) -> 1x256x64x64
     mobile_sam/decoder.onnx   embeddings + box corners (labels 2, 3) ->
                               mask logits at the picture's own size
+    mobile_sam/decoder.pt     the prompt encoder and mask decoder in PyTorch, for
+                              fine-tuning on your own masks
     mobile_sam/LICENSE        MobileSAM's licence, which these files carry
 """
 
@@ -90,6 +92,10 @@ def export(code: Path, weights: Path, out: Path) -> None:
             dynamo=False,
             dynamic_axes={"point_coords": {0: "boxes", 1: "points"},
                           "point_labels": {0: "boxes", 1: "points"}})
+    # the decoder side as PyTorch weights: what fine-tuning on a segmentation
+    # dataset of your own starts from (easydetect.nn.sam_decoder)
+    torch.save({k: v for k, v in sam.state_dict().items()
+                if k.startswith(("prompt_encoder.", "mask_decoder."))}, out / "decoder.pt")
     shutil.copyfile(code / "LICENSE", out / "LICENSE")
 
 

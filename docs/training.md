@@ -35,8 +35,10 @@ mAP50-95 after every epoch, early stop on `patience`.
 
 A data.yaml with `kpt_shape` (Ultralytics' pose format) is a keypoint
 dataset: training learns the boxes, then a keypoint network for them —
-[pose.md](pose.md#keypoints-of-your-own). Polygon labels (segmentation
-datasets) train on their bounding boxes.
+[pose.md](pose.md#keypoints-of-your-own). Polygon labels (a segmentation
+dataset) train the detector on their bounding boxes, then fine-tune the mask
+decoder task="segment" uses on the polygons —
+[usage.md](usage.md#masks-of-your-own).
 
 ## Batch size and learning rate
 

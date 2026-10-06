@@ -107,6 +107,32 @@ on your own boxes gets masks with no mask labels at all. It downloads once
 fine for photos and recordings; on a live CPU webcam, segment every few
 frames. `predict`, `track` and the CLI (`task=segment`) all take it.
 
+#### Masks of your own
+
+When MobileSAM's outlines are not what your labels mean (where a crack ends,
+what counts as part of a leaf), train on a segmentation dataset in
+Ultralytics' format — a polygon on each label line:
+
+```python
+model = Detector("dfine-s")
+model.train(data="leaves.yaml", epochs=100)       # boxes, then masks
+r = Detector("runs/train/weights/best.pt", task="segment")("leaf.jpg")[0]
+```
+
+The detector learns the polygons' boxes; then MobileSAM's mask decoder (its
+small, 4 M-parameter half) is fine-tuned on the polygons, prompted with their
+boxes, jittered by up to a tenth of their size as a detector's are. The image
+encoder stays as it is: each picture is encoded once and its embedding kept
+in `runs/train/segment/embeddings/`, so an epoch costs only the decoder. It
+is scored by mean IoU on the val split, MobileSAM as it was first (epoch 0),
+and the best — never worse than where it started — lands as
+`mask_decoder.onnx` beside `best.pt`, where `task="segment"` finds it.
+`seg_epochs` (20), `seg_batch` (16), `seg_lr` (1e-4); `seg=False` trains the
+boxes only. `model.seg_model = "path/to/mask_decoder.onnx"` picks one by hand.
+
+Unlike YOLO-seg, the masks stay class-agnostic outlines of what is in a box
+(the class comes from the detector), and the image encoder is not trained.
+
 ### Keypoints: `task="pose"`
 
 ```python

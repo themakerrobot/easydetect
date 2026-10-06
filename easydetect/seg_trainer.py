@@ -104,12 +104,12 @@ class MaskDataset:
     frame, target (256, 256) 0/1 at the low-res masks' scale)``."""
 
     def __init__(self, data_yaml, split: str, cache: EmbeddingCache, augment: bool = False,
-                 log=print) -> None:
+                 log=print, on_progress=None) -> None:
         pictures = read_polygons(data_yaml, split)
         self.augment = augment
         self.objects = []  # (picture index, polygon in the 1024 frame)
         self.embeddings, self.sizes = [], []
-        started = time.time()
+        started = reported = time.time()
         for n, (path, polys) in enumerate(pictures):
             emb, (h, w) = cache(path)
             self.embeddings.append(emb)
@@ -118,6 +118,12 @@ class MaskDataset:
                 pts = poly * np.array([w, h], np.float32) * scale
                 if np.ptp(pts[:, 0]) >= 1 and np.ptp(pts[:, 1]) >= 1:
                     self.objects.append((n, pts))
+            if on_progress is not None and (time.time() - reported >= 1.0
+                                            or n + 1 == len(pictures)):
+                reported = time.time()
+                on_progress({"phase": "masks", "stage": "encode", "split": split,
+                             "step": n + 1, "steps": len(pictures),
+                             "seconds": reported - started})
             if (n + 1) % 100 == 0:
                 log(f"  {split}: encoded {n + 1}/{len(pictures)} pictures "
                     f"({time.time() - started:.0f}s)")
@@ -230,11 +236,15 @@ def export(decoder, out: str | Path, log=print) -> Path:
 
 def train_masks(data_yaml, out: str | Path, *, segmenter=None, init: str = "mobile_sam",
                 epochs: int = 20, batch: int = 16, lr: float = 1e-4, weight_decay: float = 0.01,
-                device=None, seed: int = 0, log=print) -> Path | None:
+                device=None, seed: int = 0, log=print, on_progress=None) -> Path | None:
     """Fine-tune the mask decoder on ``data_yaml``'s polygons; write the run
     to ``out`` (results.csv, run.json, best.pt) and the best decoder, by val
     mean IoU, to ``out/decoder.onnx``. MobileSAM as it was scores first
-    (epoch 0), so the result is never worse than it on the val split."""
+    (epoch 0), so the result is never worse than it on the val split.
+    ``on_progress`` hears ``{"phase": "masks", "stage": "encode", ...}`` while
+    the pictures are encoded, then about once a second ``{"phase": "masks",
+    "epoch", "epochs", "step", "steps", "seconds"}`` and, at each epoch's end,
+    the same with ``"miou"``."""
     import csv
 
     import torch
@@ -251,8 +261,10 @@ def train_masks(data_yaml, out: str | Path, *, segmenter=None, init: str = "mobi
     segmenter = segmenter or default_segmenter()
     cache = EmbeddingCache(segmenter, out / "embeddings")
     log("encoding the pictures once (MobileSAM's image encoder)…")
-    train_ds = MaskDataset(data_yaml, "train", cache, augment=True, log=log)
-    val_ds = MaskDataset(data_yaml, "val", cache, augment=False, log=log)
+    train_ds = MaskDataset(data_yaml, "train", cache, augment=True, log=log,
+                           on_progress=on_progress)
+    val_ds = MaskDataset(data_yaml, "val", cache, augment=False, log=log,
+                         on_progress=on_progress)
     if not len(train_ds):
         raise ValueError(f"{data_yaml}: no polygon labels in the train split")
 
@@ -287,6 +299,7 @@ def train_masks(data_yaml, out: str | Path, *, segmenter=None, init: str = "mobi
     for epoch in range(1, epochs + 1):
         decoder.train()
         started, running, seen = time.time(), 0.0, 0
+        reported = 0.0
         order = np.random.permutation(len(train_ds))
         for k in range(steps):
             items = [train_ds[i] for i in order[k * batch:(k + 1) * batch]]
@@ -303,7 +316,15 @@ def train_masks(data_yaml, out: str | Path, *, segmenter=None, init: str = "mobi
             opt.step()
             running += float(loss) * len(items)
             seen += len(items)
+            if on_progress is not None and time.time() - reported >= 1.0:
+                reported = time.time()
+                on_progress({"phase": "masks", "epoch": epoch, "epochs": epochs,
+                             "step": k + 1, "steps": steps, "seconds": reported - started})
         miou = evaluate(decoder, scorer, device)
+        if on_progress is not None:
+            on_progress({"phase": "masks", "epoch": epoch, "epochs": epochs, "step": steps,
+                         "steps": steps, "seconds": time.time() - started,
+                         "miou": round(miou, 4)})
         rows.append({"epoch": epoch, "loss": round(running / max(seen, 1), 5),
                      "miou": round(miou, 4), "seconds": round(time.time() - started, 1)})
         log(f"epoch {epoch}/{epochs}: loss {rows[-1]['loss']}, mean IoU {miou:.4f}")

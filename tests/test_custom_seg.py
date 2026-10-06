@@ -108,11 +108,15 @@ def test_training_on_a_polygon_dataset_gives_task_segment_its_decoder(tmp_path, 
                         lambda: (stub_sam / "encoder.onnx", stub_sam / "decoder.onnx"))
     monkeypatch.setattr(downloads, "download_sam_decoder", lambda: stub_sam / "decoder.pt")
     data = _toy(tmp_path / "data")
+    heard = []
     best = Detector("dfine-n", pretrained=False, verbose=False).train(
         data=str(data), epochs=1, imgsz=64, batch=4, workers=0, device="cpu",
-        project=str(tmp_path / "runs"), amp=False, seg_epochs=1, seg_batch=4)
+        project=str(tmp_path / "runs"), amp=False, seg_epochs=1, seg_batch=4,
+        on_progress=heard.append)
     beside = best.parent / "mask_decoder.onnx"
     assert beside.exists()
+    stage = [h for h in heard if h["phase"] == "masks"]
+    assert any(h.get("stage") == "encode" for h in stage) and "miou" in stage[-1]
 
     used = []
     real = segment.default_segmenter

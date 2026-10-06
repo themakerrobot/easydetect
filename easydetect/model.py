@@ -509,7 +509,9 @@ class Detector:
         ``on_progress`` hears about once a second inside an epoch —
         ``{"phase": "train", "epoch", "epochs", "step", "steps", "seconds"}`` —
         and once more with ``"phase": "val"`` before validation starts, so a
-        long epoch is not a silent one.
+        long epoch is not a silent one. The keypoint and mask stages report
+        the same way with ``"phase": "keypoints"`` / ``"masks"`` (and, at a
+        scored epoch's end, ``"ap"`` / ``"miou"``).
         """
         _import_torch()
         from .data.dataset import load_data_yaml
@@ -568,16 +570,17 @@ class Detector:
         if cfg["kpt_shape"] is not None and pose:
             self._train_keypoints(data, cfg, best, device=device, workers=workers, seed=seed,
                                   amp=amp, epochs=pose_epochs or epochs, batch=pose_batch,
-                                  lr=pose_lr, size=pose_size)
+                                  lr=pose_lr, size=pose_size, on_progress=on_progress)
         if seg:
             from .seg_trainer import has_polygons
 
             if has_polygons(data):
                 self._train_masks(data, best, device=device, seed=seed, epochs=seg_epochs,
-                                  batch=seg_batch, lr=seg_lr)
+                                  batch=seg_batch, lr=seg_lr, on_progress=on_progress)
         return best
 
-    def _train_masks(self, data, best: Path, *, device, seed, epochs, batch, lr) -> Path:
+    def _train_masks(self, data, best: Path, *, device, seed, epochs, batch, lr,
+                     on_progress=None) -> Path:
         """The mask stage of training on a segmentation dataset: MobileSAM's
         decoder fine-tuned on the polygons, written to ``segment/`` in the run
         and, as ``mask_decoder.onnx``, beside ``best.pt`` — where
@@ -591,14 +594,15 @@ class Detector:
         backend = self.predictor.backend if self.predictor is not None else self.backend
         onnx = train_masks(data, best.parent.parent / "segment",
                            segmenter=default_segmenter(backend=backend), epochs=epochs,
-                           batch=batch, lr=lr, device=device, seed=seed, log=log)
+                           batch=batch, lr=lr, device=device, seed=seed, log=log,
+                           on_progress=on_progress)
         beside = best.parent / "mask_decoder.onnx"
         shutil.copy(onnx, beside)
         self.segmenter = None  # the next prediction reads the new one
         return beside
 
     def _train_keypoints(self, data, cfg, best: Path, *, device, workers, seed, amp, epochs,
-                         batch, lr, size) -> Path | None:
+                         batch, lr, size, on_progress=None) -> Path | None:
         """The keypoint stage of training on a keypoint dataset: a top-down
         network on crops of the labelled boxes, started from the backbone of
         the detector just trained, written to ``pose/`` in the run and, as
@@ -627,7 +631,8 @@ class Detector:
         onnx = train_keypoints(
             train_ds, val_ds, best.parent.parent / "pose", size=size, init=init, epochs=epochs,
             batch=batch, lr=lr, warmup=200, workers=workers,
-            val_every=max(1, epochs // 10), device=device, amp=amp, seed=seed, log=log)
+            val_every=max(1, epochs // 10), device=device, amp=amp, seed=seed, log=log,
+            on_progress=on_progress)
         if onnx is None:
             return None
         beside = best.parent / "pose.onnx"
@@ -728,16 +733,33 @@ class Detector:
         if int8:
             if format != "openvino":
                 raise ValueError("int8 is an OpenVINO export: format='openvino'")
-            return export_openvino(
+            written = export_openvino(
                 self.net, self.names, imgsz=imgsz, out_dir=out_dir, fname=f"{stem}_int8",
                 verbose=verbose, layers=layers, queries=queries,
                 int8=_calibration_images(data, calib),
             )
+            self._copy_siblings(Path(written).parent)
+            return written
         exporter = export_openvino if format == "openvino" else export_onnx
-        return exporter(
+        written = exporter(
             self.net, self.names, imgsz=imgsz, out_dir=out_dir, fname=stem,
             half=half, verbose=verbose, layers=layers, queries=queries,
         )
+        self._copy_siblings(Path(written).parent)
+        return written
+
+    def _copy_siblings(self, out_dir: Path) -> None:
+        """Training's pose.onnx / mask_decoder.onnx go along with an export,
+        so the exported detector finds them beside itself as best.pt does."""
+        import shutil
+
+        if not self.ckpt_path:
+            return
+        for name in ("pose.onnx", "mask_decoder.onnx"):
+            src = Path(self.ckpt_path).parent / name
+            dst = Path(out_dir) / name
+            if src.exists() and src.resolve() != dst.resolve():
+                shutil.copy(src, dst)
 
     # -------------------------------------------------------------------- misc
 

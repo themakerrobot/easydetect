@@ -5,6 +5,7 @@ and used — a keypoint set that is not COCO's 17 end to end."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -94,10 +95,18 @@ def test_training_on_a_keypoint_dataset_gives_a_model_that_predicts_it(tmp_path)
 
     data = _toy(tmp_path / "data")
     model = Detector("dfine-n", pretrained=False, verbose=False)
+    heard = []
     best = model.train(data=str(data), epochs=1, imgsz=64, batch=4, workers=0, device="cpu",
-                       project=str(tmp_path / "runs"), amp=False, pose_epochs=2, pose_batch=4)
+                       project=str(tmp_path / "runs"), amp=False, pose_epochs=2, pose_batch=4,
+                       on_progress=heard.append)
     beside = best.parent / "pose.onnx"
     assert beside.exists()
+    stage = [h for h in heard if h["phase"] == "keypoints"]
+    assert stage and stage[-1]["epoch"] == 2 and "ap" in stage[-1]
+
+    # an export takes the keypoint model along
+    onnx = model.export(format="onnx", out_dir=tmp_path / "exported", verbose=False)
+    assert (Path(onnx).parent / "pose.onnx").exists()
     spec = spec_of(beside)
     assert spec.names == tuple(NAMES) and spec.skeleton[0] == (0, 1) and spec.classes == (0,)
 

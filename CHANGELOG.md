@@ -23,6 +23,11 @@
   and `plot()` draws that set. `pose_epochs`, `pose_batch`, `pose_lr`,
   `pose_size`, `pose=False`. The training loop moved from tools/train_pose.py
   into `easydetect.pose_trainer`.
+- Training's keypoint and mask stages report through `on_progress` like the
+  detector's epochs (`"phase": "keypoints"` / `"masks"`, with `"ap"` /
+  `"miou"` at a scored epoch's end, and `"stage": "encode"` while MobileSAM
+  reads the pictures), and `export()` copies `pose.onnx` / `mask_decoder.onnx`
+  next to the exported model, so the IR or ONNX keeps its keypoints and masks.
 - Fixed: a keypoint label line with an even number of keypoints (4 × 3 + 5 =
   17 values) was read as a polygon; with `kpt_shape` in the data.yaml it is
   read as a box and keypoints.

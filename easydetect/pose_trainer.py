@@ -176,12 +176,14 @@ def train_keypoints(train_ds, val_ds, out: str | Path, *, size: str = "s", init:
                     weight_decay: float = 0.05, warmup: int = 1000, clip: float = 3.0,
                     workers: int = 4, val_every: int = 10, freeze: int = 0,
                     hours: float | None = None, device=None, amp: bool = True, seed: int = 0,
-                    resume: bool = False, log=print) -> Path | None:
+                    resume: bool = False, log=print, on_progress=None) -> Path | None:
     """Train a keypoint network on ``train_ds`` (a KeypointDataset; its
     ``spec`` is the keypoint set), score it on ``val_ds``, write the run to
     ``out`` (results.csv, run.json, last.pt, best.pt) and export ``best.pt``
     to ``pose-<size>.onnx``. Returns that ``.onnx``; None when ``hours`` ran
-    out first (``resume=True`` continues)."""
+    out first (``resume=True`` continues). ``on_progress`` hears about once a
+    second ``{"phase": "keypoints", "epoch", "epochs", "step", "steps",
+    "seconds"}``, and at each scored epoch's end the same with ``"ap"``."""
     import torch
     from torch.utils.data import DataLoader
 
@@ -252,6 +254,7 @@ def train_keypoints(train_ds, val_ds, out: str | Path, *, size: str = "s", init:
             return None
         net.train()
         started, seen, running = time.time(), 0, 0.0
+        reported = 0.0
         for k, (crops, xy, weight, _) in enumerate(loader):
             step = epoch * steps_per_epoch + k
             for g in opt.param_groups:
@@ -272,6 +275,12 @@ def train_keypoints(train_ds, val_ds, out: str | Path, *, size: str = "s", init:
             if k % 100 == 0:
                 log(f"  epoch {epoch + 1}/{epochs} step {k}/{steps_per_epoch} "
                     f"loss {running / seen:.4f}")
+            if on_progress is not None and (time.time() - reported >= 1.0
+                                            or k + 1 == steps_per_epoch):
+                reported = time.time()
+                on_progress({"phase": "keypoints", "epoch": epoch + 1, "epochs": epochs,
+                             "step": k + 1, "steps": steps_per_epoch,
+                             "seconds": reported - started})
         row = {"epoch": epoch + 1, "loss": round(running / max(seen, 1), 5),
                "lr": opt.param_groups[0]["lr"], "seconds": round(time.time() - started, 1)}
         if (epoch + 1) % val_every == 0 or epoch + 1 == epochs:
@@ -290,6 +299,10 @@ def train_keypoints(train_ds, val_ds, out: str | Path, *, size: str = "s", init:
             if metrics["ap"] > best:
                 best = metrics["ap"]
                 save_best(ema.module if which == "ema" else net, which, epoch + 1, best)
+            if on_progress is not None:
+                on_progress({"phase": "keypoints", "epoch": epoch + 1, "epochs": epochs,
+                             "step": steps_per_epoch, "steps": steps_per_epoch,
+                             "seconds": time.time() - started, "ap": round(metrics["ap"], 4)})
         log(f"epoch {epoch + 1}: " + ", ".join(f"{m} {v}" for m, v in row.items() if m != "epoch"))
         append_row(csv_path, row)
         torch.save({"net": net.state_dict(), "model": ema.module.state_dict(),

@@ -152,6 +152,16 @@ jobs:
             --epochs ${{ inputs.epochs }} --batch ${{ inputs.batch }} --lr ${{ inputs.lr }} \
             --freeze ${{ inputs.freeze }} --warmup ${{ inputs.warmup }} --workers 2 \
             --val-every 5 "${init[@]}" --resume "$RUN" --hours 4.8
+      # kept before scoring too: on a slow runner the scoring can run into the
+      # job's time limit, and the epochs just trained must not go with it
+      # (the next leg, or a resume_run, scores a finished but unscored run)
+      - uses: actions/upload-artifact@v4
+        if: steps.state.outputs.train == 'true'
+        with:
+          name: pose-run
+          path: run
+          overwrite: true
+          retention-days: 30
       - name: Score the whole pipeline
         if: steps.state.outputs.done == 'false'
         run: |

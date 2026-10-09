@@ -29,6 +29,10 @@ on:
         description: "Its size: s, m or l"
         default: "s"
 
+permissions:
+  contents: write   # only to see a draft release's asset (pose_url)
+  actions: read     # an earlier run's artifact (pose_run)
+
 jobs:
   upload:
     runs-on: ubuntu-latest
@@ -61,15 +65,13 @@ jobs:
         run: |
           size="${{ inputs.pose_size }}"
           mkdir -p "pose-run/$size"
-          # this repository's release assets come through the API (drafts too);
-          # the token goes to GitHub only
+          # this repository's release assets come through the API, drafts too (a
+          # draft is listed only for a token that can write); the token goes to GitHub only
           case "$URL" in
             https://github.com/${{ github.repository }}/releases/*)
-              tag=$(echo "$URL" | sed -E 's#.*/releases/download/([^/]+)/.*#\1#')
-              name=$(basename "$URL")
               id=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
                      "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" |
-                   python -c "import json,sys; t,n=sys.argv[1:]; print(next(a['id'] for r in json.load(sys.stdin) if r['tag_name']==t for a in r['assets'] if a['name']==n))" "$tag" "$name")
+                   python3 -c "import json,os,sys; print(next(a['id'] for r in json.load(sys.stdin) for a in r['assets'] if a['browser_download_url']==os.environ['URL']))")
               curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
                 -o "pose-run/$size/pose-$size.onnx" \
                 "https://api.github.com/repos/${{ github.repository }}/releases/assets/$id" ;;

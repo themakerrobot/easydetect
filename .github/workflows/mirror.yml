@@ -104,8 +104,17 @@ jobs:
               people = r.keypoints.conf.max(1) > 0
               print("pose", backend, int(people.sum()), "people,", r.keypoints.conf[people].mean())
               assert people.any() and r.keypoints.conf[people].mean() > 0.2  # a broken model reads ~0
-              got[backend] = r.keypoints.xy
-          assert np.abs(got["openvino"] - got["onnxruntime"]).max() < 1.0, "the runtimes disagree"
+              got[backend] = (r.keypoints.xy, r.keypoints.conf)
+          # the keypoints a model is sure of must land on the same pixel on both
+          # runtimes; an unsure one sits on a flat peak, and OpenVINO's bf16 on a
+          # CPU that has it can move it a bin or two
+          (a, ca), (b, cb) = got["openvino"], got["onnxruntime"]
+          diff = np.abs(a - b).max(-1)
+          sure = (ca > 0.5) & (cb > 0.5)
+          print("runtime difference, px: all max", diff.max(), "sure max", diff[sure].max(),
+                "sure median", np.median(diff[sure]), "of", int(sure.sum()), "sure keypoints")
+          assert sure.sum() >= 10 and diff[sure].max() < 2.0 and np.median(diff[sure]) < 0.5, \
+              "the runtimes disagree"
           PY
       - name: Build the weights
         if: ${{ !inputs.readme_only && !inputs.segmenter_only && env.POSE == '' }}

@@ -10,8 +10,11 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: "train-pose run id whose pose-run artifact to score"
-        required: true
+        description: "train-pose run id whose pose-run artifact to score (or leave blank and give pose_url)"
+        default: ""
+      pose_url:
+        description: "Or: the pose-<size>.onnx at this URL (a release asset of this repository, say)"
+        default: ""
       size:
         description: "s, m or l"
         default: "s"
@@ -33,11 +36,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        if: ${{ inputs.pose_url == '' }}
         with:
           name: pose-run
           path: run
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
+      - name: The model (a URL)
+        if: ${{ inputs.pose_url != '' }}
+        env:
+          URL: ${{ inputs.pose_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$(dirname "$ONNX")"
+          # this repository's release assets come through the API; the token goes to GitHub only
+          case "$URL" in
+            https://github.com/${{ github.repository }}/releases/*)
+              tag=$(echo "$URL" | sed -E 's#.*/releases/download/([^/]+)/.*#\1#')
+              name=$(basename "$URL")
+              id=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+                     "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" |
+                   python3 -c "import json,sys; t,n=sys.argv[1:]; print(next(a['id'] for r in json.load(sys.stdin) if r['tag_name']==t for a in r['assets'] if a['name']==n))" "$tag" "$name")
+              curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+                -o "$ONNX" "https://api.github.com/repos/${{ github.repository }}/releases/assets/$id" ;;
+            *) curl -fsSL -o "$ONNX" "$URL" ;;
+          esac
+          ls -l "$ONNX"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

@@ -22,6 +22,9 @@ on:
       pose_run:
         description: "Only upload pose/pose-<size>.onnx from this train-pose run id's pose-run artifact"
         default: ""
+      pose_url:
+        description: "Or: only upload the pose-<size>.onnx at this URL (a release asset of this repository, say)"
+        default: ""
       pose_size:
         description: "Its size: s, m or l"
         default: "s"
@@ -31,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       HF_REPO: leeyunjai/easydetect
+      POSE: ${{ inputs.pose_run }}${{ inputs.pose_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,20 +46,43 @@ jobs:
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[train]" "huggingface_hub>=0.25"
       - name: The keypoint model (a train-pose run's pose-run artifact)
-        if: ${{ inputs.pose_run != '' }}
+        if: ${{ inputs.pose_run != '' && inputs.pose_url == '' }}
         uses: actions/download-artifact@v4
         with:
           name: pose-run
           path: pose-run
           run-id: ${{ inputs.pose_run }}
           github-token: ${{ github.token }}
+      - name: The keypoint model (a URL)
+        if: ${{ inputs.pose_url != '' }}
+        env:
+          URL: ${{ inputs.pose_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          size="${{ inputs.pose_size }}"
+          mkdir -p "pose-run/$size"
+          # this repository's release assets come through the API (drafts too);
+          # the token goes to GitHub only
+          case "$URL" in
+            https://github.com/${{ github.repository }}/releases/*)
+              tag=$(echo "$URL" | sed -E 's#.*/releases/download/([^/]+)/.*#\1#')
+              name=$(basename "$URL")
+              id=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+                     "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" |
+                   python -c "import json,sys; t,n=sys.argv[1:]; print(next(a['id'] for r in json.load(sys.stdin) if r['tag_name']==t for a in r['assets'] if a['name']==n))" "$tag" "$name")
+              curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+                -o "pose-run/$size/pose-$size.onnx" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/assets/$id" ;;
+            *) curl -fsSL -o "pose-run/$size/pose-$size.onnx" "$URL" ;;
+          esac
+          ls -l "pose-run/$size"
       - name: Check the keypoint model before uploading it
-        if: ${{ inputs.pose_run != '' }}
+        if: ${{ env.POSE != '' }}
         run: |
           size="${{ inputs.pose_size }}"
           mkdir -p mirror/pose
           cp "pose-run/$size/pose-$size.onnx" "mirror/pose/pose-$size.onnx"
-          cat "pose-run/$size/eval.txt"
+          cat "pose-run/$size/eval.txt" 2>/dev/null || true
           cp tools/hub_README.md mirror/README.md
           python - <<'PY'
           import os, shutil, tempfile, urllib.request
@@ -79,10 +106,10 @@ jobs:
           assert np.abs(got["openvino"] - got["onnxruntime"]).max() < 1.0, "the runtimes disagree"
           PY
       - name: Build the weights
-        if: ${{ !inputs.readme_only && !inputs.segmenter_only && inputs.pose_run == '' }}
+        if: ${{ !inputs.readme_only && !inputs.segmenter_only && env.POSE == '' }}
         run: python tools/build_mirror.py --out mirror --sizes ${{ inputs.sizes }}
       - name: Build the segmenter
-        if: ${{ !inputs.readme_only && inputs.pose_run == '' }}
+        if: ${{ !inputs.readme_only && env.POSE == '' }}
         run: |
           pip install timm
           python tools/convert_sam.py --out mirror
@@ -91,7 +118,7 @@ jobs:
         if: ${{ inputs.readme_only }}
         run: mkdir -p mirror && cp tools/hub_README.md mirror/README.md
       - name: Check the IRs and ONNX files predict before uploading them
-        if: ${{ !inputs.readme_only && inputs.pose_run == '' }}
+        if: ${{ !inputs.readme_only && env.POSE == '' }}
         run: |
           python - <<'PY'
           import glob, os, shutil, tempfile, urllib.request
@@ -132,15 +159,15 @@ jobs:
               folder_path="mirror",
               repo_id=os.environ["HF_REPO"],
               repo_type="model",
-              commit_message=("easydetect keypoint model (${{ inputs.pose_size }}) from train-pose run ${{ inputs.pose_run }}"
-                              if "${{ inputs.pose_run }}" else
+              commit_message=("easydetect keypoint model (${{ inputs.pose_size }}) from ${{ inputs.pose_url || format('train-pose run {0}', inputs.pose_run) }}"
+                              if "${{ env.POSE }}" else
                               "easydetect weights (${{ inputs.sizes }}) from ${{ github.sha }}"),
               delete_patterns=["rtdetr-*/*"],   # the retired RT-DETR folders
           )
           print(info)
           PY
       - name: Download the keypoint model back, the way users will
-        if: ${{ inputs.pose_run != '' }}
+        if: ${{ env.POSE != '' }}
         run: |
           python - <<'PY'
           import os, tempfile
@@ -153,7 +180,7 @@ jobs:
           assert (r.keypoints.conf.max(1) > 0).any()
           PY
       - name: Download one back, the way users will
-        if: ${{ !inputs.readme_only && inputs.pose_run == '' }}
+        if: ${{ !inputs.readme_only && env.POSE == '' }}
         run: |
           python - <<'PY'
           import os, tempfile

@@ -82,11 +82,17 @@ model.pose_model = "l"                          # HGNetv2-B4
 model.pose_model = "runs/pose/m/pose-m.onnx"    # or one you trained
 ```
 
-| | backbone (from) | parameters | time a person, relative |
-| --- | --- | --- | --- |
-| `"s"` | HGNetv2-B0 (dfine-s) | 3.7 M | 1× |
-| `"m"` | HGNetv2-B2 (dfine-m) | 8.1 M | about 2× |
-| `"l"` | HGNetv2-B4 (dfine-l) | 15.8 M | about 4× |
+| | backbone (from) | parameters | time a person, relative | OKS AP, labelled boxes | behind dfine-s |
+| --- | --- | --- | --- | --- | --- |
+| `"s"` | HGNetv2-B0 (dfine-s) | 3.7 M | 1× | 0.637 | 0.588 |
+| `"m"` | HGNetv2-B2 (dfine-m) | 8.1 M | about 2× | **0.725** | **0.664** |
+| `"l"` | HGNetv2-B4 (dfine-l) | 15.8 M | about 4× | | |
+
+COCO val2017, with flip averaging. `"m"` trained for 100 epochs with every
+layer learning, on one RTX 5090 in 2¼ hours (batch 256, lr 2e-3,
+`train_pose.py --size m --epochs 100 --batch 256 --lr 2e-3 --freeze 0`);
+`"s"` on GitHub's CPU runners (40 epochs with the early backbone kept, then
+20 more).
 
 Each is downloaded as `pose/pose-<size>.onnx` once that is on the mirror
 (until then it says so). On the command line and in `easydetect serve`:

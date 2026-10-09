@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `pose_model="m"` is on the mirror: OKS AP 0.725 on COCO val2017 with the
+  labelled boxes, 0.664 behind dfine-s (s: 0.637 / 0.588). Trained on an RTX
+  5090 for 100 epochs. `eval-pose.yml` and `mirror.yml` take a model from a URL
+  (`pose_url`, a release asset of the repository, drafts included).
+
 ## 0.6.0
 
 - **Masks of your own.** A segmentation dataset (polygons, Ultralytics'

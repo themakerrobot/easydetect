@@ -23,9 +23,9 @@ it can differ from pycocotools in the third decimal):
 
 | | AP | AP50 | AP75 |
 | --- | --- | --- | --- |
-| the labelled person boxes (the keypoint model alone) | 0.637 | 0.890 | 0.708 |
-| behind dfine-s (what you get) | 0.588 | 0.801 | 0.655 |
-| behind dfine-s, `model.pose_flip = False` | 0.571 | 0.795 | 0.637 |
+| the labelled person boxes (the keypoint model alone) | 0.670 | 0.901 | 0.736 |
+| behind dfine-s (what you get) | 0.612 | 0.806 | 0.681 |
+| behind dfine-s, `model.pose_flip = False` | 0.601 | 0.803 | 0.670 |
 
 For scale, Ultralytics publishes 50.4 for YOLOv8n-pose and 60.0 for
 YOLOv8s-pose (their own end-to-end models, scored with pycocotools). Behind
@@ -84,15 +84,13 @@ model.pose_model = "runs/pose/m/pose-m.onnx"    # or one you trained
 
 | | backbone (from) | parameters | time a person, relative | OKS AP, labelled boxes | behind dfine-s |
 | --- | --- | --- | --- | --- | --- |
-| `"s"` | HGNetv2-B0 (dfine-s) | 3.7 M | 1× | 0.637 | 0.588 |
-| `"m"` | HGNetv2-B2 (dfine-m) | 8.1 M | about 2× | **0.725** | **0.664** |
-| `"l"` | HGNetv2-B4 (dfine-l) | 15.8 M | about 4× | | |
+| `"s"` | HGNetv2-B0 (dfine-s) | 3.7 M | 1× | 0.670 | 0.612 |
+| `"m"` | HGNetv2-B2 (dfine-m) | 8.1 M | about 2× | 0.725 | 0.664 |
+| `"l"` | HGNetv2-B4 (dfine-l) | 15.8 M | about 4× | 0.748 | 0.680 |
 
-COCO val2017, with flip averaging. `"m"` trained for 100 epochs with every
-layer learning, on one RTX 5090 in 2¼ hours (batch 256, lr 2e-3,
-`train_pose.py --size m --epochs 100 --batch 256 --lr 2e-3 --freeze 0`);
-`"s"` on GitHub's CPU runners (40 epochs with the early backbone kept, then
-20 more).
+COCO val2017, with flip averaging. Each trained for 100 epochs with every
+layer learning on one RTX 5090 — s in 1½ hours, m in 2¼, l in 2½ —
+`train_pose.py --size <s|m|l> --epochs 100 --batch 256 --lr 2e-3 --freeze 0`.
 
 Each is downloaded as `pose/pose-<size>.onnx` once that is on the mirror
 (until then it says so). On the command line and in `easydetect serve`:

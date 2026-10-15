@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- README compares with YOLO26 (detection a draw; YOLO26-pose ahead by 2–2½
+  OKS AP at each size), and `tools/bench_finetune.py` fine-tunes dfine-s and
+  a YOLO on the same small public datasets and scores both with one
+  evaluator. `compare_yolo.py` reads an end-to-end YOLO's ONNX (YOLO26).
 - **Keypoint models s, m and l on the mirror**, each trained for 100 epochs
   with every layer learning on an RTX 5090. OKS AP on COCO val2017 (flip
   averaging), with the labelled boxes / behind dfine-s: s 0.670 / 0.612

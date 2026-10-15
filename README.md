@@ -150,31 +150,48 @@ covers measuring your own machine and what makes it faster.
 ## Compared with YOLO
 
 Published COCO val2017 numbers at 640 px, as each project reports them — not
-re-measured here:
+re-measured here. Both models are NMS-free; YOLO26 also publishes a score
+with NMS added, shown second.
 
-| model | params | COCO mAP50-95 | NMS | license |
-| --- | --- | --- | --- | --- |
-| D-FINE n / s / m / l / x | 4M / 10M / 19M / 31M / 62M | 42.8 / 48.5 / 52.3 / 54.0 / 55.8 | not needed¹ | Apache-2.0 |
-| YOLO11 n / s / m / l / x | 2.6M / 9.4M / 20.1M / 25.3M / 56.9M | 39.5 / 47.0 / 51.5 / 53.4 / 54.7 | needed | AGPL-3.0 |
+| | n | s | m | l | x |
+| --- | --- | --- | --- | --- | --- |
+| D-FINE mAP50-95 | **42.8** | **48.5** | 52.3 | 54.0 | 55.8 |
+| YOLO26 mAP50-95 (no NMS / with NMS) | 40.1 / 40.9 | 47.8 / 48.6 | 52.5 / 53.1 | 54.4 / 55.0 | 56.9 / 57.5 |
+| D-FINE params | 4M | 10M | 19M | 31M | 62M |
+| YOLO26 params | 2.4M | 9.5M | 20.4M | 24.8M | 55.7M |
 
-¹ The model has no NMS step; `predict` drops a box overlapping a better one
-by more than `iou=0.7`, the rare duplicate — see [performance](https://github.com/themakerrobot/easydetect/blob/main/docs/performance.md#duplicate-boxes).
+Keypoints (OKS AP, COCO val2017, the whole pipeline — people found by the
+detector, then their keypoints):
+
+| | s | m | l |
+| --- | --- | --- | --- |
+| easydetect (dfine-s, then the keypoint model of that size) | 61.2 | 66.4 | 68.0 |
+| YOLO26-pose | **63.0** | **68.8** | **70.4** |
 
 Read it plainly:
 
-* **At each size D-FINE scores a little higher on COCO**, with a similar
-  parameter count (YOLO11-n and -l are the lighter ones).
-* **The license is the difference that usually decides.** Ultralytics YOLO is
-  AGPL-3.0: a product that ships it, or serves it over a network, must publish
-  its source or buy a commercial license. Everything here is Apache-2.0 — code
-  and weights — so it goes into closed products as it is.
-* **Where YOLO fits better:** segmentation and pose trained end to end in one
-  model (here they ride on the detector's boxes: `task="segment"` with
-  MobileSAM, `task="pose"` with easydetect's own keypoint network), and a far
-  larger ecosystem.
+* **Detection is a draw.** D-FINE is ahead at the small sizes (n, s), YOLO26
+  at the large ones (l, x), and lighter there.
+* **Keypoints: YOLO26-pose is 2–2½ points ahead** at each size, in one pass
+  for everyone in the picture; here each person is a second step. Given the
+  labelled boxes the keypoint models score higher (67.0 / 72.5 / 74.8), so
+  the gap is in finding people, and in running two models.
+* **Masks without mask labels.** YOLO-seg learns masks from polygon labels.
+  Here `task="segment"` outlines whatever the detector finds — a model trained
+  on boxes alone gets masks with no polygon drawn — and polygons, when you
+  have them, fine-tune the mask decoder (COCO polygons: mean IoU 0.752 →
+  0.810).
+* **The licence.** Ultralytics YOLO is AGPL-3.0: a product that ships it, or
+  serves it over a network, must publish its source or buy a commercial
+  licence. Everything here — code and weights — is Apache-2.0.
+* **Where YOLO fits better:** pose and segmentation trained end to end, more
+  tasks (oriented boxes, classification, depth), and a far larger ecosystem.
 
-COCO is a guide, not your answer. Fine-tune both on your own data, then compare
-mAP on the same validation images and latency on the same device, NMS included.
+COCO is a guide, not your answer. What matters is the model you get from a
+few hundred pictures of your own: `tools/bench_finetune.py` fine-tunes
+dfine-s and YOLO26s on the same public datasets (from 92 to 1,132 pictures)
+with each trainer's own defaults and scores both with one evaluator on the
+CPU. Its results will be published here.
 
 ## Command line
 

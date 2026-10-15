@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Apache-2.0
-"""yolo11s.onnx and a D-FINE checkpoint on the same val images, scored by one evaluator.
+"""A YOLO .onnx and a D-FINE checkpoint on the same val images, scored by one evaluator.
 
     python tools/compare_yolo.py --data ~/datasets/coco/data.yaml \
         --yolo yolo11s.onnx --dfine runs/dfine-n-320/weights/best.pt
@@ -11,9 +11,11 @@ at IoU 0.7; D-FINE plain-resized, no NMS. Boxes from both go through
 easydetect's Evaluator (COCO-style mAP50 / mAP50-95, the same code as
 `easydetect val`), at conf 0.001 and up to 300 boxes a picture.
 
-The YOLO side reads the exported ONNX's published layout (boxes as centre,
-width, height in letterboxed input pixels, then one score per class); it is
-written here from that description, with no Ultralytics code. Its numbers
+The YOLO side reads the exported ONNX's published layouts — boxes as centre,
+width, height in letterboxed input pixels then one score per class (YOLOv8,
+YOLO11), or, from an end-to-end model (YOLO26), up to 300 rows of corners,
+score and class with no NMS to run; it is written here from that
+description, with no Ultralytics code. Its numbers
 can differ a little from Ultralytics' own `val`, which batches pictures of
 similar shape; the point is that both models are measured the same way.
 """
@@ -61,9 +63,16 @@ class Yolo:
         boxed, r, px, py = letterbox(img, self.size)
         x = cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB).transpose(2, 0, 1)[None].astype(np.float32) / 255
         t = time.perf_counter()
-        out = self.request.infer({0: x})[self.compiled.output(0)][0]      # (4+nc, anchors)
+        out = self.request.infer({0: x})[self.compiled.output(0)][0]
         infer_ms = (time.perf_counter() - t) * 1000
-        scores = out[4:].T
+        # end-to-end (YOLO26, YOLOv10): rows of x1 y1 x2 y2 score class, no NMS to run
+        if out.ndim == 2 and out.shape[1] == 6:
+            out = out[out[:, 4] >= conf][:max_det]
+            xyxy = np.stack([(out[:, 0] - px) / r, (out[:, 1] - py) / r,
+                             (out[:, 2] - px) / r, (out[:, 3] - py) / r], 1)
+            xyxy = np.clip(xyxy, 0, [w, h, w, h])
+            return xyxy / [w, h, w, h], out[:, 4], out[:, 5].astype(int), infer_ms
+        scores = out[4:].T                                                # (4+nc, anchors)
         cls = scores.argmax(1)
         best = scores[np.arange(len(cls)), cls]
         keep = best >= conf

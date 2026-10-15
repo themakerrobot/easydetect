@@ -162,8 +162,13 @@ def test_masks_from_low_res_logits_match_the_decoders_full_size_ones(stub_sam, b
         "mask_input": np.zeros((1, 1, 256, 256), np.float32),
         "has_mask_input": np.zeros(1, np.float32),
         "orig_im_size": np.array(img.shape[:2], np.float32)})
-    ref = full[0][:, 0] > 0
-    assert masks.shape == ref.shape and ref.any() and (masks == ref).mean() > 0.999
+    logits = full[0][:, 0]
+    ref = logits > 0
+    # the stub's random weights leave many pixels a hair from 0, where two
+    # runtimes' rounding may land on either side: compare the decided ones
+    decided = np.abs(logits) > 0.02 * np.abs(logits).max()
+    assert masks.shape == ref.shape and ref.any() and decided.mean() > 0.9
+    assert (masks == ref)[decided].mean() > 0.999
     np.testing.assert_allclose(scores, full[1][:, 0], atol=1e-4)
     if backend == "openvino":   # the full-size output is not even in the graph
         assert len(seg._decoder.outputs) == 2

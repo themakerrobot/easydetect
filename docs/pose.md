@@ -28,16 +28,14 @@ it can differ from pycocotools in the third decimal):
 | behind dfine-s, `model.pose_flip = False` | 0.601 | 0.803 | 0.670 |
 
 For scale, Ultralytics publishes 50.4 for YOLOv8n-pose and 60.0 for
-YOLOv8s-pose (their own end-to-end models, scored with pycocotools). Behind
-dfine-m instead of dfine-s the score is the same (0.571 either way, without
-mirroring), so the faster detector is enough.
+YOLOv8s-pose (their own end-to-end models, scored with pycocotools). The
+larger keypoint models are in [A larger keypoint model](#a-larger-keypoint-model-or-your-own):
+m 0.725 / 0.664, l 0.748 / 0.680.
 
-The released model was trained on GitHub's CPU runners in two runs: 40 epochs
-with the stem and first two backbone stages kept from the detector (0.589
-with the labelled boxes), then 20 more epochs from there with every layer
-training, the learning rate starting again at 4e-4 (0.619). Both runs, their
-logs and their scores are in the repository's Actions history
-(`train-pose.yml`, `eval-pose.yml`).
+The released model was trained for 100 epochs with every layer learning, on
+one RTX 5090 in 1½ hours (`train_pose.py --size s --epochs 100 --batch 256
+--lr 2e-3 --freeze 0`). The one before it, trained on GitHub's CPU runners
+(60 epochs, part of the backbone kept), scored 0.637 / 0.588.
 
 ## How it works
 
@@ -58,9 +56,9 @@ the shoulder and wrist are. A keypoint's confidence is how sharply peaked
 those two distributions are.
 
 Each person is read twice, as cropped and mirrored, and the two readings are
-averaged (left and right swapped back): on COCO val2017 that is worth 2.5 OKS
-AP with the labelled boxes (0.589 → 0.613) and 2.0 behind dfine-s (0.545 →
-0.565). On a 4-core CPU (OpenVINO) it costs about 13 ms for one person instead
+averaged (left and right swapped back): on COCO val2017 that is worth 1.4 OKS
+AP with the labelled boxes (0.656 → 0.670) and 1.1 behind dfine-s (0.601 →
+0.612). On a 4-core CPU (OpenVINO) it costs about 13 ms for one person instead
 of 9, and 40 ms for four instead of 20, on top of the detector. For the faster
 reading:
 

@@ -121,6 +121,13 @@ def subset(data: Path, n: int) -> Path:
 def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
     from easydetect import Detector
 
+    for run in sorted(out.glob(f"{args.dfine}*")):   # finished before an interruption
+        summary = run / "summary.json"
+        if summary.exists() and (run / "weights" / "best.pt").exists():
+            done = json.loads(summary.read_text())
+            if done.get("epochs_run") == args.epochs:
+                print(f"{run}: trained already, reusing it", flush=True)
+                return run / "weights" / "best.pt", float(done.get("wall_seconds") or 0)
     started = time.time()
     best = Detector(args.dfine, verbose=False).train(
         data=str(data), epochs=args.epochs, imgsz=args.imgsz, batch=args.batch,
@@ -142,6 +149,11 @@ UNBUFFERED = dict(os.environ, PYTHONUNBUFFERED="1")
 
 def train_yolo(data: Path, out: Path, args) -> tuple[Path, float]:
     name = Path(args.yolo).stem
+    best = out / name / "weights" / "best.pt"
+    log = out / name / "results.csv"
+    if best.exists() and log.exists() and len(log.read_text().splitlines()) > args.epochs:
+        print(f"{out / name}: trained already, reusing it", flush=True)
+        return _export_yolo(best, args), 0.0   # its time was not recorded
     started = time.time()
     subprocess.run(["yolo", "detect", "train", f"model={args.yolo}", f"data={data}",
                     f"epochs={args.epochs}", f"imgsz={args.imgsz}", f"batch={args.batch}",
@@ -149,10 +161,16 @@ def train_yolo(data: Path, out: Path, args) -> tuple[Path, float]:
                     f"workers={args.workers}", "exist_ok=True", "plots=False"], check=True,
                    env=UNBUFFERED)
     seconds = time.time() - started
-    best = out / name / "weights" / "best.pt"
-    subprocess.run(["yolo", "export", f"model={best}", "format=onnx", f"imgsz={args.imgsz}"],
-                   check=True, env=UNBUFFERED)
-    return best.with_suffix(".onnx"), seconds
+    return _export_yolo(best, args), seconds
+
+
+def _export_yolo(best: Path, args) -> Path:
+    onnx = best.with_suffix(".onnx")
+    if not onnx.exists():
+        # a timeout: an export that hangs (it has, once) fails loudly instead
+        subprocess.run(["yolo", "export", f"model={best}", "format=onnx",
+                        f"imgsz={args.imgsz}"], check=True, env=UNBUFFERED, timeout=900)
+    return onnx
 
 
 def score(data: Path, yolo_onnx: Path, dfine_pt: Path, args) -> dict:

@@ -63,44 +63,56 @@ DATASETS = {
 
 
 def fetch(name: str, root: Path) -> Path:
-    """The dataset's data.yaml, downloading and unpacking it the first time."""
+    """The dataset's data.yaml, downloading and unpacking it the first time.
+
+    Each zip is unpacked into ``<root>/<name>/`` and searched there, whatever
+    its layout: ``images/train`` + ``images/val``, the same one folder down,
+    or ``train/images`` + ``valid/images`` (as Roboflow exports it).
+    """
     folder = root / name
-    if not (folder / "images" / "train").is_dir():
+    archive = root / f"{name}.zip"
+    if not folder.is_dir():
         root.mkdir(parents=True, exist_ok=True)
-        archive = root / f"{name}.zip"
         if not archive.exists():
             print(f"downloading {name}…", flush=True)
             urllib.request.urlretrieve(f"{ASSETS}/{name}.zip", archive)
         with zipfile.ZipFile(archive) as zf:
-            zf.extractall(root)
-    if not (folder / "images" / "train").is_dir():
-        found = [p.parent.parent for p in root.glob("**/images/train") if name in str(p)]
+            zf.extractall(folder)
+    splits = {}
+    for split, aliases in (("train", ("train",)), ("val", ("val", "valid", "validation"))):
+        found = [p for a in aliases for p in [*folder.glob(f"**/images/{a}"),
+                                              *folder.glob(f"**/{a}/images")] if p.is_dir()]
         if not found:
-            raise SystemExit(f"{archive}: no images/train inside; unpack it as {folder}/images/...")
-        folder = found[0]
+            raise SystemExit(f"{folder}: no {split} images found inside (looked for "
+                             f"images/{split} and {split}/images); unpack {archive} there by hand")
+        splits[split] = min(found, key=lambda p: len(p.parts))
+    # the folder above images/<split> or <split>/images: labels sit beside it
+    common = splits["train"].parent.parent
     data = folder / "bench.yaml"
-    data.write_text(yaml.safe_dump({"path": str(folder.resolve()), "train": "images/train",
-                                    "val": "images/val",
+    data.write_text(yaml.safe_dump({"path": str(common.resolve()),
+                                    "train": str(splits["train"].relative_to(common)),
+                                    "val": str(splits["val"].relative_to(common)),
                                     "names": dict(enumerate(DATASETS[name]))}))
     return data
 
 
 def subset(data: Path, n: int) -> Path:
     """A copy of a dataset with only its first ``n`` training pictures (links, not copies)."""
+    from easydetect.data.labels import label_path
+
     cfg = yaml.safe_load(data.read_text())
     src = Path(cfg["path"])
     dst = src.parent / f"{src.name}-{n}"
     for split, keep in (("train", n), ("val", None)):
-        pics = sorted((src / "images" / split).iterdir())[:keep]
-        for kind in ("images", "labels"):
-            (dst / kind / split).mkdir(parents=True, exist_ok=True)
+        pics = sorted(p for p in (src / cfg[split]).iterdir() if p.is_file())[:keep]
         for pic in pics:
-            label = src / "labels" / split / (pic.stem + ".txt")
-            for a, b in ((pic, dst / "images" / split / pic.name),
-                         (label, dst / "labels" / split / label.name)):
+            label = Path(label_path(pic))
+            for a in (pic, label):
+                b = dst / a.relative_to(src)
+                b.parent.mkdir(parents=True, exist_ok=True)
                 if a.exists() and not b.exists():
                     b.symlink_to(a.resolve())
-    out = dst / "bench.yaml"
+    out = dst.parent / f"{dst.name}.yaml"
     out.write_text(yaml.safe_dump(dict(cfg, path=str(dst.resolve()))))
     return out
 
@@ -212,7 +224,7 @@ def main():
             print(f"{name}: done already", flush=True)
             continue
         cfg = yaml.safe_load(data.read_text())
-        train_pictures = len(list((Path(cfg["path"]) / "images" / "train").iterdir()))
+        train_pictures = sum(1 for p in (Path(cfg["path"]) / cfg["train"]).iterdir() if p.is_file())
         print(f"=== {name} ({train_pictures} training pictures)", flush=True)
         dfine_pt, dfine_s = train_dfine(data, out / name, args)
         yolo_onnx, yolo_s = train_yolo(data, out / name, args)

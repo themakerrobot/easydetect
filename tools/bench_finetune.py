@@ -40,6 +40,7 @@ so the script can be rerun after an interruption.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import json
 import os
 import shutil
@@ -61,6 +62,11 @@ DATASETS = {
     "signature": ["signature"],
     "medical-pills": ["pill"],
 }
+
+
+# a log file is block-buffered: without this, what each step prints shows up
+# minutes later, out of order with the yolo commands' own output
+UNBUFFERED = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONFAULTHANDLER="1")
 
 
 def fetch(name: str, root: Path) -> Path:
@@ -119,8 +125,6 @@ def subset(data: Path, n: int) -> Path:
 
 
 def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
-    from easydetect import Detector
-
     for run in sorted(out.glob(f"{args.dfine}*")):   # finished before an interruption
         summary = run / "summary.json"
         if summary.exists() and (run / "weights" / "best.pt").exists():
@@ -128,23 +132,25 @@ def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
             if done.get("epochs_run") == args.epochs:
                 print(f"{run}: trained already, reusing it", flush=True)
                 return run / "weights" / "best.pt", float(done.get("wall_seconds") or 0)
+    # in a process of its own, as the yolo command is: a crash in what training
+    # leaves behind (loader workers, CUDA) then takes only that process down
     started = time.time()
-    best = Detector(args.dfine, verbose=False).train(
-        data=str(data), epochs=args.epochs, imgsz=args.imgsz, batch=args.batch,
-        patience=args.epochs, project=str(out), name=args.dfine, workers=args.workers)
-    seconds = time.time() - started
-    try:
-        import torch
-
-        torch.cuda.empty_cache()
-    except Exception:  # noqa: BLE001 — a CPU-only machine has nothing to free
-        pass
-    return Path(best), seconds
-
-
-# a log file is block-buffered: without this, what each step prints shows up
-# minutes later, out of order with the yolo commands' own output
-UNBUFFERED = dict(os.environ, PYTHONUNBUFFERED="1")
+    code = ("import sys; from easydetect import Detector; "
+            "print('BEST', Detector(sys.argv[1], verbose=False).train(data=sys.argv[2], "
+            "epochs=int(sys.argv[3]), imgsz=int(sys.argv[4]), batch=int(sys.argv[5]), "
+            "patience=int(sys.argv[3]), project=sys.argv[6], name=sys.argv[1], "
+            "workers=int(sys.argv[7])))")
+    best = None
+    with subprocess.Popen([sys.executable, "-c", code, args.dfine, str(data), str(args.epochs),
+                           str(args.imgsz), str(args.batch), str(out), str(args.workers)],
+                          env=UNBUFFERED, stdout=subprocess.PIPE, text=True) as proc:
+        for line in proc.stdout:                    # passed on as it comes
+            print(line, end="", flush=True)
+            if line.startswith("BEST "):
+                best = Path(line[5:].strip())
+    if proc.returncode or best is None:
+        raise SystemExit(f"D-FINE training failed (exit {proc.returncode})")
+    return best, time.time() - started
 
 
 def train_yolo(data: Path, out: Path, args) -> tuple[Path, float]:
@@ -233,6 +239,7 @@ def main():
     parser.add_argument("--device", default="CPU", help="OpenVINO device for scoring")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
+    faulthandler.enable()  # a crash prints where it happened
     if shutil.which("yolo") is None:
         raise SystemExit("the yolo command is missing: pip install ultralytics")
 

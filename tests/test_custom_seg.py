@@ -169,7 +169,8 @@ def test_masks_from_low_res_logits_match_the_decoders_full_size_ones(stub_sam, b
     decided = np.abs(logits) > 0.02 * np.abs(logits).max()
     assert masks.shape == ref.shape and ref.any() and decided.mean() > 0.9
     assert (masks == ref)[decided].mean() > 0.999
-    np.testing.assert_allclose(scores, full[1][:, 0], atol=1e-4)
+    # OpenVINO runs in bfloat16 on CPUs that have it (some CI runners do)
+    np.testing.assert_allclose(scores, full[1][:, 0], atol=5e-3 if backend == "openvino" else 1e-4)
     if backend == "openvino":   # the full-size output is not even in the graph
         assert len(seg._decoder.outputs) == 2
 

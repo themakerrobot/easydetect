@@ -153,6 +153,9 @@ def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
     return best, time.time() - started
 
 
+EXIT_GRACE = 300  # seconds a finished yolo training may take to exit
+
+
 def train_yolo(data: Path, out: Path, args) -> tuple[Path, float]:
     name = Path(args.yolo).stem
     best = out / name / "weights" / "best.pt"
@@ -161,12 +164,29 @@ def train_yolo(data: Path, out: Path, args) -> tuple[Path, float]:
         print(f"{out / name}: trained already, reusing it", flush=True)
         return _export_yolo(best, args), 0.0   # its time was not recorded
     started = time.time()
-    subprocess.run(["yolo", "detect", "train", f"model={args.yolo}", f"data={data}",
-                    f"epochs={args.epochs}", f"imgsz={args.imgsz}", f"batch={args.batch}",
-                    f"patience={args.epochs}", f"project={out.resolve()}", f"name={name}",
-                    f"workers={args.workers}", "exist_ok=True", "plots=False"], check=True,
-                   env=UNBUFFERED)
-    seconds = time.time() - started
+    proc = subprocess.Popen(["yolo", "detect", "train", f"model={args.yolo}", f"data={data}",
+                             f"epochs={args.epochs}", f"imgsz={args.imgsz}",
+                             f"batch={args.batch}", f"patience={args.epochs}",
+                             f"project={out.resolve()}", f"name={name}",
+                             f"workers={args.workers}", "exist_ok=True", "plots=False"],
+                            env=UNBUFFERED)
+    finished = None
+    while proc.poll() is None:
+        time.sleep(10)
+        complete = log.exists() and len(log.read_text().splitlines()) > args.epochs
+        if complete and finished is None:
+            finished = time.time()
+        # it has hung on its way out, with the training done and saved:
+        # give its final validation time, then stop waiting for it
+        if finished is not None and time.time() - finished > EXIT_GRACE:
+            print(f"yolo train: done, but still running {EXIT_GRACE} s later; stopping it",
+                  flush=True)
+            proc.kill()
+            proc.wait()
+            break
+    if not (best.exists() and log.exists() and len(log.read_text().splitlines()) > args.epochs):
+        raise SystemExit(f"yolo training failed (exit {proc.returncode})")
+    seconds = (finished or time.time()) - started
     return _export_yolo(best, args), seconds
 
 

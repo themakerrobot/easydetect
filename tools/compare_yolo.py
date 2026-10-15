@@ -44,6 +44,10 @@ def letterbox(img, size):
 class Yolo:
     """An exported YOLO ONNX: input 1x3xSxS RGB 0..1, output 1 x (4+classes) x anchors."""
 
+    # multi_label: every class above conf counts, each box once per class (how
+    # Ultralytics' own validator scores); otherwise one class a box, as predict gives
+    multi_label = False
+
     def __init__(self, path, device, size=320):
         import openvino as ov
 
@@ -72,12 +76,16 @@ class Yolo:
                              (out[:, 2] - px) / r, (out[:, 3] - py) / r], 1)
             xyxy = np.clip(xyxy, 0, [w, h, w, h])
             return xyxy / [w, h, w, h], out[:, 4], out[:, 5].astype(int), infer_ms
-        scores = out[4:].T                                                # (4+nc, anchors)
-        cls = scores.argmax(1)
-        best = scores[np.arange(len(cls)), cls]
-        keep = best >= conf
-        cx, cy, bw, bh = out[:4, keep]
-        best, cls = best[keep], cls[keep]
+        scores = out[4:].T                                                # (anchors, nc)
+        if self.multi_label:
+            anchor, cls = np.nonzero(scores >= conf)
+            best = scores[anchor, cls]
+        else:
+            cls = scores.argmax(1)
+            best = scores[np.arange(len(cls)), cls]
+            anchor = np.nonzero(best >= conf)[0]
+            best, cls = best[anchor], cls[anchor]
+        cx, cy, bw, bh = out[:4, anchor]
         xywh = np.stack([cx - bw / 2, cy - bh / 2, bw, bh], 1)
         picked = cv2.dnn.NMSBoxesBatched(xywh.tolist(), best.tolist(), cls.tolist(), conf, iou)
         picked = np.asarray(picked, int).reshape(-1)[:max_det]
@@ -89,6 +97,10 @@ class Yolo:
 
 
 class Dfine:
+    # multi_label: the 300 best (query, class) pairs, as D-FINE's own evaluation
+    # takes them; otherwise one class a query, as predict gives
+    multi_label = False
+
     def __init__(self, path, device):
         from easydetect import Detector
 
@@ -98,6 +110,23 @@ class Dfine:
 
     def __call__(self, img, conf=0.001, max_det=300):
         h, w = img.shape[:2]
+        if self.multi_label:
+            from easydetect.predictor import _looks_like_logits
+            from easydetect.utils.ops import cxcywh2xyxy_np
+
+            predictor = self.model.predictor
+            tensor = predictor.preprocess(img)
+            t = time.perf_counter()
+            boxes, scores = predictor.infer(tensor)
+            ms = (time.perf_counter() - t) * 1000
+            if _looks_like_logits(scores):
+                scores = 1.0 / (1.0 + np.exp(-scores))
+            nc = scores.shape[-1]
+            flat = scores.reshape(-1)
+            top = np.argsort(-flat)[:max_det]
+            top = top[flat[top] >= conf]
+            xyxy = np.clip(cxcywh2xyxy_np(boxes[top // nc].astype(np.float32)), 0, 1)
+            return xyxy, flat[top], (top % nc).astype(int), ms
         r = self.model.predict(img, conf=conf, max_det=max_det, iou=None, verbose=False)[0]
         return (r.boxes.xyxy / [w, h, w, h], r.boxes.conf, r.boxes.cls.astype(int),
                 r.speed["inference"])

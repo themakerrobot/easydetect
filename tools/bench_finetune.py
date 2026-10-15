@@ -219,8 +219,14 @@ def score(data: Path, yolo_onnx: Path, dfine_pt: Path, args) -> dict:
     out = {"val_pictures": len(ds.files), "val_boxes": int(sum(len(t[1]) for t in truth))}
     for key, runner in (("yolo", Yolo(str(yolo_onnx), args.device, args.imgsz)),
                         ("dfine", Dfine(str(dfine_pt), args.device))):
+        # as each project scores itself (a box may count for several classes),
+        # then as predict hands them out (one class a box)
+        runner.multi_label = True
         m50, m, ms = evaluate(key, runner, ds.files, truth, ds.nc)
-        out[key] = {"map50": round(m50, 4), "map": round(m, 4), "ms": round(ms, 1)}
+        runner.multi_label = False
+        s50, sm, _ = evaluate(key, runner, ds.files, truth, ds.nc)
+        out[key] = {"map50": round(m50, 4), "map": round(m, 4), "ms": round(ms, 1),
+                    "map50_one_class": round(s50, 4), "map_one_class": round(sm, 4)}
     return out
 
 
@@ -231,16 +237,23 @@ def _bold_if_higher(a: float, b: float) -> str:
 def table(results: dict, args) -> str:
     yolo, dfine = Path(args.yolo).stem, args.dfine
     rows = [f"| dataset | train pictures | {yolo} mAP50-95 | {dfine} mAP50-95 | "
+            f"{yolo} one class a box | {dfine} one class a box | "
             f"{yolo} mAP50 | {dfine} mAP50 | {yolo} ms | {dfine} ms |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for name, r in results.items():
         y, d = r["yolo"], r["dfine"]
-        best_y, best_d = _bold_if_higher(y["map"], d["map"]), _bold_if_higher(d["map"], y["map"])
-        rows.append(f"| {name} | {r['train_pictures']} | {best_y} | {best_d} | "
+        one_y, one_d = y.get("map_one_class"), d.get("map_one_class")
+        ones = (f"{_bold_if_higher(one_y, one_d)} | {_bold_if_higher(one_d, one_y)}"
+                if one_y is not None and one_d is not None else "| ")
+        rows.append(f"| {name} | {r['train_pictures']} | {_bold_if_higher(y['map'], d['map'])} | "
+                    f"{_bold_if_higher(d['map'], y['map'])} | {ones} | "
                     f"{y['map50']:.3f} | {d['map50']:.3f} | {y['ms']} | {d['ms']} |")
     return "\n".join(rows) + (
         f"\n\n{args.epochs} epochs, {args.imgsz} px, batch {args.batch}, each trainer's own "
-        f"defaults; scored by one evaluator, inference times on OpenVINO {args.device}.\n")
+        "defaults; scored by one evaluator (COCO's mAP, up to 100 boxes a picture). mAP "
+        "counts a box for every class it scores (as each project scores itself); \"one "
+        "class a box\" is what predict hands out. Inference times on OpenVINO "
+        f"{args.device}.\n")
 
 
 def main():
@@ -257,6 +270,8 @@ def main():
     parser.add_argument("--yolo", default="yolo26s.pt")
     parser.add_argument("--dfine", default="dfine-s")
     parser.add_argument("--device", default="CPU", help="OpenVINO device for scoring")
+    parser.add_argument("--rescore", action="store_true",
+                        help="score finished datasets again (their trained models are reused)")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
     faulthandler.enable()  # a crash prints where it happened
@@ -273,7 +288,7 @@ def main():
         plan.append((f"african-wildlife-{args.low_data}",
                      subset(fetch("african-wildlife", root), args.low_data)))
     for name, data in plan:
-        if name in results:
+        if name in results and not args.rescore:
             print(f"{name}: done already", flush=True)
             continue
         cfg = yaml.safe_load(data.read_text())
@@ -282,8 +297,10 @@ def main():
         dfine_pt, dfine_s = train_dfine(data, out / name, args)
         yolo_onnx, yolo_s = train_yolo(data, out / name, args)
         r = score(data, yolo_onnx, dfine_pt, args)
-        r.update(train_pictures=train_pictures,
-                 train_minutes={"dfine": round(dfine_s / 60, 1), "yolo": round(yolo_s / 60, 1)})
+        minutes = {"dfine": round(dfine_s / 60, 1), "yolo": round(yolo_s / 60, 1)}
+        if name in results:            # rescored: the training times are the first run's
+            minutes = results[name].get("train_minutes", minutes)
+        r.update(train_pictures=train_pictures, train_minutes=minutes)
         results[name] = r
         record.write_text(json.dumps(results, indent=2))
         print(json.dumps(r), flush=True)

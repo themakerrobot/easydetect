@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from . import downloads
 from .errors import ModelNotFoundError
 from .metrics import DetMetrics
 from .results import Results
+from .utils.checkpoint import load_checkpoint
 
 #: What a Detector can add to its boxes: nothing, a mask each, or a person's keypoints.
 TASKS = ("detect", "segment", "pose")
@@ -209,7 +211,7 @@ class Detector:
         conf: float = 0.5,
         iou: float | None = 0.7,
         contain: float | None = None,
-        match_iou: float = 0.3,
+        match_iou: float = 0.2,
         max_age: int = 30,
         persist: bool = False,
         stream: bool = False,
@@ -218,16 +220,21 @@ class Detector:
         """Predict, and keep an id on each box across frames (``boxes.id``).
 
         ``iou`` and ``contain`` filter duplicates, as in :meth:`predict`. ``match_iou``
-        is how much a box must overlap a track in the previous frame to carry
-        its id on; ``max_age`` is how many frames a track waits for its object.
+        is how much a box must overlap where its track is expected (moving as it
+        was) to carry its id on; ``max_age`` is how many frames a track waits for
+        its object. Boxes below ``conf`` (down to 0.1) still keep a track alive
+        through a partial occlusion, but only boxes scoring ``conf`` are shown.
         """
         from .tracker import IoUTracker
 
         if self.tracker is None or not persist:
             self.tracker = IoUTracker(iou=match_iou, max_age=max_age)
+        # the tracker needs unsure boxes too (they carry a track through a
+        # partial occlusion); it shows only the boxes scoring conf
+        self.tracker.conf = conf
         kwargs.setdefault("name", "track")
-        gen = self._run(source, conf=conf, iou=iou, contain=contain, tracker=self.tracker,
-                        **self._track_kwargs(kwargs))
+        gen = self._run(source, conf=min(conf, 0.1), iou=iou, contain=contain,
+                        tracker=self.tracker, **self._track_kwargs(kwargs))
         return _Stream(gen, "track") if stream else list(gen)
 
     def _ensure_segmenter(self, device: str | None = None):
@@ -398,8 +405,12 @@ class Detector:
         if self.ir_path is None:
             if self.net is not None:
                 fmt = "openvino" if backend == "openvino" else "onnx"
-                self.ir_path = self.export(format=fmt, out_dir=self._cache_export_dir(),
-                                           verbose=self.verbose)
+                folder = self._cache_export_dir()
+                ready = folder / f"{self._export_stem()}{wanted}"
+                # an export of these very weights from an earlier run: reuse it
+                # rather than spending ~12 s exporting again on every load
+                self.ir_path = ready if self.ckpt_path and ready.exists() else self.export(
+                    format=fmt, out_dir=folder, verbose=self.verbose)
             elif backend == "openvino":
                 self.ir_path = downloads.download_ir(self.model_name)
             else:
@@ -414,19 +425,32 @@ class Detector:
             self.names = self.predictor.names
         return self.predictor
 
+    def _export_stem(self) -> str:
+        return self.ckpt_path.stem if self.ckpt_path else f"easydetect-{self.variant}"
+
     def _cache_export_dir(self) -> Path:
-        stem = self.ckpt_path.stem if self.ckpt_path else (self.variant or "s")
-        out = downloads.cache_dir() / "exported" / stem
+        """Where a checkpoint's automatic export goes: one folder per file and
+        version of it. By stem alone, every run's ``best.pt`` shared one
+        folder, and two exported at once could compile each other's weights."""
+        import hashlib
+
+        if self.ckpt_path:
+            st = Path(self.ckpt_path).stat()
+            tag = f"{Path(self.ckpt_path).resolve()}|{st.st_size}|{st.st_mtime_ns}"
+            key = f"{self._export_stem()}-{hashlib.sha1(tag.encode()).hexdigest()[:12]}"
+        else:  # weights only in memory: a fresh folder of their own every time
+            key = f"{self.variant or 's'}-{id(self.net):x}-{time.time_ns():x}"
+        out = downloads.cache_dir() / "exported" / key
         out.mkdir(parents=True, exist_ok=True)
         return out
 
     # --------------------------------------------------------------- checkpoint
 
     def _load_checkpoint(self, path: Path) -> None:
-        torch = _import_torch()
+        _import_torch()
         from .nn import DFINENet
 
-        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        ckpt = load_checkpoint(path)
         self.ckpt = ckpt
         self.ckpt_path = Path(path)
         self.variant = ckpt["variant"]
@@ -880,12 +904,15 @@ class _OutputWriter:
         if writer is None:
             stem = Path(frame.path).stem or "stream"
             h, w = img.shape[:2]
-            writer = cv2.VideoWriter(
-                str(self.save_dir / f"{stem}.mp4"),
-                cv2.VideoWriter_fourcc(*"mp4v"),
-                frame.fps or 25.0,  # keep the source's timing, not a guess
-                (w, h),
-            )
+            # H.264 plays in browsers; OpenCV's pip wheels often lack it, so fall back
+            for codec in ("avc1", "mp4v"):
+                writer = cv2.VideoWriter(str(self.save_dir / f"{stem}.mp4"),
+                                         cv2.VideoWriter_fourcc(*codec),
+                                         frame.fps or 25.0,  # keep the source's timing
+                                         (w, h))
+                if writer.isOpened():
+                    break
+                writer.release()
             self.videos[frame.path] = writer
         writer.write(img)
 

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -134,17 +135,23 @@ def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
     return Path(best), seconds
 
 
+# a log file is block-buffered: without this, what each step prints shows up
+# minutes later, out of order with the yolo commands' own output
+UNBUFFERED = dict(os.environ, PYTHONUNBUFFERED="1")
+
+
 def train_yolo(data: Path, out: Path, args) -> tuple[Path, float]:
     name = Path(args.yolo).stem
     started = time.time()
     subprocess.run(["yolo", "detect", "train", f"model={args.yolo}", f"data={data}",
                     f"epochs={args.epochs}", f"imgsz={args.imgsz}", f"batch={args.batch}",
                     f"patience={args.epochs}", f"project={out.resolve()}", f"name={name}",
-                    f"workers={args.workers}", "exist_ok=True", "plots=False"], check=True)
+                    f"workers={args.workers}", "exist_ok=True", "plots=False"], check=True,
+                   env=UNBUFFERED)
     seconds = time.time() - started
     best = out / name / "weights" / "best.pt"
     subprocess.run(["yolo", "export", f"model={best}", "format=onnx", f"imgsz={args.imgsz}"],
-                   check=True)
+                   check=True, env=UNBUFFERED)
     return best.with_suffix(".onnx"), seconds
 
 
@@ -207,6 +214,7 @@ def main():
     parser.add_argument("--dfine", default="dfine-s")
     parser.add_argument("--device", default="CPU", help="OpenVINO device for scoring")
     args = parser.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)
     if shutil.which("yolo") is None:
         raise SystemExit("the yolo command is missing: pip install ultralytics")
 

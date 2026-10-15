@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from .pose import COCO, ONNX_SPEC_KEY, KeypointSpec
+from .utils.checkpoint import load_checkpoint
 
 
 def build(size: str, init: str, num_keypoints: int = len(COCO), log=print):
@@ -35,10 +36,9 @@ def build(size: str, init: str, num_keypoints: int = len(COCO), log=print):
     net = PoseNet(size, num_keypoints=num_keypoints, pretrained_backbone=init == "imagenet")
     if init in ("imagenet", "none"):
         return net
-    import torch
 
     path = Path(init) if str(init).endswith(".pt") else downloads.download_checkpoint(init)
-    state = torch.load(path, map_location="cpu", weights_only=False)
+    state = load_checkpoint(path)
     if state.get("kind") == "pose":
         mine = net.state_dict()
         fits = {k: v for k, v in state["model"].items() if k in mine and mine[k].shape == v.shape}
@@ -140,7 +140,7 @@ def export(ckpt_path: Path, out: Path | None = None, log=print) -> Path:
     from .pose import INPUT, decode
 
     ckpt_path = Path(ckpt_path)
-    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    ckpt = load_checkpoint(ckpt_path)
     spec = KeypointSpec.from_dict(ckpt["spec"]) if ckpt.get("spec") else COCO
     net = PoseNet(ckpt["size"], num_keypoints=len(spec))
     net.load_state_dict(ckpt["model"])
@@ -220,7 +220,7 @@ def train_keypoints(train_ds, val_ds, out: str | Path, *, size: str = "s", init:
     ema = ModelEMA(net, decay=0.9998, warmups=min(2000, max(total // 5, 1)))
     start, best = 0, -1.0
     if resuming:
-        state = torch.load(last, map_location="cpu", weights_only=False)
+        state = load_checkpoint(last)
         net.load_state_dict(state["net"])
         ema.module.load_state_dict(state["model"])
         ema.updates = state["ema_updates"]

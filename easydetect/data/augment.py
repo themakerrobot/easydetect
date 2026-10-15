@@ -133,19 +133,22 @@ def render(img: np.ndarray, view: np.ndarray, size: tuple[int, int],
     """Draw ``view`` (picture coordinates, may reach past the picture) at ``size``.
 
     One affine warp straight to the output, so a 4x zoom-out never builds a
-    canvas 4x the photo. Outside the picture is its mean colour. A big
+    canvas 4x the photo. Outside the picture is its mean colour. Any
     shrink goes through an area resize first, so fine detail averages
-    instead of aliasing.
+    instead of aliasing (D-FINE's pictures are resized with antialiasing,
+    which is what its COCO weights learned on).
     """
     h, w = img.shape[:2]
     out_w, out_h = size
     sx, sy = out_w / (view[2] - view[0]), out_h / (view[3] - view[1])
     inside = view[0] >= 0 and view[1] >= 0 and view[2] <= w and view[3] <= h
+    shrink = max(sx, sy) < 1.0
     if inside and not flip and view[0] == 0 and view[1] == 0 and view[2] == w and view[3] == h:
-        return cv2.resize(img, (out_w, out_h))
+        return cv2.resize(img, (out_w, out_h),
+                          interpolation=cv2.INTER_AREA if shrink else cv2.INTER_LINEAR)
     src, fx, fy = img, 1.0, 1.0
-    if max(sx, sy) < 0.5:                       # shrinking hard: average first
-        nw, nh = max(1, round(w * sx * 2)), max(1, round(h * sy * 2))
+    if shrink:                                  # average first, then place
+        nw, nh = max(1, round(w * min(sx, 1.0))), max(1, round(h * min(sy, 1.0)))
         src = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
         fx, fy = nw / w, nh / h
     ax, ay = sx / fx, sy / fy
@@ -160,7 +163,7 @@ def render(img: np.ndarray, view: np.ndarray, size: tuple[int, int],
 
 def apply(img: np.ndarray, labels: np.ndarray, strong: bool = True,
           size: int | tuple[int, int] | None = None,
-          min_side: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+          min_side: float = 1.0, zoom: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """Augment one picture and its ``cls cx cy w h`` (normalised) labels.
 
     ``size`` renders the result square at that many pixels (what training
@@ -169,6 +172,7 @@ def apply(img: np.ndarray, labels: np.ndarray, strong: bool = True,
     ``strong=False`` keeps only the flip — what the last epochs train on, as
     in D-FINE, so the model settles on pictures framed like the ones it will
     see. ``min_side`` drops boxes thinner than that many output pixels.
+    ``zoom=False`` skips the zoom-out (a mosaic tile is small already).
     Colour jitter runs last, on the small output: it does not care where the
     pixels came from, and there are far fewer of them there.
     """
@@ -182,7 +186,8 @@ def apply(img: np.ndarray, labels: np.ndarray, strong: bool = True,
 
     view = np.array([0, 0, w, h], np.float32)
     if strong:
-        view = zoom_out(view)
+        if zoom:
+            view = zoom_out(view)
         view, boxes, classes = iou_crop(view, boxes, classes)
     flip = random.random() < 0.5
 
@@ -222,10 +227,12 @@ def mosaic(pictures: list[tuple[np.ndarray, np.ndarray]], size: int,
            min_side: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
     """Four pictures as the four tiles of one, meeting at a random point.
 
-    Each tile is its picture augmented as usual and rendered straight at the
-    tile's size, so objects come out smaller and in unusual company — more
-    objects a step, and many at sizes a single photo rarely shows. Labels are
-    ``cls cx cy w h`` normalised, in and out.
+    Each tile is its picture cropped, flipped and jittered as usual and
+    rendered straight at the tile's size, so objects come out smaller and in
+    unusual company — more objects a step. No zoom-out inside a tile: a
+    quarter-sized tile zoomed out 4× more would leave most objects a few
+    pixels wide, too small to learn from. Labels are ``cls cx cy w h``
+    normalised, in and out.
     """
     cx = round(size * random.uniform(*MOSAIC_SPLIT))
     cy = round(size * random.uniform(*MOSAIC_SPLIT))
@@ -234,7 +241,7 @@ def mosaic(pictures: list[tuple[np.ndarray, np.ndarray]], size: int,
     out = []
     for (img, labels), (x0, y0, x1, y1) in zip(pictures, tiles, strict=True):
         tile, tile_labels = apply(img, labels, strong=True, size=(x1 - x0, y1 - y0),
-                                  min_side=min_side)
+                                  min_side=min_side, zoom=False)
         canvas[y0:y1, x0:x1] = tile
         if len(tile_labels):
             tile_labels = tile_labels.copy()

@@ -73,11 +73,28 @@ def draw_boxes(
 
 
 def draw_masks(img: np.ndarray, masks: np.ndarray, classes, alpha: float = 0.45) -> np.ndarray:
-    """Tint each mask with its class colour (a copy of ``img``)."""
-    out = img.astype(np.float32, copy=True)
+    """Tint each mask with its class colour (a copy of ``img``).
+
+    Blends in uint8 and only inside each mask's bounding rectangle: a 4K frame
+    with 30 masks is 30 small rectangles, not 30 passes over a float copy of
+    the whole frame.
+    """
+    import cv2
+
+    out = np.ascontiguousarray(img.copy())
     for mask, cls in zip(masks, classes, strict=True):
-        out[mask] = out[mask] * (1 - alpha) + np.array(color_for(int(cls)), np.float32) * alpha
-    return out.astype(np.uint8)
+        rows = np.flatnonzero(mask.any(1))
+        if not len(rows):
+            continue
+        y1, y2 = rows[0], rows[-1] + 1
+        cols = np.flatnonzero(mask[y1:y2].any(0))
+        x1, x2 = cols[0], cols[-1] + 1
+        roi, inside = out[y1:y2, x1:x2], mask[y1:y2, x1:x2]
+        tint = np.empty_like(roi)
+        tint[:] = color_for(int(cls))
+        blended = cv2.addWeighted(roi, 1 - alpha, tint, alpha, 0)
+        np.copyto(roi, blended, where=inside[..., None])
+    return out
 
 
 #: limb colours (BGR): face, arms, body, legs

@@ -160,22 +160,21 @@ with NMS added, shown second.
 | D-FINE params | 4M | 10M | 19M | 31M | 62M |
 | YOLO26 params | 2.4M | 9.5M | 20.4M | 24.8M | 55.7M |
 
-Keypoints (OKS AP, COCO val2017, the whole pipeline — people found by the
-detector, then their keypoints):
+Keypoints (OKS AP, COCO val2017, scored with pycocotools; the whole pipeline
+— people found by the detector, then their keypoints):
 
 | | s | m | l |
 | --- | --- | --- | --- |
-| easydetect (dfine-s, then the keypoint model of that size) | 61.2 | 66.4 | 68.0 |
-| YOLO26-pose | **63.0** | **68.8** | **70.4** |
+| easydetect (dfine-s, then the keypoint model of that size) | **66.3** | **71.6** | **73.4** |
+| YOLO26-pose | 63.0 | 68.8 | 70.4 |
 
 Read it plainly:
 
 * **Detection is a draw.** D-FINE is ahead at the small sizes (n, s), YOLO26
   at the large ones (l, x), and lighter there.
-* **Keypoints: YOLO26-pose is 2–2½ points ahead** at each size, in one pass
-  for everyone in the picture; here each person is a second step. Given the
-  labelled boxes the keypoint models score higher (67.0 / 72.5 / 74.8), so
-  the gap is in finding people, and in running two models.
+* **Keypoints: easydetect is about 3 points ahead** at each size. The price is
+  speed with crowds: YOLO26-pose places everyone's keypoints in one pass, here
+  each person found is a second (small) pass.
 * **Masks without mask labels.** YOLO-seg learns masks from polygon labels.
   Here `task="segment"` outlines whatever the detector finds — a model trained
   on boxes alone gets masks with no polygon drawn — and polygons, when you

@@ -234,10 +234,18 @@ class TestAgainstARealModel:
         writer.release()
 
         model = Detector(str(tiny_ir), device="CPU", verbose=False)
-        results = model.track(clip, conf=0.0, max_det=2)
+        real = model._ensure_predictor()
+        sure = np.array([[5, 5, 20, 20, 0.9, 0], [25, 25, 40, 40, 0.8, 0],
+                         [30, 5, 45, 15, 0.3, 0]], np.float32)   # the last one is unsure
+        fake = type("Fake", (), {k: getattr(real, k) for k in
+                                 ("backend", "device", "precision", "imgsz", "names")})()
+        fake.__class__.__call__ = lambda self, img, **kw: (sure.copy(), {})
+        model.predictor = fake                    # an untrained net finds nothing
+        results = model.track(clip, conf=0.5, max_det=3)
         assert len(results) == 3
-        assert all(r.boxes.id is not None for r in results)
+        assert [len(r.boxes) for r in results] == [2, 2, 2]     # the unsure box is not shown
         assert results[0].boxes.id.tolist() == results[-1].boxes.id.tolist()
+        assert sorted(results[0].boxes.id.tolist()) == [1, 2]
 
     def test_track_takes_iou_as_the_duplicate_filter_and_match_iou_for_the_tracker(
             self, tiny_ir, tmp_path, monkeypatch):

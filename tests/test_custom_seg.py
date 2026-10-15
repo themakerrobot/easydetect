@@ -125,3 +125,199 @@ def test_training_on_a_polygon_dataset_gives_task_segment_its_decoder(tmp_path, 
     img = cv2.imread(str(next((tmp_path / "data" / "images" / "val").glob("*.jpg"))))
     r = Detector(str(best), task="segment", verbose=False)(img, conf=0.0, max_det=2)[0]
     assert used == [beside] and r.masks is not None and len(r.masks) == len(r.boxes)
+
+
+# -- the runtime: low-res logits, scaled up around each box ----------------------------
+
+
+def _picture(h=300, w=500):
+    import cv2
+
+    img = np.full((h, w, 3), 40, np.uint8)
+    cv2.ellipse(img, (w // 2, h // 2), (w // 5, h // 4), 0, 0, 360, (200, 180, 90), -1)
+    return img
+
+
+@needs_torch
+@pytest.mark.parametrize("backend", ["onnxruntime", "openvino"])
+def test_masks_from_low_res_logits_match_the_decoders_full_size_ones(stub_sam, backend):
+    """The same masks SAM's own postprocessing (the decoder's full-size
+    output) gives, without ever making one the picture's size per box."""
+    import onnxruntime as ort
+
+    from easydetect.segment import BoxSegmenter
+
+    if backend == "openvino":
+        pytest.importorskip("openvino")
+    seg = BoxSegmenter(stub_sam / "encoder.onnx", stub_sam / "decoder.onnx", backend=backend,
+                       box_pad=None)
+    img = _picture()  # 3:5, not the 3:4 the decoder was exported with
+    boxes = np.array([[150, 70, 350, 230], [10, 10, 200, 120], [300, 150, 499, 299]], np.float32)
+    masks, scores = seg(img, boxes)
+    tensor, scale = seg.preprocess(img)
+    emb = seg._run("encoder", {"image": tensor})[0]
+    full = ort.InferenceSession(str(stub_sam / "decoder.onnx")).run(None, {
+        "image_embeddings": emb, "point_coords": (boxes.reshape(-1, 2, 2) * scale),
+        "point_labels": np.tile(np.array([[2, 3]], np.float32), (3, 1)),
+        "mask_input": np.zeros((1, 1, 256, 256), np.float32),
+        "has_mask_input": np.zeros(1, np.float32),
+        "orig_im_size": np.array(img.shape[:2], np.float32)})
+    ref = full[0][:, 0] > 0
+    assert masks.shape == ref.shape and ref.any() and (masks == ref).mean() > 0.999
+    np.testing.assert_allclose(scores, full[1][:, 0], atol=1e-4)
+    if backend == "openvino":   # the full-size output is not even in the graph
+        assert len(seg._decoder.outputs) == 2
+
+
+@needs_torch
+def test_a_mask_stays_near_its_box(stub_sam):
+    from easydetect.segment import BoxSegmenter
+
+    img = _picture()
+    box = np.array([[150, 70, 350, 230]], np.float32)
+    whole = BoxSegmenter(stub_sam / "encoder.onnx", stub_sam / "decoder.onnx",
+                         backend="onnxruntime", box_pad=None)(img, box)[0][0]
+    near = BoxSegmenter(stub_sam / "encoder.onnx", stub_sam / "decoder.onnx",
+                        backend="onnxruntime")(img, box)[0][0]
+    grown = np.zeros_like(whole)
+    grown[54:246, 130:370] = True                  # the box, 10% bigger each side
+    assert (near == (whole & grown)).all()
+    assert whole[~grown].any()                     # the random decoder does spill out
+
+
+def test_holes_and_stray_parts_are_cleaned_only_when_asked():
+    from easydetect.segment import BoxSegmenter
+
+    ring = np.zeros((40, 40), bool)
+    ring[5:25, 5:25] = True
+    ring[10:20, 10:20] = False                     # a hole
+    ring[30:33, 30:33] = True                      # a stray speck
+    seg = BoxSegmenter.__new__(BoxSegmenter)
+    seg.fill_holes = seg.largest = False
+    assert (seg._clean(ring) == ring).all()
+    seg.fill_holes = seg.largest = True
+    cleaned = seg._clean(ring)
+    assert cleaned[15, 15] and not cleaned[31, 31] and cleaned.sum() == 400
+
+
+def test_the_encoder_input_is_shrunk_without_aliasing():
+    from easydetect.segment import BoxSegmenter
+
+    stripes = np.zeros((1024, 2048, 3), np.uint8)
+    stripes[:, ::2] = 255                          # finer than the 1024 frame can hold
+    tensor, scale = BoxSegmenter.preprocess(stripes)
+    shrunk = tensor[0, :, :512, :1024]
+    assert scale == 0.5 and abs(float(shrunk.mean()) - 127.5) < 1 and float(shrunk.std()) < 1
+
+
+# -- fine-tuning: both ways of picking a mask, jittered boxes, mapped embeddings ------
+
+
+def test_jittered_boxes_are_gaussian_and_a_share_stay_exact(tmp_path, monkeypatch):
+    from easydetect import seg_trainer
+    from easydetect.seg_trainer import BOX_JITTER, jitter_box
+
+    rng = np.random.default_rng(0)
+    box = np.array([100, 100, 300, 200], np.float32)
+    moved = np.stack([jitter_box(box, rng) for _ in range(4000)]) - box
+    share = moved / np.array([200, 100, 200, 100])
+    assert np.allclose(share.std(0), BOX_JITTER, rtol=0.1) and np.allclose(share.mean(0), 0,
+                                                                           atol=0.005)
+
+    class Cache:
+        def file(self, path):
+            np.save(tmp_path / "e.npy", np.zeros((256, 64, 64), np.float16))
+            return tmp_path / "e.npy", (100, 100)
+
+    poly = np.array([[0.2, 0.2], [0.6, 0.2], [0.6, 0.5], [0.2, 0.5]], np.float32)
+    monkeypatch.setattr(seg_trainer, "read_polygons", lambda *a: [(tmp_path / "p.jpg",
+                                                                  [(0, poly)])])
+    ds = seg_trainer.MaskDataset("data.yaml", "train", Cache(), augment=True)
+    np.random.seed(0)
+    exact = np.mean([np.allclose(ds[0][1], [204.8, 204.8, 614.4, 512.0]) for _ in range(2000)])
+    assert abs(exact - seg_trainer.EXACT_BOXES) < 0.04
+
+
+@needs_torch
+def test_all_four_masks_learn():
+    import torch
+
+    from easydetect.seg_trainer import _losses
+
+    masks = torch.zeros(2, 4, 256, 256, requires_grad=True)
+    ious = torch.full((2, 4), 0.5, requires_grad=True)
+    target = torch.zeros(2, 256, 256)
+    target[:, 64:192, 64:192] = 1
+    _losses(masks, ious, target).backward()
+    assert masks.grad[:, 0].abs().sum() > 0 and ious.grad[:, 0].abs().sum() > 0
+
+
+def test_the_mask_choice_goes_by_jittered_boxes():
+    from easydetect.seg_trainer import choose
+
+    scores = {"exact": {"best_iou": 0.9, "single": 0.8},
+              "jittered": {"best_iou": 0.7, "single": 0.75}}
+    assert choose(scores) == ("single", 0.75)
+    scores["jittered"]["single"] = 0.7
+    assert choose(scores)[0] == "best_iou"      # a tie goes to SAM's own way
+
+
+@needs_torch
+def test_fine_tuning_scores_both_ways_and_exports_the_better(tmp_path, stub_sam):
+    import json
+
+    import onnxruntime as ort
+    import torch
+
+    from easydetect.nn.sam_decoder import SamDecoder
+    from easydetect.seg_trainer import EmbeddingCache, MaskDataset, evaluate, train_masks
+    from easydetect.segment import BoxSegmenter
+
+    data = _toy(tmp_path / "data")
+    seg = BoxSegmenter(stub_sam / "encoder.onnx", stub_sam / "decoder.onnx", backend="onnxruntime")
+    onnx = train_masks(data, tmp_path / "run", segmenter=seg, init=str(stub_sam / "decoder.pt"),
+                       epochs=1, batch=4, device="cpu", log=lambda m: None)
+    run = json.loads((tmp_path / "run" / "run.json").read_text())
+    rule = run["mask_choice"]
+    assert rule in ("best_iou", "single") and set(run["val_miou"]) == {"exact", "jittered"}
+    assert run["miou"] == max(run["val_miou"]["jittered"].values())
+    meta = ort.InferenceSession(str(onnx)).get_modelmeta().custom_metadata_map
+    assert meta.get("mask_choice") == rule
+
+    # the embeddings are memory-mapped from their files, not held
+    cache = EmbeddingCache(seg, tmp_path / "run" / "embeddings")
+    picture = next((tmp_path / "data" / "images" / "val").glob("*.jpg"))
+    assert isinstance(cache(picture)[0], np.memmap)
+    ds = MaskDataset(data, "val", cache)
+    assert not hasattr(ds, "embeddings") and len(ds.files) == 3
+
+    # the same jitter each call, so epochs compare fairly
+    decoder = SamDecoder()
+    decoder.load_state_dict(torch.load(tmp_path / "run" / "best.pt", weights_only=False)["model"])
+    first, again = evaluate(decoder, ds, "cpu"), evaluate(decoder, ds, "cpu")
+    assert first == again and first["exact"] != first["jittered"]
+
+
+@needs_torch
+def test_an_exported_single_mask_decoder_gives_slot_0(tmp_path, stub_sam):
+    import onnxruntime as ort
+    import torch
+
+    from easydetect.nn.sam_decoder import SamDecoder
+    from easydetect.seg_trainer import export
+
+    decoder = SamDecoder()
+    decoder.load_state_dict(torch.load(stub_sam / "decoder.pt"))
+    out = export(decoder, tmp_path / "single.onnx", log=lambda m: None, mask_choice="single")
+    emb = torch.randn(1, 256, 64, 64)
+    boxes = torch.tensor([[100.0, 100.0, 400.0, 300.0], [50.0, 500.0, 300.0, 900.0]])
+    with torch.no_grad():
+        want, iou = decoder(emb.expand(2, -1, -1, -1), boxes)
+    got = ort.InferenceSession(str(out)).run(None, {
+        "image_embeddings": emb.numpy(), "point_coords": boxes.reshape(-1, 2, 2).numpy(),
+        "point_labels": np.tile(np.array([[2, 3]], np.float32), (2, 1)),
+        "mask_input": np.zeros((1, 1, 256, 256), np.float32),
+        "has_mask_input": np.zeros(1, np.float32),
+        "orig_im_size": np.array([600, 800], np.float32)})
+    np.testing.assert_allclose(got[2][:, 0], want[:, 0].numpy(), atol=1e-3)
+    np.testing.assert_allclose(got[1][:, 0], iou[:, 0].numpy(), atol=1e-4)

@@ -94,3 +94,28 @@ def test_the_command_line_rejects_unknown_serve_keys():
     from easydetect import cli
 
     assert cli.main(["serve", "model=dfine-s", "conf=0.5"]) == 2
+
+
+def test_a_failing_model_answers_500_and_frees_its_slot():
+    from http.server import ThreadingHTTPServer
+
+    from easydetect import serve
+
+    class Broken:
+        names, predictor, task = {0: "a"}, None, "detect"
+
+        def __call__(self, *a, **k):
+            raise RuntimeError("out of memory")
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), serve.make_handler(Broken(), "broken"))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{httpd.server_address[1]}/predict"
+        for _ in range(serve.MAX_WAITING + 2):  # a leaked slot would turn into 503
+            with pytest.raises(urllib.error.HTTPError) as raised:
+                _post(url, _jpeg(), "image/jpeg")
+            assert raised.value.code == 500
+            assert "out of memory" in json.loads(raised.value.read())["error"]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

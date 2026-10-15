@@ -494,7 +494,7 @@ class HGNetv2(nn.Module):
 
         try:
             path = download(url, cache_dir() / "imagenet" / url.rsplit("/", 1)[-1])
-            self.load_state_dict(torch.load(path, map_location="cpu", weights_only=False))
+            self.load_state_dict(torch.load(path, map_location="cpu", weights_only=True))
             self.imagenet_loaded = True
             print(f"[easydetect] loaded ImageNet backbone (HGNetv2-{name})")
         except Exception as exc:  # offline / mirror down -> train from scratch

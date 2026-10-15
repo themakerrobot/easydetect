@@ -11,7 +11,6 @@ the package at an internal copy.
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 import urllib.error
 import urllib.request
@@ -63,32 +62,55 @@ def read_url_bytes(url: str, timeout: float = _TIMEOUT) -> bytes:
 
 
 def download(url: str, dest: Path, progress: bool = True) -> Path:
-    """Download ``url`` to ``dest`` (atomically). Existing files are reused."""
+    """Download ``url`` to ``dest`` (atomically). Existing files are reused.
+
+    A transfer cut short is an error, not a file: what arrived is checked
+    against ``Content-Length`` and, where the server publishes one (Hugging
+    Face does, for every weights file), against its SHA-256 — so a dropped
+    connection cannot leave a truncated model in the cache for good. Each
+    process writes its own partial file, so two downloading at once do not
+    write into each other's."""
+    import hashlib
+    import re
+
     dest = Path(dest)
     if dest.exists() and dest.stat().st_size:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp = dest.with_suffix(dest.suffix + f".{os.getpid()}.part")
     request = urllib.request.Request(url, headers={"User-Agent": "easydetect"})
+    digest = hashlib.sha256()
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT) as response, open(tmp, "wb") as out:
             total = int(response.headers.get("Content-Length") or 0)
+            tag = (response.headers.get("X-Linked-Etag") or response.headers.get("ETag") or "")
+            expected = re.fullmatch(r'(?:W/)?"?([0-9a-f]{64})"?', tag.strip())
             done = 0
             while chunk := response.read(1 << 16):
                 out.write(chunk)
+                digest.update(chunk)
                 done += len(chunk)
                 if progress and total and sys.stderr.isatty():
                     pct = 100 * done / total
                     print(f"\rdownloading {dest.name} {pct:5.1f}%", end="", file=sys.stderr)
         if progress and sys.stderr.isatty():
             print(f"\rdownloading {dest.name}  done ", file=sys.stderr)
+        if total and done != total:
+            raise DownloadError(f"{url}: got {done} of {total} bytes; the connection dropped, "
+                                "try again")
+        if expected and digest.hexdigest() != expected.group(1):
+            raise DownloadError(f"{url}: the file arrived damaged (SHA-256 does not match "
+                                "the server's); try again")
+    except DownloadError:
+        tmp.unlink(missing_ok=True)
+        raise
     except urllib.error.HTTPError as exc:
         tmp.unlink(missing_ok=True)
         raise DownloadError(f"HTTP {exc.code} for {url}") from exc
-    except urllib.error.URLError as exc:
+    except (urllib.error.URLError, OSError) as exc:
         tmp.unlink(missing_ok=True)
         raise DownloadError(f"could not fetch {url}: {exc}") from exc
-    shutil.move(str(tmp), str(dest))
+    os.replace(tmp, dest)
     return dest
 
 

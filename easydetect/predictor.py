@@ -24,12 +24,40 @@ from .utils.ops import cxcywh2xyxy_np
 
 
 def preprocess_image(img: np.ndarray, imgsz: int) -> np.ndarray:
-    """BGR HWC uint8 -> NCHW float32 RGB 0..1, plain-resized to imgsz."""
+    """BGR HWC uint8 -> NCHW float32 RGB 0..1, plain-resized to imgsz.
+
+    One pass, straight into a contiguous NCHW buffer: the colour swap, the
+    transpose and the scaling as views and one multiply, instead of an RGB
+    copy, a float copy and a transposed view the runtime then copies again
+    (1080p: 6.9 -> 1.7 ms, the same numbers to 6e-8)."""
     import cv2
 
     resized = cv2.resize(img, (imgsz, imgsz))
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-    return rgb.transpose(2, 0, 1)[None]
+    out = np.empty((1, 3, imgsz, imgsz), np.float32)
+    np.multiply(resized[:, :, ::-1].transpose(2, 0, 1), np.float32(1 / 255), out=out[0],
+                casting="unsafe")
+    return out
+
+
+def ov_core():
+    """An OpenVINO Core that keeps compiled models in easydetect's cache: a
+    model's second load in a new process compiles from there, about three
+    times faster (0.8-1.2 s -> 0.3-0.4 s). ``$EASYDETECT_OV_CACHE=0`` turns it off."""
+    import os
+
+    import openvino as ov
+
+    core = ov.Core()
+    if os.environ.get("EASYDETECT_OV_CACHE", "1") != "0":
+        try:
+            from .downloads import cache_dir
+
+            folder = cache_dir() / "openvino"
+            folder.mkdir(parents=True, exist_ok=True)
+            core.set_property({"CACHE_DIR": str(folder)})
+        except OSError:
+            pass  # a read-only home: compile every time, as before
+    return core
 
 
 def _looks_like_logits(scores: np.ndarray) -> bool:
@@ -299,11 +327,19 @@ class Predictor:
         """
         if _looks_like_logits(scores):
             scores = 1.0 / (1.0 + np.exp(-scores))
-        cls = scores.argmax(-1)
-        best = scores.max(-1)
-        keep = best >= conf
         if classes is not None:
-            keep &= np.isin(cls, np.asarray(classes, np.int64))
+            # each query's best class among those asked for, not its best class
+            # overall: a query sure of "person" at 0.6 but of "rider" at 0.7
+            # is still a person when only people are wanted
+            wanted = np.asarray(classes, np.int64)
+            wanted = wanted[(wanted >= 0) & (wanted < scores.shape[-1])]
+            among = scores[:, wanted] if len(wanted) else scores[:, :0]
+            cls = wanted[among.argmax(-1)] if len(wanted) else np.zeros(len(scores), np.int64)
+            best = among.max(-1) if len(wanted) else np.zeros(len(scores), scores.dtype)
+        else:
+            cls = scores.argmax(-1)
+            best = scores.max(-1)
+        keep = best >= conf
         boxes, best, cls = boxes[keep], best[keep], cls[keep]
         if len(best) > max_det:
             top = np.argsort(-best)[:max_det]
@@ -372,12 +408,10 @@ class OVPredictor(Predictor):
         bfloat16, which is much faster but shifts scores slightly. Pass
         ``"f32"`` when you want output that matches PyTorch exactly.
         """
-        import openvino as ov
-
         self.model_path = Path(model_path)
         self.device = device
         self.precision = precision
-        core = ov.Core()
+        core = ov_core()
         model = core.read_model(str(self.model_path))
         config = {"INFERENCE_PRECISION_HINT": precision} if precision else {}
         self.compiled = core.compile_model(model, device, config)
@@ -412,6 +446,22 @@ class OVPredictor(Predictor):
         return _split_outputs(arrays)
 
 
+def ort_providers(device: str, available: list[str]) -> list[str]:
+    """ONNX Runtime's execution providers for ``device``, the CPU always last.
+
+    ``"AUTO"`` takes a GPU when this onnxruntime build has one — CUDA
+    (onnxruntime-gpu) or DirectML (onnxruntime-directml, any GPU on Windows);
+    ``"CUDA"``/``"GPU0"`` asks for CUDA, ``"TENSORRT"`` for TensorRT (its
+    first run builds an engine, minutes); ``"CPU"`` stays on the CPU."""
+    want = str(device).upper()
+    order = {"AUTO": ["CUDAExecutionProvider", "DmlExecutionProvider"],
+             "CUDA": ["CUDAExecutionProvider"], "GPU0": ["CUDAExecutionProvider"],
+             "GPU": ["CUDAExecutionProvider", "DmlExecutionProvider"],
+             "TENSORRT": ["TensorrtExecutionProvider", "CUDAExecutionProvider"],
+             "DML": ["DmlExecutionProvider"]}.get(want, [])
+    return [p for p in order if p in available] + ["CPUExecutionProvider"]
+
+
 class ORTPredictor(Predictor):
     """An ``.onnx`` on ONNX Runtime: the light CPU runtime, no OpenVINO needed."""
 
@@ -436,10 +486,7 @@ class ORTPredictor(Predictor):
         options = ort.SessionOptions()
         if threads:
             options.intra_op_num_threads = threads
-        providers = ["CPUExecutionProvider"]
-        if str(device).upper() in ("CUDA", "GPU0") and \
-                "CUDAExecutionProvider" in ort.get_available_providers():
-            providers.insert(0, "CUDAExecutionProvider")
+        providers = ort_providers(device, ort.get_available_providers())
         # InferenceSession.run may be called from several threads at once
         self.session = ort.InferenceSession(str(self.model_path), options, providers=providers)
         self.input_name = self.session.get_inputs()[0].name

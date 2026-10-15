@@ -13,12 +13,20 @@ Accepted::
     0                         a webcam index
     ndarray | PIL.Image       pixels you already have
     [ …any of the above… ]    a list, processed in order
+
+Pictures and video files are read a couple of frames ahead on a thread of
+their own, so decoding the next frame overlaps running the model on this one.
+A live source (a webcam, rtsp://…) is read on its own thread too, but only its
+newest frame is kept: a model slower than the camera skips frames rather than
+falling further and further behind it.
 """
 
 from __future__ import annotations
 
 import glob as _glob
+import queue
 import re
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -28,6 +36,8 @@ import numpy as np
 IMG_FORMATS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".dng", ".pfm"}
 VID_FORMATS = {".mp4", ".avi", ".mov", ".mkv", ".mpg", ".mpeg", ".m4v", ".wmv", ".webm", ".gif"}
 _URL_RE = re.compile(r"^(https?|rtsp|rtmp|tcp|udp)://", re.IGNORECASE)
+_LIVE_RE = re.compile(r"^(rtsp|rtmp|tcp|udp)://", re.IGNORECASE)
+PREFETCH = 2  # frames read ahead of the model from pictures and video files
 
 
 def is_url(value: Any) -> bool:
@@ -116,6 +126,105 @@ def _expand(source: Any) -> list[tuple[str, Any]]:
     raise ValueError(f"unsupported source type: {p}")
 
 
+def _is_live(payload: Any, cap) -> bool:
+    """A webcam or a network stream, not a file: its frames come at the
+    camera's pace whether or not anyone reads them."""
+    import cv2
+
+    if isinstance(payload, int) or _LIVE_RE.match(str(payload)):
+        return True
+    return cap.get(cv2.CAP_PROP_FRAME_COUNT) <= 0  # e.g. an http MJPEG stream
+
+
+class _Newest:
+    """Reads a live capture on a thread of its own and keeps only the newest
+    frame, so a slow model always gets the latest picture instead of one that
+    waited in a queue. Frames skipped by ``stride`` are grabbed, not decoded.
+    The thread releases the capture when it ends."""
+
+    def __init__(self, cap, stride: int = 1) -> None:
+        self.cap, self.stride = cap, stride
+        self._cond = threading.Condition()
+        self._img, self._count, self._done, self._stop = None, 0, False, False
+        self._thread = threading.Thread(target=self._read, daemon=True)
+        self._thread.start()
+
+    def _read(self) -> None:
+        try:
+            n = 0
+            while not self._stop:
+                if n % self.stride:
+                    ok, img = self.cap.grab(), None
+                else:
+                    ok, img = self.cap.read()
+                if not ok:
+                    break
+                n += 1
+                if img is not None:
+                    with self._cond:
+                        self._img, self._count = img, self._count + 1
+                        self._cond.notify_all()
+        finally:
+            self.cap.release()
+            with self._cond:
+                self._done = True
+                self._cond.notify_all()
+
+    def next(self, after: int) -> tuple[int, np.ndarray] | None:
+        """The newest frame once it is newer than frame ``after``: ``(its
+        number, pixels)``, or ``None`` when the source has ended."""
+        with self._cond:
+            self._cond.wait_for(lambda: self._count > after or self._done)
+            if self._count > after:
+                return self._count, self._img
+            return None
+
+    def close(self) -> None:
+        self._stop = True
+        self._thread.join(timeout=2.0)
+
+
+def _read_ahead(frames: Iterator[Frame], depth: int = PREFETCH) -> Iterator[Frame]:
+    """``frames``, produced on a thread of its own up to ``depth`` ahead of
+    whoever iterates; its errors are raised here, where they would have been."""
+    q: queue.Queue = queue.Queue(maxsize=depth)
+    stop = threading.Event()
+
+    def put(item) -> bool:
+        while not stop.is_set():
+            try:
+                q.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def work() -> None:
+        try:
+            for frame in frames:
+                if not put(("frame", frame)):
+                    return
+            put(("end", None))
+        except BaseException as exc:  # handed over and raised by the reader
+            put(("error", exc))
+        finally:
+            frames.close()  # on this thread, where the generator runs
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    try:
+        while True:
+            kind, item = q.get()
+            if kind == "end":
+                return
+            if kind == "error":
+                raise item
+            yield item
+    finally:
+        stop.set()
+        thread.join(timeout=2.0)
+
+
 class SourceLoader:
     """Iterates a resolved source as :class:`Frame` objects."""
 
@@ -129,6 +238,12 @@ class SourceLoader:
         return self.total
 
     def __iter__(self) -> Iterator[Frame]:
+        # never read ahead of a stream: a live one must be read as it comes
+        if self.is_stream:
+            return self._frames()
+        return _read_ahead(self._frames())
+
+    def _frames(self) -> Iterator[Frame]:
         import cv2
 
         for i, (kind, payload) in enumerate(self.entries, start=1):
@@ -151,24 +266,38 @@ class SourceLoader:
                 # a stride of 2 keeps every other frame, so playback halves too
                 fps = fps / self.vid_stride if fps > 0 else 0.0
                 label = "video" if kind == "video" else "stream"
+                path = f"webcam{payload}" if isinstance(payload, int) else payload
+                if kind == "stream" and _is_live(payload, cap):
+                    yield from self._live(cap, path, i, label, fps)
+                    continue
                 n = 0
                 try:
                     while True:
-                        ok, img = cap.read()
+                        # frames vid_stride skips are grabbed, never decoded
+                        if n % self.vid_stride:
+                            ok, img = cap.grab(), None
+                        else:
+                            ok, img = cap.read()
                         if not ok:
                             break
                         n += 1
-                        if (n - 1) % self.vid_stride:
+                        if img is None:
                             continue
-                        yield Frame(
-                            img,
-                            f"webcam{payload}" if isinstance(payload, int) else payload,
-                            i,
-                            self.total,
-                            label,
-                            frame=(n - 1) // self.vid_stride + 1,
-                            frames=frames,
-                            fps=fps,
-                        )
+                        yield Frame(img, path, i, self.total, label,
+                                    frame=(n - 1) // self.vid_stride + 1, frames=frames, fps=fps)
                 finally:
                     cap.release()
+
+    def _live(self, cap, path, i: int, label: str, fps: float) -> Iterator[Frame]:
+        import cv2
+
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # where the backend allows: no stale backlog
+        reader = _Newest(cap, self.vid_stride)
+        count, shown = 0, 0
+        try:
+            while (got := reader.next(count)) is not None:
+                count, img = got
+                shown += 1
+                yield Frame(img, path, i, self.total, label, frame=shown, fps=fps)
+        finally:
+            reader.close()

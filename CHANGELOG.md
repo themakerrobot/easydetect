@@ -1,17 +1,92 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
-- README compares with YOLO26 (detection a draw; YOLO26-pose ahead by 2–2½
-  OKS AP at each size), and `tools/bench_finetune.py` fine-tunes dfine-s and
-  a YOLO on the same small public datasets and scores both with one
-  evaluator. `compare_yolo.py` reads an end-to-end YOLO's ONNX (YOLO26).
+Tracking, masks and video
+
+- **A new tracker** (ByteTrack's recipe): a Kalman filter predicts where each
+  object moves, boxes are assigned globally, and boxes below `conf` (down to
+  0.1) carry a track through a partial occlusion without being shown. A fast
+  object (60 px a frame) keeps its id, crossing objects no longer swap ids
+  (0 of 12 cases, was 9), and a one-frame flicker no longer starts a track.
+  Matching ignores the class (`match_class=True` to match by class);
+  `match_iou` defaults to 0.2.
+- **Masks 3× faster, 40–55% less memory**: the mask decoder's small output is
+  upscaled per box, only inside the box (4K, 30 people: 8.3 → 3.0 s on
+  OpenVINO). Each mask is cut to its box grown by 10% (`box_pad`); a
+  segmenter's `fill_holes` and `largest` clean masks further.
+  `r.summary()` with masks 30× faster, drawing masks 6× faster.
+- Fixed: a fine-tuned mask decoder exported with a fixed crop gave wrong
+  full-size masks for pictures that are not 4:3. Mask fine-tuning now trains
+  all four mask outputs, picks the better selection rule (best IoU or the
+  single mask) on jittered boxes, and builds it into the exported decoder.
+- Video: a webcam or stream is read on its own thread and only the newest
+  frame is kept (no growing lag); files are read ahead; `vid_stride` skips
+  frames without decoding them (stride 4: 27.7 → 16.0 ms a frame). Saved
+  videos are H.264 when OpenCV has it (plays in browsers), else mp4v.
+
+Accuracy
+
+- **Fine-tuning computes its loss in float32.** Under float16 autocast a sure
+  logit's focal cost became -inf and the matcher stopped weighing the boxes;
+  the network still runs in mixed precision (bfloat16 where the GPU has it,
+  so no loss scaling). Custom models train better, most with AMP on.
+- **The plain-picture epochs start from the best weights so far** (as D-FINE
+  does), the average then following a little faster.
+- Multi-scale sizes drawn as D-FINE draws them (imgsz three times in 13), a
+  mosaic tile is no longer zoomed out on top of being a quarter of the
+  picture, and every shrink in augmentation is antialiased.
+- Warmup is at least min(500 steps, 5% of the run): a small dataset no longer
+  warms up in a handful of steps.
+- Validation scores like COCO: the 300 best (query, class) pairs, up to 100
+  boxes a picture, 101-point AP. Val boxes are clipped into the picture.
+- `classes=[...]` keeps a query sure of a wanted class even when another class
+  scores higher on it.
+- Keypoint AP agrees with pycocotools: our pipeline is ahead of YOLO26-pose at
+  every size (s 66.3 / 63.0, m 71.6 / 68.8, l 73.4 / 70.4). README and
+  docs/pose.md updated.
+
+Custom data
+
+- Training prints (and run.json keeps) plain warnings: fewer than 100
+  pictures, a class with no or very few boxes, very uneven classes, val the
+  same pictures as train, no val split.
+- A label with a class id outside the dataset's names is dropped with a
+  warning instead of crashing a batch; an unreadable picture is skipped.
+- Resume carries on exactly: random state and the early-stop count are saved.
+
+Speed
+
+- Pictures leave the loader as uint8 and become float on the GPU (53 → 147
+  pictures a second fed on a 4-core CPU); the average update is one fused
+  call (230 → 90 ms a step on a CPU); the loss is no longer synchronised
+  every step.
+- Preprocessing in one pass (1080p: 6.9 → 1.7 ms). OpenVINO caches compiled
+  models (`$EASYDETECT_OV_CACHE=0` to turn off): the second load is about 3×
+  faster. ONNX Runtime picks CUDA or DirectML by itself on `device="AUTO"`.
+- An exported model is reused instead of exported again, keyed by the weights'
+  path, size and time, so two `best.pt` never share a cache entry.
+
+Safety
+
+- Checkpoints load with `weights_only=True`: a `.pt` that would run code is
+  refused unless `EASYDETECT_TRUST_CHECKPOINTS=1`.
+- Downloads are checked: a cut-off transfer or one whose SHA-256 does not
+  match the server's is an error, not a broken model file.
+- ONNX `half=True` now writes float16 (needs `onnxconverter-common`); INT8
+  export reports how many FP32 boxes it still finds on the calibration
+  pictures and warns below 90%.
+- `easydetect serve`: one inference at a time, at most 8 waiting (503 after),
+  a 30 s read timeout, and a 500 with the reason when the model fails.
+
+Benchmark
+
+- `tools/bench_finetune.py` fine-tunes dfine-s and a YOLO on the same small
+  public datasets and scores both with one evaluator. `compare_yolo.py`
+  reads an end-to-end YOLO's ONNX (YOLO26).
 - **Keypoint models s, m and l on the mirror**, each trained for 100 epochs
-  with every layer learning on an RTX 5090. OKS AP on COCO val2017 (flip
-  averaging), with the labelled boxes / behind dfine-s: s 0.670 / 0.612
-  (was 0.637 / 0.588: `task="pose"` is better as it is), m 0.725 / 0.664,
-  l 0.748 / 0.680. `eval-pose.yml` and `mirror.yml` take a model from a URL
-  (`pose_url`, a release asset of the repository, drafts included).
+  with every layer learning on an RTX 5090. `eval-pose.yml` and `mirror.yml`
+  take a model from a URL (`pose_url`, a release asset, drafts included).
 
 ## 0.6.0
 

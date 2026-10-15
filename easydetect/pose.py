@@ -253,9 +253,9 @@ class KeypointEstimator:
         self.spec = spec_of(model)
         self._local = threading.local()
         if self.backend == "openvino":
-            import openvino as ov
+            from .predictor import ov_core
 
-            self._model = ov.Core().compile_model(str(model), device)
+            self._model = ov_core().compile_model(str(model), device)
         else:
             import onnxruntime as ort
 

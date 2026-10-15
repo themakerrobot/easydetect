@@ -22,6 +22,10 @@ IMG_SIZE = 1024  # the encoder's input side
 EMBED = 256  # prompt / transformer width
 GRID = 64  # the image embedding is GRID x GRID
 LOW_RES = 256  # masks come out at this side, for the IMG_SIZE frame
+#: how the ONNX decoder picks a box's mask: "best_iou", the best-scored of the
+#: three multimask outputs (SAM's ONNX export); "single", the single-mask
+#: output (slot 0, what SAM's box demos use, multimask_output=False)
+MASK_CHOICES = ("best_iou", "single")
 
 
 class MLPBlock(nn.Module):
@@ -273,11 +277,16 @@ class SamDecoderOnnx(nn.Module):
     return_single_mask): image embeddings ``(1, 256, 64, 64)``, box corners as
     points labelled 2 and 3 ``(N, 2, 2)``, the unused mask input, the picture's
     size -> masks at the picture's size, their predicted IoU, the low-res
-    masks. One picture, N boxes, as task="segment" calls it."""
+    masks. One picture, N boxes, as task="segment" calls it. ``mask_choice``
+    (one of :data:`MASK_CHOICES`) is fixed into the graph, so the runtime runs
+    any decoder the same way."""
 
-    def __init__(self, decoder: SamDecoder) -> None:
+    def __init__(self, decoder: SamDecoder, mask_choice: str = "best_iou") -> None:
         super().__init__()
+        if mask_choice not in MASK_CHOICES:
+            raise ValueError(f"mask_choice must be one of {MASK_CHOICES}, not {mask_choice!r}")
         self.decoder = decoder
+        self.mask_choice = mask_choice
 
     @staticmethod
     def resize_longest_image_size(input_image_size: Tensor, longest_side: int) -> Tensor:
@@ -306,15 +315,19 @@ class SamDecoderOnnx(nn.Module):
         src = torch.repeat_interleave(image_embeddings, n, dim=0) + dense
         pos = torch.repeat_interleave(pe.get_dense_pe(), n, dim=0)
         masks, scores = self.decoder.mask_decoder.predict_masks(src, pos, sparse)
-        # a box (two points) takes the best of the three multimask outputs
-        reweight = torch.tensor([[1000] + [0] * (self.decoder.mask_decoder.num_mask_tokens - 1)],
-                                device=scores.device)
-        best = torch.argmax(scores + (point_coords.shape[1] - 2.5) * reweight, dim=1)
+        if self.mask_choice == "single":
+            best = torch.zeros_like(scores[:, 0], dtype=torch.int64)
+        else:
+            # a box (two points) takes the best of the three multimask outputs
+            reweight = torch.tensor(
+                [[1000] + [0] * (self.decoder.mask_decoder.num_mask_tokens - 1)],
+                device=scores.device)
+            best = torch.argmax(scores + (point_coords.shape[1] - 2.5) * reweight, dim=1)
         masks = masks[torch.arange(masks.shape[0]), best, :, :].unsqueeze(1)
         scores = scores[torch.arange(masks.shape[0]), best].unsqueeze(1)
         up = F.interpolate(masks, size=(IMG_SIZE, IMG_SIZE), mode="bilinear", align_corners=False)
         pre = self.resize_longest_image_size(orig_im_size, IMG_SIZE)
-        up = up[..., :int(pre[0]), :int(pre[1])]
+        up = up[..., :pre[0], :pre[1]]  # tensors, not ints: traced, not fixed at export
         size = orig_im_size.to(torch.int64)
         up = F.interpolate(up, size=(size[0], size[1]), mode="bilinear", align_corners=False)
         return up, scores, masks

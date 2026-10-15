@@ -30,8 +30,8 @@ class Boxes:
 
     def __init__(self, data: np.ndarray, orig_shape: tuple[int, int]) -> None:
         data = np.asarray(data, dtype=np.float32)
-        if data.size == 0:
-            data = data.reshape(0, 6)
+        if data.size == 0:  # a tracked frame with no boxes is still a tracked frame
+            data = data.reshape(0, 7 if data.ndim == 2 and data.shape[1] == 7 else 6)
         if data.ndim != 2 or data.shape[1] not in (6, 7):
             raise ValueError(f"boxes data must be (N, 6) or (N, 7), got {data.shape}")
         self.data = data
@@ -257,6 +257,9 @@ class Results:
     def summary(self) -> list[dict[str, Any]]:
         """Detections as plain dicts — handy for JSON, CSV, or a quick print."""
         rows = []
+        # each property walks every mask, so take them once and not once a row
+        if self.masks is not None:
+            areas, outlines = self.masks.area, self.masks.xy
         for i in range(len(self.boxes)):
             x1, y1, x2, y2 = (float(v) for v in self.boxes.xyxy[i])
             row: dict[str, Any] = {
@@ -268,8 +271,8 @@ class Results:
             if self.boxes.is_track:
                 row["track_id"] = int(self.boxes.id[i])
             if self.masks is not None:
-                row["mask"] = {"area": int(self.masks.area[i]),
-                               "polygon": self.masks.xy[i].round(1).tolist()}
+                row["mask"] = {"area": int(areas[i]),
+                               "polygon": outlines[i].round(1).tolist()}
             if self.keypoints is not None and self.keypoints.conf[i].any():
                 row["keypoints"] = {
                     name: {"x": round(float(x), 1), "y": round(float(y), 1),

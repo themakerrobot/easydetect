@@ -120,3 +120,30 @@ def test_mixup_lays_two_pictures_over_each_other():
     img, labels = aug.mixup(a, b)
     assert 200 * 0.4 - 1 <= img.mean() <= 200 * 0.6 + 1
     assert labels[:, 0].tolist() == [0, 1]
+
+
+def test_a_mosaic_tile_is_never_zoomed_out(monkeypatch):
+    def refuse(view):
+        raise AssertionError("zoom-out inside a mosaic tile")
+
+    monkeypatch.setattr(aug, "zoom_out", refuse)
+    random.seed(0)
+    aug.mosaic([_scene() for _ in range(4)], 160)
+
+
+def test_a_shrink_averages_instead_of_aliasing():
+    # one-pixel stripes: averaged they are grey, sampled they stay black or white
+    img = np.zeros((400, 400, 3), np.uint8)
+    img[:, ::2] = 255
+    for view in (np.array([0, 0, 400, 400], np.float32), np.array([10, 0, 390, 380], np.float32)):
+        out = aug.render(img, view, (100, 100), flip=False)
+        assert out.std() < 20, "a 4x shrink kept the stripes as aliasing"
+
+
+def test_multiscale_sizes_favour_the_trained_size():
+    from easydetect.trainer import BASE_SIZE_REPEAT, Trainer
+
+    stub = type("T", (), {"imgsz": 640})()
+    sizes = Trainer.train_sizes(stub)
+    assert min(sizes) == 480 and max(sizes) == 800
+    assert sizes.count(640) == BASE_SIZE_REPEAT and len(sizes) == 13   # D-FINE's list

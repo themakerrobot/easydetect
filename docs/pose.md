@@ -18,24 +18,18 @@ person. `predict`, `track` and the CLI (`task=pose`) all take it.
 ## Accuracy
 
 OKS AP on COCO val2017 (5,000 pictures), through the exported model the
-package downloads, with easydetect's scorer (written to COCO's definition;
-it can differ from pycocotools in the third decimal):
+package downloads, scored with pycocotools (easydetect's own scorer,
+`KeypointAP`, agrees with it):
 
-| | AP | AP50 | AP75 |
+| keypoint model | the labelled person boxes (the keypoint model alone) | behind dfine-s (what you get) | YOLO26-pose of that size |
 | --- | --- | --- | --- |
-| the labelled person boxes (the keypoint model alone) | 0.670 | 0.901 | 0.736 |
-| behind dfine-s (what you get) | 0.612 | 0.806 | 0.681 |
-| behind dfine-s, `model.pose_flip = False` | 0.601 | 0.803 | 0.670 |
-
-For scale, Ultralytics publishes 50.4 for YOLOv8n-pose and 60.0 for
-YOLOv8s-pose (their own end-to-end models, scored with pycocotools). The
-larger keypoint models are in [A larger keypoint model](#a-larger-keypoint-model-or-your-own):
-m 0.725 / 0.664, l 0.748 / 0.680.
+| `"s"` (default) | 0.677 | **0.663** | 0.630 |
+| `"m"` | 0.731 | **0.716** | 0.688 |
+| `"l"` | 0.752 | **0.734** | 0.704 |
 
 The released model was trained for 100 epochs with every layer learning, on
 one RTX 5090 in 1½ hours (`train_pose.py --size s --epochs 100 --batch 256
---lr 2e-3 --freeze 0`). The one before it, trained on GitHub's CPU runners
-(60 epochs, part of the backbone kept), scored 0.637 / 0.588.
+--lr 2e-3 --freeze 0`).
 
 ## How it works
 
@@ -56,9 +50,8 @@ the shoulder and wrist are. A keypoint's confidence is how sharply peaked
 those two distributions are.
 
 Each person is read twice, as cropped and mirrored, and the two readings are
-averaged (left and right swapped back): on COCO val2017 that is worth 1.4 OKS
-AP with the labelled boxes (0.656 → 0.670) and 1.1 behind dfine-s (0.601 →
-0.612). On a 4-core CPU (OpenVINO) it costs about 13 ms for one person instead
+averaged (left and right swapped back): on COCO val2017 that is worth about
+1 to 1½ points of OKS AP. On a 4-core CPU (OpenVINO) it costs about 13 ms for one person instead
 of 9, and 40 ms for four instead of 20, on top of the detector. For the faster
 reading:
 
@@ -82,12 +75,12 @@ model.pose_model = "runs/pose/m/pose-m.onnx"    # or one you trained
 
 | | backbone (from) | parameters | time a person, relative | OKS AP, labelled boxes | behind dfine-s |
 | --- | --- | --- | --- | --- | --- |
-| `"s"` | HGNetv2-B0 (dfine-s) | 3.7 M | 1× | 0.670 | 0.612 |
-| `"m"` | HGNetv2-B2 (dfine-m) | 8.1 M | about 2× | 0.725 | 0.664 |
-| `"l"` | HGNetv2-B4 (dfine-l) | 15.8 M | about 4× | 0.748 | 0.680 |
+| `"s"` | HGNetv2-B0 (dfine-s) | 3.7 M | 1× | 0.677 | 0.663 |
+| `"m"` | HGNetv2-B2 (dfine-m) | 8.1 M | about 2× | 0.731 | 0.716 |
+| `"l"` | HGNetv2-B4 (dfine-l) | 15.8 M | about 4× | 0.752 | 0.734 |
 
-COCO val2017, with flip averaging. Each trained for 100 epochs with every
-layer learning on one RTX 5090 — s in 1½ hours, m in 2¼, l in 2½ —
+COCO val2017, with flip averaging, scored with pycocotools. Each trained for
+100 epochs with every layer learning on one RTX 5090 — s in 1½ hours, m in 2¼, l in 2½ —
 `train_pose.py --size <s|m|l> --epochs 100 --batch 256 --lr 2e-3 --freeze 0`.
 
 Each is downloaded as `pose/pose-<size>.onnx` once that is on the mirror
@@ -145,11 +138,13 @@ detector misses gets no keypoints, and each found box costs one keypoint pass.
 In return the keypoint network sees every object at the same size, which
 suits small objects and fine keypoints.
 
+## Training the keypoint model on COCO
 
-210 epochs over COCO's 150,000 labelled people. On one RTX 5090 that should
-take roughly 4–5 hours — an estimate: reading, cropping and jittering a person
-costs about 4 ms of one CPU core, so 16 workers feed some 4,000 a second and
-the loading, not the GPU, sets the pace. Give it as many `--workers` as you
+`tools/train_pose.py` trains the released models: 100 epochs over COCO's
+150,000 labelled people (`--epochs 100`; the default, 210, is RTMPose's). On
+one RTX 5090 that takes 1½ (s) to 2½ (l) hours: reading, cropping and
+jittering a person costs about 4 ms of one CPU core, so the loading, not the
+GPU, sets the pace. Give it as many `--workers` as you
 have cores to spare.
 
 ```bash

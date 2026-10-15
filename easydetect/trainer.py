@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 
 from .data import augment as aug
 from .data.dataset import DetDataset, load_data_yaml, worker_context
+from .utils.checkpoint import load_checkpoint
 from .utils.loss import DetectionLoss
 
 
@@ -35,6 +36,49 @@ def seed_everything(seed: int) -> None:
 #: The learning rate a batch of 4 fine-tunes well at: D-FINE from its COCO
 #: weights reached 0.765 mAP50-95 on a dataset where RT-DETR's own run gave 0.762.
 REF_BATCH, REF_LR = 4, 1e-4
+
+
+#: Warm-up steps D-FINE uses (``LinearWarmup``); see ``Trainer.warmup_for``.
+WARMUP_STEPS = 500
+BASE_SIZE_REPEAT = 3  # how often imgsz itself is listed among the multi-scale sizes
+EMA_RESTART_STEP = 0.0001  # the average's decay is lowered this much after the best is reloaded
+
+
+def _float32(out):
+    """The network's outputs, every floating tensor in them as float32."""
+    if isinstance(out, torch.Tensor):
+        return out.float() if out.is_floating_point() else out
+    if isinstance(out, dict):
+        return {k: _float32(v) for k, v in out.items()}
+    if isinstance(out, (list, tuple)):
+        return type(out)(_float32(v) for v in out)
+    return out
+
+
+def _rng_state() -> dict:
+    """Every random stream training draws from, in types ``torch.load(...,
+    weights_only=True)`` accepts (numpy's key as a tensor)."""
+    name, keys, pos, has_gauss, cached = np.random.get_state()
+    state = {"python": random.getstate(),
+             "numpy": (name, torch.from_numpy(keys.astype(np.int64)), int(pos), int(has_gauss),
+                       float(cached)),
+             "torch": torch.get_rng_state()}
+    if torch.cuda.is_available():
+        state["cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _set_rng_state(state: dict) -> None:
+    try:
+        random.setstate(state["python"])
+        name, keys, pos, has_gauss, cached = state["numpy"]
+        np.random.set_state((name, np.asarray(keys, np.int64).astype(np.uint32), pos,
+                             has_gauss, cached))
+        torch.set_rng_state(state["torch"])
+        if "cuda" in state and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(state["cuda"])
+    except (KeyError, ValueError, RuntimeError, TypeError):
+        pass  # another machine or version: the run continues, just not bit-identical
 
 
 def auto_lr(batch: int) -> float:
@@ -74,10 +118,14 @@ class ModelEMA:
         self.updates += 1
         d = self.decay * (1 - math.exp(-self.updates / self.warmups))
         current = net.state_dict()
-        for k, v in self.module.state_dict().items():
-            if v.dtype.is_floating_point:
-                v.mul_(d).add_(current[k].detach(), alpha=1 - d)
-            else:
+        mine = self.module.state_dict()
+        floats = [k for k, v in mine.items() if v.dtype.is_floating_point]
+        # one fused call over every tensor instead of ~700 small ones a step
+        # (230 -> 90 ms on a CPU; fewer kernel launches on a GPU)
+        torch._foreach_lerp_([mine[k] for k in floats],
+                             [current[k].detach() for k in floats], 1 - d)
+        for k, v in mine.items():
+            if not v.dtype.is_floating_point:
                 v.copy_(current[k])
 
 
@@ -128,6 +176,42 @@ def _split_counts(ds, num_classes: int) -> dict:
                 per_class[c] += 1
     return {"images": len(ds.files), "boxes": boxes, "background_images": empty,
             "per_class": per_class}
+
+
+def data_warnings(data: dict, names, train_files=(), val_files=()) -> list[str]:
+    """What in the data is likely to give a disappointing model, in plain words.
+
+    ``data`` is run.json's ``data`` (``_split_counts`` per split). Nothing here
+    stops training; each line is printed once and kept in run.json.
+    """
+    out = []
+    train, val = data.get("train", {}), data.get("val")
+    if train.get("images", 0) < 100:
+        out.append(f"only {train.get('images', 0)} training pictures: expect a rough model; "
+                   "a few hundred per class is where it starts to hold up")
+    per_class = train.get("per_class", [])
+    for c, n in enumerate(per_class):
+        name = names[c] if isinstance(names, (list, tuple)) else (names or {}).get(c, c)
+        if n == 0:
+            out.append(f"class {c} ({name}) has no boxes in train: the model cannot learn it")
+        elif n < 10:
+            out.append(f"class {c} ({name}) has only {n} boxes in train")
+    seen = [n for n in per_class if n]
+    if len(seen) > 1 and max(seen) >= 50 * min(seen):
+        out.append(f"classes are very uneven ({min(seen)} to {max(seen)} boxes): the rare ones "
+                   "will score low; more of them helps more than anything else")
+    if train.get("images") and train.get("boxes", 0) == 0:
+        out.append("no boxes in any training label file: are the labels next to the pictures?")
+    if val is None:
+        out.append("no val split: the best epoch is picked blind (the last one is kept)")
+    elif train_files and val_files:
+        shared = {Path(f).resolve() for f in train_files} & {Path(f).resolve() for f in val_files}
+        if shared and len(shared) == len(val_files):
+            out.append("val is the same pictures as train: its scores will look far better "
+                       "than the model is; hold some pictures out")
+        elif shared:
+            out.append(f"{len(shared)} val pictures are also in train: val scores read high")
+    return out
 
 
 #: The loss parts logged per epoch (see utils.loss).
@@ -213,6 +297,10 @@ class Trainer:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.workers = workers
         self.amp = amp and self.device.type == "cuda"
+        # bfloat16 where the GPU has it (RTX 30 and later): float32's range, so
+        # no loss scaling and no overflow; float16 with a GradScaler otherwise
+        self.amp_dtype = (torch.bfloat16 if self.amp and torch.cuda.is_bf16_supported()
+                          else torch.float16)
         self.patience = patience
         self.start_epoch = 0
         self.best = -1.0
@@ -237,7 +325,8 @@ class Trainer:
         self.ema = ModelEMA(net)
         self.warmup_epochs = warmup_epochs
         self.base_lrs = [g["lr"] for g in self.opt.param_groups]
-        self.scaler = torch.amp.GradScaler(enabled=self.amp)
+        self.scaler = torch.amp.GradScaler(enabled=self.amp and self.amp_dtype == torch.float16)
+        self.since_improved = 0
         if resume:
             self._load_resume_state()
 
@@ -265,19 +354,41 @@ class Trainer:
         if not last.exists():
             print(f"[easydetect] resume: nothing to resume from in {self.save_dir}, starting fresh")
             return
-        ckpt = torch.load(last, map_location="cpu", weights_only=False)
+        ckpt = load_checkpoint(last)
         # "model" is the averaged weights everyone uses; "raw" what training was at
         self.net.load_state_dict(ckpt.get("raw") or ckpt["model"])
         self.ema.module.load_state_dict(ckpt["model"])
         self.ema.updates = int(ckpt.get("ema_updates", 0))
         if ckpt.get("optimizer"):
             self.opt.load_state_dict(ckpt["optimizer"])
-        if ckpt.get("scaler") and self.amp:
+        if ckpt.get("scaler") and self.scaler.is_enabled():
             self.scaler.load_state_dict(ckpt["scaler"])
         self.start_epoch = int(ckpt.get("epoch", -1)) + 1
         self.best = float(ckpt.get("best", -1.0))
+        # a resumed run carries on as the uninterrupted one would: the same
+        # random stream, and early stopping counting from where it was
+        self.since_improved = int(ckpt.get("since_improved", 0))
+        if ckpt.get("rng"):
+            _set_rng_state(ckpt["rng"])
         print(f"[easydetect] resuming {self.save_dir} "
               f"at epoch {self.start_epoch + 1}/{self.epochs}")
+
+    def _restart_from_best(self, net) -> None:
+        """Start the plain-picture epochs from the best weights so far, as
+        D-FINE does: the strong-augment phase may have peaked and wandered
+        off before it ended. The average then follows a little faster."""
+        best = self.save_dir / "weights" / "best.pt"
+        if not best.exists():
+            return
+        ckpt = load_checkpoint(best)
+        if int(ckpt.get("epoch", -1)) + 1 >= self.clean_from:
+            return                           # the last epoch was the best: nothing to undo
+        net.load_state_dict(ckpt.get("raw") or ckpt["model"])
+        self.ema.module.load_state_dict(ckpt["model"])
+        self.ema.updates = int(ckpt.get("ema_updates", self.ema.updates))
+        self.ema.decay -= EMA_RESTART_STEP
+        print(f"[easydetect] restarting from the best epoch so far "
+              f"({int(ckpt.get('epoch', -1)) + 1}, mAP50-95 {float(ckpt.get('best', 0)):.4f})")
 
     # ------------------------------------------------------------- the record
 
@@ -321,7 +432,7 @@ class Trainer:
                 "lr_backbone": self.lr * self.lr_backbone_mult,
                 "weight_decay": self.weight_decay,
                 "schedule": "linear warmup, then cosine decay to 1%",
-                "warmup_epochs": self.warmup_epochs,
+                "warmup_epochs": round(self.warmup_for(max(len(ds) // self.batch, 1)), 2),
                 "grad_clip": 0.1,
             },
             "amp": self.amp,
@@ -339,11 +450,16 @@ class Trainer:
             "started": old.get("started") or time.strftime("%Y-%m-%dT%H:%M:%S"),
             "resumed_at_epoch": self.start_epoch + 1 if self.start_epoch else None,
         }
+        val_files = []
         try:
             val = DetDataset(self.data_yaml, "val", self.imgsz, augment=False)
             setup["data"]["val"] = _split_counts(val, self.net.num_classes)
+            val_files = val.files
         except (ValueError, FileNotFoundError, KeyError):
             pass                                     # no val split: nothing to count
+        setup["warnings"] = data_warnings(setup["data"], self.cfg["names"], ds.files, val_files)
+        for line in setup["warnings"]:
+            print(f"[easydetect] warning: {line}", flush=True)
         previous.write_text(json.dumps(setup, ensure_ascii=False, indent=2), encoding="utf-8")
         return setup
 
@@ -369,12 +485,22 @@ class Trainer:
             "finished": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
 
+    def warmup_for(self, steps_per_epoch: int) -> float:
+        """Warm-up length in epochs: ``warmup_epochs``, or longer when that is
+        only a handful of steps — 100 pictures at batch 16 make a 7-step epoch,
+        no warm-up at all. D-FINE warms up over 500 steps; here up to 500, but
+        never more than a twentieth of the run."""
+        total = max(steps_per_epoch * self.epochs, 1)
+        steps = min(WARMUP_STEPS, total // 20)
+        return max(self.warmup_epochs, steps / max(steps_per_epoch, 1))
+
     def _set_lr(self, epoch, step, steps_per_epoch):
         t = epoch + step / max(steps_per_epoch, 1)
-        if t < self.warmup_epochs:
-            scale = t / max(self.warmup_epochs, 1e-8)
+        warmup = self.warmup_for(steps_per_epoch)
+        if t < warmup:
+            scale = t / max(warmup, 1e-8)
         else:
-            prog = (t - self.warmup_epochs) / max(self.epochs - self.warmup_epochs, 1e-8)
+            prog = (t - warmup) / max(self.epochs - warmup, 1e-8)
             scale = 0.5 * (1 + math.cos(math.pi * min(prog, 1.0)))
             scale = max(scale, 0.01)
         for g, base in zip(self.opt.param_groups, self.base_lrs, strict=False):
@@ -390,16 +516,19 @@ class Trainer:
             lines.append(f"mixup of two (p={self.mixup:g})")
         if lines and self.multiscale:
             sizes = self.train_sizes()
-            lines.append(f"each batch at a random size, {sizes[0]}–{sizes[-1]} px")
+            lines.append(f"each batch at a random size, {min(sizes)}–{max(sizes)} px")
         if lines and self.clean_from < self.epochs:
             lines.append(f"those off for the last {self.epochs - self.clean_from} epoch(s)")
         return lines + [flip, f"resize to {self.imgsz}×{self.imgsz}"]
 
     def train_sizes(self) -> list[int]:
-        """Multi-scale training sizes: ±25% of imgsz in steps of 32, as D-FINE's
-        batch collation draws them."""
+        """Multi-scale training sizes, as D-FINE's batch collation draws them:
+        ±25% of imgsz in steps of 32, with imgsz itself listed three times so
+        a quarter of the batches train at the size the model will run at."""
         low, high = int(self.imgsz * 0.75) // 32 * 32, int(self.imgsz * 1.25) // 32 * 32
-        return list(range(max(low, 32), max(high, 32) + 1, 32))
+        below = [s for s in range(max(low, 32), self.imgsz, 32)]
+        above = [s for s in range(max(high, 32), self.imgsz, -32)]
+        return below + [self.imgsz] * BASE_SIZE_REPEAT + above
 
     @property
     def clean_from(self) -> int:
@@ -429,7 +558,7 @@ class Trainer:
         ds.strong = self.augment and self.start_epoch < self.clean_from
         dl = self._loader(ds)
         net = self.net.to(self.device)
-        since_improved = 0
+        since_improved = self.since_improved
         if self.start_epoch >= self.epochs:
             # resuming a run that already finished its schedule: there is nothing
             # to do until someone asks for more epochs
@@ -454,13 +583,15 @@ class Trainer:
                 dl = self._loader(ds)
                 print(f"[easydetect] epoch {epoch + 1}: zoom, crop and colour jitter off "
                       "for the last epochs")
+                if val_fn is not None:
+                    self._restart_from_best(net)
             net.train()
             for module in self.frozen:  # frozen batch norms must not keep adapting
                 module.eval()
             t0, running, reported = time.time(), 0.0, 0.0
             for step, (imgs, targets) in enumerate(dl):
                 self._set_lr(epoch, step, len(dl))
-                imgs = imgs.to(self.device, non_blocking=True)
+                imgs = DetDataset.as_float(imgs.to(self.device, non_blocking=True))
                 if self.multiscale and ds.strong:  # boxes are normalised: only pixels change
                     side = random.choice(self.train_sizes())
                     if side != imgs.shape[-1]:
@@ -468,9 +599,14 @@ class Trainer:
                             imgs, size=(side, side), mode="bilinear", align_corners=False)
                 targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
 
-                with torch.amp.autocast(self.device.type, enabled=self.amp):
+                with torch.amp.autocast(self.device.type, dtype=self.amp_dtype,
+                                        enabled=self.amp):
                     out = net(imgs, targets)       # targets feed the denoising queries
-                    loss, logs = self.criterion(out, targets)
+                # the matching and the losses in float32, as D-FINE does: in
+                # float16 a confident logit's sigmoid rounds to 1, the focal
+                # cost's log(1 - p) to -inf, and the box costs stop counting
+                # in the matching; the IoU targets lose precision too
+                loss, logs = self.criterion(_float32(out), targets)
 
                 self.opt.zero_grad(set_to_none=True)
                 self.scaler.scale(loss).backward()
@@ -479,7 +615,7 @@ class Trainer:
                 self.scaler.step(self.opt)
                 self.scaler.update()
                 self.ema.update(net)
-                running += float(loss.detach())
+                running += loss.detach()
                 if self.on_progress is not None and (
                     time.time() - reported >= 1.0 or step + 1 == len(dl)
                 ):
@@ -489,7 +625,7 @@ class Trainer:
                         "step": step + 1, "steps": len(dl), "seconds": reported - t0,
                     })
 
-            avg = running / max(len(dl), 1)
+            avg = float(running) / max(len(dl), 1)
             msg = (
                 f"epoch {epoch + 1}/{self.epochs}  loss {avg:.3f}  "
                 + " ".join(f"{k} {float(logs.get(k, 0.0)):.3f}" for k in LOGGED) + "  "
@@ -523,6 +659,7 @@ class Trainer:
                 since_improved = 0
             else:
                 since_improved += 1
+            self.since_improved = since_improved
             self._save(net, epoch, "last.pt")
             if improved:
                 self._save(net, epoch, "best.pt")
@@ -580,7 +717,10 @@ class Trainer:
                 "names": self.cfg["names"],
                 "epoch": epoch,
                 "best": self.best,
+                "since_improved": self.since_improved,
                 "imgsz": self.imgsz,
+                # resuming reads last.pt only; best.pt is what people load
+                **({"rng": _rng_state()} if fname == "last.pt" else {}),
             },
             self.save_dir / "weights" / fname,
         )

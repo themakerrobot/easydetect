@@ -1,5 +1,9 @@
 # Apache-2.0
-"""Validation: mAP@50 and mAP@50-95 (101-point interpolation), no pycocotools needed."""
+"""Validation: mAP@50 and mAP@50-95 as COCO computes them, no pycocotools needed.
+
+Like D-FINE's own evaluation: each picture's 300 best (query, class) pairs —
+a query may stand for two classes — scored with COCO's 101-point precision
+over up to 100 boxes a picture."""
 
 import numpy as np
 import torch
@@ -23,19 +27,23 @@ def _iou_np(a, b):
 
 
 def _ap(recall, precision):
-    r = np.concatenate([[0.0], recall, [1.0]])
-    p = np.concatenate([[1.0], precision, [0.0]])
-    p = np.flip(np.maximum.accumulate(np.flip(p)))
-    x = np.linspace(0, 1, 101)
-    trapezoid = getattr(np, "trapezoid", None) or np.trapz  # numpy 2.x / 1.x
-    return float(trapezoid(np.interp(x, r, p), x))
+    """COCO's: the best precision at or beyond each of 101 recall points, averaged."""
+    if not len(precision):
+        return 0.0
+    p = np.maximum.accumulate(precision[::-1])[::-1]
+    idx = np.searchsorted(recall, np.linspace(0, 1, 101), side="left")
+    return float(np.where(idx < len(p), p[np.minimum(idx, len(p) - 1)], 0.0).mean())
 
 
 class Evaluator:
-    """Accumulates (pred, gt) pairs per image; computes mAP over IoU 0.5:0.95."""
+    """Accumulates (pred, gt) pairs per image; computes mAP over IoU 0.5:0.95.
 
-    def __init__(self, num_classes):
+    Up to ``max_det`` boxes a picture count, the highest-scoring ones (COCO's
+    maxDets 100)."""
+
+    def __init__(self, num_classes, max_det=100):
         self.nc = num_classes
+        self.max_det = max_det
         self.iouv = np.linspace(0.5, 0.95, 10)
         self.records = []  # per image: (pred xyxy, pred conf, pred cls, gt xyxy, gt cls)
 
@@ -43,11 +51,13 @@ class Evaluator:
         # copies, never views: an array that views a tensor from a DataLoader
         # worker keeps that worker's shared-memory file open, two per image —
         # 10,000 for COCO val, past Linux's usual limit of 1,024 descriptors
+        conf = np.array(pred_conf, np.float32).reshape(-1)
+        top = np.argsort(-conf, kind="stable")[: self.max_det]
         self.records.append(
             (
-                np.array(pred_boxes, np.float32).reshape(-1, 4),
-                np.array(pred_conf, np.float32).reshape(-1),
-                np.array(pred_cls, np.int64).reshape(-1),
+                np.array(pred_boxes, np.float32).reshape(-1, 4)[top],
+                conf[top],
+                np.array(pred_cls, np.int64).reshape(-1)[top],
                 np.array(gt_boxes, np.float32).reshape(-1, 4),
                 np.array(gt_cls, np.int64).reshape(-1),
             )
@@ -101,28 +111,43 @@ class Evaluator:
         }
 
 
+def top_pairs(logits: torch.Tensor, boxes: torch.Tensor, k: int = 300):
+    """D-FINE's post-processing: the ``k`` best (query, class) pairs of one
+    picture — ``logits (Q, C)``, ``boxes (Q, 4)`` — as boxes, scores, classes."""
+    scores = logits.sigmoid().flatten()
+    top, index = scores.topk(min(k, scores.numel()))
+    nc = logits.shape[-1]
+    return boxes[index // nc], top, index % nc
+
+
 @torch.no_grad()
-def validate_torch(net, data_yaml, imgsz=640, batch=8, conf=0.01, device=None, workers=2):
-    """Evaluate a torch DFINENet on the val split. Returns metrics dict."""
+def validate_torch(net, data_yaml, imgsz=640, batch=8, conf=0.0, device=None, workers=2):
+    """Evaluate a torch DFINENet on the val split. Returns metrics dict.
+
+    On a GPU the network runs in bfloat16 (float16 where there is none) —
+    scoring, not training, so the few thousandths it may move are noise."""
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     ds = DetDataset(data_yaml, "val", imgsz, augment=False)
     dl = DataLoader(ds, batch_size=batch, num_workers=workers, collate_fn=DetDataset.collate,
+                    pin_memory=device.type == "cuda",
                     multiprocessing_context=worker_context() if workers > 0 else None)
     net = net.to(device).eval()
     ev = Evaluator(net.num_classes)
+    half = (torch.bfloat16 if device.type == "cuda" and torch.cuda.is_bf16_supported()
+            else torch.float16)
     for imgs, targets in dl:
-        out = net(imgs.to(device))
-        scores = out["pred_logits"].sigmoid()
-        boxes = cxcywh2xyxy(out["pred_boxes"])
+        imgs = DetDataset.as_float(imgs.to(device, non_blocking=True))
+        with torch.autocast(device.type, dtype=half, enabled=device.type == "cuda"):
+            out = net(imgs)
+        logits, boxes = out["pred_logits"].float(), cxcywh2xyxy(out["pred_boxes"].float())
         for b in range(imgs.shape[0]):
-            sc, cl = scores[b].max(-1)
+            bx, sc, cl = top_pairs(logits[b], boxes[b])
             keep = sc >= conf
-            gt = cxcywh2xyxy(targets[b]["boxes"])
             ev.add(
-                boxes[b][keep].cpu().numpy(),
+                bx[keep].cpu().numpy(),
                 sc[keep].cpu().numpy(),
                 cl[keep].cpu().numpy(),
-                gt.cpu().numpy(),
-                targets[b]["labels"].cpu().numpy(),
+                cxcywh2xyxy(targets[b]["boxes"]).numpy(),
+                targets[b]["labels"].numpy(),
             )
     return ev.compute()

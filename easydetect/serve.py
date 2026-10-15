@@ -22,6 +22,7 @@ a Raspberry Pi included. It listens on 127.0.0.1 unless told ``host=0.0.0.0``
 from __future__ import annotations
 
 import json
+import threading
 import time
 from email.parser import BytesParser
 from email.policy import HTTP
@@ -32,6 +33,8 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 
 MAX_BYTES = 32 * 1024 * 1024  # a picture, not a video
+MAX_WAITING = 8  # requests queued for the model; more get 503 instead of piling up
+READ_TIMEOUT = 30  # seconds a client may take to send its picture
 
 
 def _picture(content_type: str, body: bytes) -> bytes:
@@ -64,8 +67,14 @@ def make_handler(model, name: str):
     """The request handler class for one loaded Detector."""
     import cv2
 
+    # one inference at a time (a predictor is not made for parallel calls),
+    # and a bounded queue in front of it so a flood is refused, not hoarded
+    busy = threading.Lock()
+    slots = threading.BoundedSemaphore(MAX_WAITING)
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "easydetect"
+        timeout = READ_TIMEOUT  # a stalled upload frees its thread
 
         def _send(self, status: int, body: bytes, content_type: str) -> None:
             self.send_response(status)
@@ -105,13 +114,23 @@ def make_handler(model, name: str):
                 options = _options(query)
             except ValueError as exc:
                 return self._json(400, {"error": str(exc)})
-            started = time.perf_counter()
-            result = model(img, verbose=False, **options)[0]
-            if query.get("draw", ["0"])[0] in ("1", "true", "yes"):
-                ok, jpg = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 85])
-                return self._send(200, jpg.tobytes(), "image/jpeg")
+            if not slots.acquire(blocking=False):
+                return self._json(503, {"error": "busy; try again in a moment"})
+            try:
+                started = time.perf_counter()
+                with busy:
+                    result = model(img, verbose=False, **options)[0]
+                if query.get("draw", ["0"])[0] in ("1", "true", "yes"):
+                    ok, jpg = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    return self._send(200, jpg.tobytes(), "image/jpeg")
+                summary = result.summary()
+            except Exception as exc:  # noqa: BLE001 — answer, don't drop the connection
+                self.log_message("predict failed: %r", exc)
+                return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            finally:
+                slots.release()
             h, w = img.shape[:2]
-            self._json(200, {"detections": result.summary(), "width": w, "height": h,
+            self._json(200, {"detections": summary, "width": w, "height": h,
                              "ms": round((time.perf_counter() - started) * 1e3, 1),
                              "speed": {k: round(v, 1) for k, v in result.speed.items()}})
 

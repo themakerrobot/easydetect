@@ -135,6 +135,20 @@ def worker_context():
     return "forkserver"
 
 
+def _clean(labels: np.ndarray) -> np.ndarray:
+    """Boxes clipped into the picture, the empty ones dropped — what training's
+    augmentation does to its boxes; a validation box half outside the frame
+    (cx 1.4) otherwise stays as a target no prediction can match."""
+    if not len(labels):
+        return labels
+    cx, cy, w, h = labels[:, 1], labels[:, 2], labels[:, 3], labels[:, 4]
+    x0, y0 = np.clip(cx - w / 2, 0, 1), np.clip(cy - h / 2, 0, 1)
+    x1, y1 = np.clip(cx + w / 2, 0, 1), np.clip(cy + h / 2, 0, 1)
+    out = np.stack([labels[:, 0], (x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0], 1)
+    ok = np.isfinite(out).all(1) & (out[:, 3] > 0) & (out[:, 4] > 0)
+    return out[ok].astype(np.float32)
+
+
 class DetDataset(Dataset):
     def __init__(self, data_yaml, split="train", imgsz=640, augment=True,
                  mosaic=0.0, mixup=0.0):
@@ -155,9 +169,16 @@ class DetDataset(Dataset):
         if not self.files:
             raise FileNotFoundError(f"no images for split '{split}'")
         self.kpt_shape = cfg["kpt_shape"]
+        self.split = split
+        self._warned: set[str] = set()   # one message per kind of problem, not per picture
 
     def __len__(self):
         return len(self.files)
+
+    def _warn(self, kind: str, message: str) -> None:
+        if kind not in self._warned:
+            self._warned.add(kind)
+            print(f"[easydetect] {self.split}: {message}", flush=True)
 
     def _load_labels(self, img_file):
         lp = _label_path(img_file)
@@ -166,8 +187,16 @@ class DetDataset(Dataset):
         rows = []
         for line in lp.read_text().splitlines():
             row = label_row_to_box(line.split(), self.kpt_shape)
-            if row is not None:
-                rows.append(row)
+            if row is None:
+                continue
+            # a class the data.yaml does not name would index past the class
+            # head: an IndexError on the CPU, a device-side assert on a GPU,
+            # hours into a run. Such a box is left out, and said so once.
+            if not 0 <= int(row[0]) < self.nc:
+                self._warn("class", f"{lp} has class {int(row[0])}, but data.yaml names "
+                                    f"{self.nc} (0-{self.nc - 1}); boxes like it are left out")
+                continue
+            rows.append(row)
         return np.asarray(rows, np.float32) if rows else np.zeros((0, 5), np.float32)
 
     def _raw(self, i):
@@ -177,12 +206,26 @@ class DetDataset(Dataset):
             raise FileNotFoundError(f)
         return img, self._load_labels(f)  # cls, cx, cy, w, h (normalized)
 
+    def _readable(self, i):
+        """``_raw``, or — for a picture that cannot be read (a truncated copy,
+        a stray non-image) — another one, so one bad file costs a sample and
+        not the run. Said once per split."""
+        for _ in range(10):
+            try:
+                return self._raw(i)
+            except FileNotFoundError:
+                self._warn("unreadable", f"cannot read {self.files[i]}; skipping unreadable "
+                                         "pictures (each is replaced by another)")
+                i = random.randrange(len(self.files))
+        raise FileNotFoundError(f"10 unreadable pictures in a row in {self.split}, "
+                                f"the last {self.files[i]}")
+
     def _augmented(self, i):
         """One training picture at imgsz x imgsz: a mosaic of four now and then."""
         if self.strong and self.mosaic and random.random() < self.mosaic:
             others = random.choices(range(len(self.files)), k=3)
-            return aug.mosaic([self._raw(j) for j in (i, *others)], self.imgsz)
-        img, labels = self._raw(i)
+            return aug.mosaic([self._readable(j) for j in (i, *others)], self.imgsz)
+        img, labels = self._readable(i)
         return aug.apply(img, labels, strong=self.strong, size=self.imgsz)
 
     def __getitem__(self, i):
@@ -192,9 +235,14 @@ class DetDataset(Dataset):
                 img, labels = aug.mixup((img, labels),
                                         self._augmented(random.randrange(len(self.files))))
         else:
-            img, labels = self._raw(i)
+            img, labels = self._readable(i)
             img = cv2.resize(img, (self.imgsz, self.imgsz))  # plain resize, as D-FINE trains
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+            labels = _clean(labels)
+        # uint8 out of the workers: a quarter of the bytes through shared
+        # memory, pinning and the copy to the GPU, and no float conversion per
+        # picture on one CPU core (53 -> 147 pictures a second, 4 workers).
+        # The trainer and validator scale to 0..1 on the device (``as_float``).
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         tensor = torch.from_numpy(img.transpose(2, 0, 1)).contiguous()
 
         target = {
@@ -202,6 +250,11 @@ class DetDataset(Dataset):
             "boxes": torch.as_tensor(labels[:, 1:5], dtype=torch.float32),  # cxcywh 0..1
         }
         return tensor, target
+
+    @staticmethod
+    def as_float(imgs: torch.Tensor) -> torch.Tensor:
+        """A batch from ``collate`` as the network takes it: float, 0..1."""
+        return imgs.float().div_(255.0) if imgs.dtype == torch.uint8 else imgs
 
     @staticmethod
     def collate(batch):

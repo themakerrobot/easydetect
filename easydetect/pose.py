@@ -331,22 +331,33 @@ def keypoint_rows(spec: KeypointSpec, names: dict[int, str], cls: np.ndarray) ->
 
 # ---------------------------------------------------------------- evaluation
 
-def oks(pred: np.ndarray, gt: np.ndarray, area: float, sigmas=OKS_SIGMAS) -> float:
+def oks(pred: np.ndarray, gt: np.ndarray, area: float, sigmas=OKS_SIGMAS,
+        box=None) -> float:
     """Object keypoint similarity of one prediction ``(K, 2)`` to one labelled
-    person ``(K, 3)`` (x, y, visibility) of segment ``area``, as COCO defines it."""
+    person ``(K, 3)`` (x, y, visibility) of segment ``area``, as COCO defines it.
+
+    A person with no keypoint labelled is measured as pycocotools does, from
+    their ``box`` (x, y, w, h): each predicted keypoint's distance outside the
+    box widened by its size on every side — so a prediction on an unlabelled
+    person can match them and be ignored, instead of counting as wrong."""
     vis = gt[:, 2] > 0
-    if not vis.any():
+    var = (2 * np.asarray(sigmas)) ** 2
+    if vis.any():
+        d2 = ((pred[:, :2] - gt[:, :2]) ** 2).sum(1)
+        return float(np.exp(-(d2 / var / (area + np.spacing(1)) / 2)[vis]).mean())
+    if box is None:
         return 0.0
-    d2 = ((pred[:, :2] - gt[:, :2]) ** 2).sum(1)
-    e = d2 / ((2 * np.asarray(sigmas)) ** 2) / (area + np.spacing(1)) / 2
-    return float(np.exp(-e[vis]).mean())
+    x, y, w, h = box
+    dx = np.maximum(0, (x - w) - pred[:, 0]) + np.maximum(0, pred[:, 0] - (x + 2 * w))
+    dy = np.maximum(0, (y - h) - pred[:, 1]) + np.maximum(0, pred[:, 1] - (y + 2 * h))
+    return float(np.exp(-((dx ** 2 + dy ** 2) / var / (area + np.spacing(1)) / 2)).mean())
 
 
 class KeypointAP:
     """COCO-style keypoint AP (OKS 0.50:0.95, 101-point precision, up to 20 people
-    a picture, people without labelled keypoints ignored). Written to the
-    published definition for easydetect; within a few tenths of pycocotools,
-    which also gives crowd regions their own treatment."""
+    a picture, people without labelled keypoints and crowds ignored), written
+    to pycocotools' definition for easydetect. Pass the people's ``boxes`` to
+    ``add`` for its handling of unlabelled people."""
 
     THRESHOLDS = np.linspace(0.5, 0.95, 10)
 
@@ -358,19 +369,25 @@ class KeypointAP:
         self.positives = 0
 
     def add(self, pred: np.ndarray, scores: np.ndarray, gt: np.ndarray, areas: np.ndarray,
-            ignore: np.ndarray | None = None) -> None:
+            ignore: np.ndarray | None = None, boxes: np.ndarray | None = None) -> None:
         """One picture: ``pred (D, K, 2)``, ``scores (D,)``, ``gt (G, K, 3)``,
-        ``areas (G,)``; ``ignore`` marks crowds (and people with no keypoints
-        labelled are ignored anyway)."""
+        ``areas (G,)``; ``ignore`` marks crowds, which, as in pycocotools, any
+        number of predictions may match (and people with no keypoints labelled
+        are ignored anyway). ``boxes (G, 4)``, the people's x, y, w, h, let a
+        prediction match an unlabelled person (see ``oks``); without them it
+        cannot, and a picture full of unlabelled people scores lower than
+        pycocotools would."""
         gt = np.asarray(gt, np.float64).reshape(-1, len(self.sigmas), 3)
-        ig = (gt[:, :, 2] > 0).sum(1) == 0
-        if ignore is not None:
-            ig |= np.asarray(ignore, bool)
+        crowd = np.zeros(len(gt), bool) if ignore is None else np.asarray(ignore, bool)
+        ig = ((gt[:, :, 2] > 0).sum(1) == 0) | crowd
+        boxes = [None] * len(gt) if boxes is None else np.asarray(boxes, np.float64)
         order_g = np.argsort(ig, kind="stable")  # people that count first
-        gt, areas, ig = gt[order_g], np.asarray(areas)[order_g], ig[order_g]
+        gt, areas, ig, crowd = gt[order_g], np.asarray(areas)[order_g], ig[order_g], crowd[order_g]
+        boxes = [boxes[i] for i in order_g]
         order = np.argsort(-np.asarray(scores), kind="stable")[: self.max_det]
         pred, scores = np.asarray(pred)[order], np.asarray(scores)[order]
-        sims = np.array([[oks(p, g, a, self.sigmas) for g, a in zip(gt, areas, strict=True)]
+        sims = np.array([[oks(p, g, a, self.sigmas, b)
+                          for g, a, b in zip(gt, areas, boxes, strict=True)]
                          for p in pred]) \
             .reshape(len(pred), len(gt))
         out = np.zeros((len(self.THRESHOLDS), len(pred)), np.int8)
@@ -387,7 +404,7 @@ class KeypointAP:
                         continue
                     best, best_sim = g, sims[d, g]
                 if best >= 0:
-                    taken[best] = True
+                    taken[best] = not crowd[best]  # a crowd takes any number
                     out[t, d] = -1 if ig[best] else 1
         self.scores.append(scores.astype(np.float64))
         self.matched.append(out)

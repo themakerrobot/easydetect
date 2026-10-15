@@ -471,3 +471,84 @@ def test_each_keypoint_size_takes_its_detectors_whole_backbone(size, detector):
     # (dfine-l freezes its norms, which keeps none)
     missing = set(net.backbone.state_dict()) - {k[len("backbone."):] for k in det}
     assert all(k.endswith("num_batches_tracked") for k in missing)
+
+
+def test_a_person_with_no_keypoints_labelled_is_matched_and_ignored():
+    """pycocotools measures a prediction against an unlabelled person by their
+    box, so it is neither right nor wrong; without the boxes it counts as wrong."""
+    from easydetect.pose import KeypointAP
+
+    labelled = np.zeros((17, 3))
+    labelled[:, :2], labelled[:, 2] = np.stack([np.arange(17) * 2 + 10, np.arange(17) + 20], 1), 2
+    unlabelled = np.zeros((17, 3))
+    gt = np.stack([labelled, unlabelled])
+    pred = np.stack([labelled[:, :2], np.full((17, 2), 300.0)])   # the second on the unlabelled one
+    boxes = np.array([[10, 20, 40, 20], [290, 290, 20, 20]], np.float64)
+    with_boxes, without = KeypointAP(), KeypointAP()
+    with_boxes.add(pred, np.array([0.5, 0.9]), gt, np.array([800.0, 400.0]), boxes=boxes)
+    without.add(pred, np.array([0.5, 0.9]), gt, np.array([800.0, 400.0]))
+    assert with_boxes.compute()["ap"] == pytest.approx(1.0)
+    assert without.compute()["ap"] < 1.0
+
+
+def test_keypoint_ap_agrees_with_pycocotools():
+    pytest.importorskip("pycocotools")
+    import contextlib
+    import io
+    import json
+
+    from pycocotools.coco import COCO
+    from pycocotools.cocoeval import COCOeval
+
+    from easydetect.pose import KeypointAP
+
+    rng = np.random.default_rng(0)
+    images, anns, dets, ap, aid = [], [], [], KeypointAP(), 1
+    for img in range(1, 121):
+        images.append({"id": img, "width": 640, "height": 480})
+        gts = []
+        for _ in range(rng.integers(0, 5)):
+            x, y, w, h = rng.uniform(0, 400), rng.uniform(0, 300), rng.uniform(30, 200), \
+                rng.uniform(60, 250)
+            kp = np.zeros((17, 3))
+            n = 0 if rng.random() < 0.3 else int(rng.integers(1, 18))
+            idx = rng.choice(17, n, replace=False)
+            kp[idx, 0], kp[idx, 1] = x + rng.uniform(0, w, n), y + rng.uniform(0, h, n)
+            kp[idx, 2] = 2
+            a = {"id": aid, "image_id": img, "category_id": 1, "bbox": [x, y, w, h],
+                 "area": w * h * 0.6, "iscrowd": int(rng.random() < 0.05), "num_keypoints": n,
+                 "keypoints": kp.ravel().tolist()}
+            aid += 1
+            anns.append(a)
+            gts.append(a)
+        preds, scores = [], []
+        for _ in range(rng.integers(0, 7)):
+            if gts and rng.random() < 0.7:
+                g = gts[rng.integers(len(gts))]
+                x, y, w, h = g["bbox"]
+                p = np.stack([x + rng.uniform(0, w, 17), y + rng.uniform(0, h, 17)], 1)
+                kp = np.array(g["keypoints"]).reshape(17, 3)
+                vis = kp[:, 2] > 0
+                p[vis] = kp[vis, :2] + rng.normal(0, rng.uniform(1, 15), (vis.sum(), 2))
+            else:
+                p = np.stack([rng.uniform(0, 640, 17), rng.uniform(0, 480, 17)], 1)
+            preds.append(p)
+            scores.append(float(rng.random()))
+            dets.append({"image_id": img, "category_id": 1, "score": scores[-1],
+                         "keypoints": np.concatenate([p, np.ones((17, 1))], 1).ravel().tolist()})
+        ap.add(np.array(preds).reshape(len(preds), 17, 2), np.array(scores),
+               np.array([a["keypoints"] for a in gts]).reshape(len(gts), 17, 3),
+               np.array([a["area"] for a in gts]), np.array([a["iscrowd"] for a in gts], bool),
+               np.array([a["bbox"] for a in gts]).reshape(len(gts), 4))
+    truth = COCO()
+    truth.dataset = {"images": images, "annotations": anns,
+                     "categories": [{"id": 1, "name": "person"}]}
+    with contextlib.redirect_stdout(io.StringIO()):
+        truth.createIndex()
+        ev = COCOeval(truth, truth.loadRes(json.loads(json.dumps(dets))), "keypoints")
+        ev.evaluate()
+        ev.accumulate()
+        ev.summarize()
+    ours = ap.compute()
+    assert ours["ap"] == pytest.approx(ev.stats[0], abs=1e-4)
+    assert ours["ap50"] == pytest.approx(ev.stats[1], abs=1e-4)

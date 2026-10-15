@@ -67,7 +67,7 @@ jobs:
       - name: Install
         run: |
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[train]"
+          pip install -e ".[train]" pycocotools
       - name: COCO val2017 and annotations
         run: |
           mkdir -p coco/images && cd coco
@@ -79,7 +79,7 @@ jobs:
       - name: Score
         run: |
           set -o pipefail
-          score() { python tools/train_pose.py --coco coco --eval "$ONNX" --device CPU "$@" \
+          score() { python tools/train_pose.py --coco coco --eval "$ONNX" --device CPU --pycocotools "$@" \
                       | tail -n 1 | tee -a scores.txt; }
           score --detector gt --no-flip --no-subpixel
           score --detector gt --no-flip

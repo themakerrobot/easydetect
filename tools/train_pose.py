@@ -49,14 +49,16 @@ from easydetect.pose_trainer import (  # noqa: E402, F401
 
 def evaluate_pipeline(coco: str, onnx: Path, detector: str, device: str = "AUTO",
                       limit: int | None = None, flip: bool = True,
-                      subpixel: bool = True) -> dict:
+                      subpixel: bool = True, pycocotools: bool = False) -> dict:
     """OKS AP on val2017 the way it is used: the detector's person boxes, then
     keypoints in each — every picture, people missed and false boxes included.
     A person's score is its box confidence times its mean keypoint confidence.
 
     ``detector="gt"`` takes the labelled boxes instead (confidence 1): the
     keypoint model alone, as training scores it, but through the exported
-    model and the runtime's decoding (``flip``, ``subpixel``)."""
+    model and the runtime's decoding (``flip``, ``subpixel``).
+    ``pycocotools=True`` also scores the same predictions with pycocotools
+    (``pip install pycocotools``), the evaluator others publish with."""
     import cv2
 
     from easydetect import Detector
@@ -69,6 +71,7 @@ def evaluate_pipeline(coco: str, onnx: Path, detector: str, device: str = "AUTO"
     estimator = KeypointEstimator(onnx, device="CPU" if device == "AUTO" else device,
                                   flip=flip, subpixel=subpixel)
     ap = KeypointAP()
+    found = []  # for pycocotools
     ids = sorted(images)[:limit] if limit else sorted(images)
     started = time.time()
     for k, image_id in enumerate(ids):
@@ -92,15 +95,44 @@ def evaluate_pipeline(coco: str, onnx: Path, detector: str, device: str = "AUTO"
                           for b, c in zip(box_conf, conf, strict=True)])
         gt = np.array([a["keypoints"] for a in anns], np.float64).reshape(len(anns), 17, 3)
         ap.add(xy, score, gt, np.array([a["area"] for a in anns]),
-               np.array([a.get("iscrowd", 0) for a in anns], bool))
+               np.array([a.get("iscrowd", 0) for a in anns], bool),
+               np.array([a["bbox"] for a in anns], np.float64).reshape(len(anns), 4))
+        for p, s_ in zip(xy, score, strict=True):
+            found.append({"image_id": image_id, "category_id": 1, "score": float(s_),
+                          "keypoints": np.concatenate([p, np.ones((len(p), 1))], 1)
+                          .ravel().round(2).tolist()})
         if (k + 1) % 500 == 0:
             print(f"  {k + 1}/{len(ids)}  {time.time() - started:.0f}s", flush=True)
     result = ap.compute()
+    if pycocotools:
+        result.update(_pycocotools(Path(coco), found, ids))
     how = ("flip, " if flip else "") + ("sub-pixel" if subpixel else "argmax")
     print(f"{onnx.name} on {detector} boxes ({how}), {len(ids)} pictures: "
           + ", ".join(f"{k} {v:.4f}" for k, v in result.items()))
     return result
 
+
+
+def _pycocotools(coco: Path, found: list, ids: list) -> dict:
+    """pycocotools' keypoint AP of the same predictions, over the same pictures."""
+    import contextlib
+    import io
+
+    from pycocotools.coco import COCO
+    from pycocotools.cocoeval import COCOeval
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        truth = COCO(str(coco / "annotations" / "person_keypoints_val2017.json"))
+        result = truth.loadRes(found) if found else None
+        if result is None:
+            return {"coco_ap": 0.0}
+        ev = COCOeval(truth, result, "keypoints")
+        ev.params.imgIds = ids
+        ev.evaluate()
+        ev.accumulate()
+        ev.summarize()
+    return {"coco_ap": float(ev.stats[0]), "coco_ap50": float(ev.stats[1]),
+            "coco_ap75": float(ev.stats[2])}
 
 
 def train(args) -> None:
@@ -154,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="--eval: read each crop once, not also mirrored (as pose_flip=False)")
     p.add_argument("--no-subpixel", action="store_true",
                    help="--eval: decode to the peak bin only")
+    p.add_argument("--pycocotools", action="store_true",
+                   help="--eval: also score with pycocotools (pip install pycocotools)")
     args = p.parse_args(argv)
     if args.export:
         export(args.export)
@@ -162,7 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.coco:
             p.error("--coco is required to evaluate")
         evaluate_pipeline(args.coco, args.eval, args.detector, args.device or "AUTO",
-                          args.val_limit, flip=not args.no_flip, subpixel=not args.no_subpixel)
+                          args.val_limit, flip=not args.no_flip, subpixel=not args.no_subpixel,
+                          pycocotools=args.pycocotools)
         return 0
     if not args.coco:
         p.error("--coco is required to train")

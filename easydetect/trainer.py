@@ -436,6 +436,8 @@ class Trainer:
             # a resumed run started where its first attempt did
             "start": old.get("start") or self.origin,
             "imgsz": self.imgsz,
+            "queries": self.net.decoder.num_queries,
+            "denoising": self.net.decoder.num_denoising,
             "batch": self.batch,
             "epochs": self.epochs,
             "patience": self.patience,
@@ -736,6 +738,8 @@ class Trainer:
                 "scaler": self.scaler.state_dict() if self.amp else None,
                 "variant": net.variant,
                 "num_classes": net.num_classes,
+                "queries": net.decoder.num_queries,
+                "denoising": net.decoder.num_denoising,
                 "names": self.cfg["names"],
                 "epoch": epoch,
                 "best": self.best,

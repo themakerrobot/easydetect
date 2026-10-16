@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `train(queries=, denoising=)`: fewer decoder queries (of 300) and denoising
+  queries (100) while training. On a CPU most of a step goes to them, not to
+  the picture (dfine-n at 256, 320 or 416 px: about the same time a step);
+  `queries=100, denoising=30` with `freeze="backbone"` trains about 2× faster
+  on a laptop. The checkpoint keeps the query count, so the model also runs
+  with it.
+- `tools/profile_train.py --freeze --queries --denoising`, and the same options
+  in `tools/bench_finetune.py`.
+
 ## 0.7.2
 
 - **Fixed: downloads from the mirror could fail since 0.7.0.** The SHA-256

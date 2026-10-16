@@ -457,6 +457,11 @@ class Detector:
         self.names = {int(k): str(v) for k, v in ckpt.get("names", {}).items()}
         self.net = DFINENet(ckpt["variant"], ckpt["num_classes"], pretrained_backbone=False)
         self.net.load_state_dict(ckpt["model"])
+        # trained with fewer queries: runs (and fine-tunes again) with as many
+        if ckpt.get("queries") and ckpt["queries"] != self.net.decoder.num_queries:
+            self.net.trim(queries=int(ckpt["queries"]))
+        if ckpt.get("denoising") is not None:
+            self.net.decoder.num_denoising = int(ckpt["denoising"])
         self.net.eval()
         self.ir_path = None
         self.predictor = None
@@ -505,6 +510,8 @@ class Detector:
         seg_epochs: int = 20,
         seg_batch: int = 16,
         seg_lr: float = 1e-4,
+        queries: int | None = None,
+        denoising: int | None = None,
         **kwargs: Any,
     ) -> Path:
         """Train on a data.yaml dataset. Returns the path of ``best.pt``.
@@ -517,6 +524,12 @@ class Detector:
         the last tenth of the epochs; ``False`` keeps only the flip.
         ``on_epoch_end`` is called with a dict of the epoch's numbers — the
         same row that lands in ``results.csv``.
+
+        ``queries`` (of 300) and ``denoising`` (training-only queries, 100)
+        make every step cheaper; on a CPU most of a step is spent on them, not
+        on the picture. ``queries=100, denoising=30`` trains dfine-n about
+        twice as fast on a laptop and suits scenes with a handful of objects;
+        the model keeps ``queries`` (it runs faster too).
 
         A keypoint dataset (``kpt_shape`` in its data.yaml, Ultralytics' pose
         format) also trains a keypoint network after the detector: on crops of
@@ -561,6 +574,10 @@ class Detector:
         elif self.net.num_classes != cfg["nc"]:
             self.net = self._reheaded_net(cfg["nc"])
 
+        if queries is not None:
+            self.net.trim(queries=int(queries))
+        if denoising is not None:
+            self.net.decoder.num_denoising = int(denoising)
         device = _torch_device(device)
         trainer = Trainer(
             self.net,

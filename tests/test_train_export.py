@@ -477,3 +477,20 @@ def test_multiscale_mosaic_and_mixup_train_and_are_recorded(dataset, tmp_path, m
     assert any("mixup" in line for line in setup["augment"])
     assert any("random size, 32–64" in line for line in setup["augment"])
     assert (32, 32) in sizes  # the batches went through at the drawn size
+
+
+def test_fewer_queries_train_and_stay_with_the_model(dataset, tmp_path, monkeypatch):
+    monkeypatch.setattr("easydetect.nn.hgnetv2.HGNetv2.load_imagenet", lambda self, name, url: None)
+    model = Detector("dfine-n", verbose=False, pretrained=False)
+    best = model.train(data=str(dataset), project=str(tmp_path), epochs=1, imgsz=64, batch=2,
+                       workers=0, device="cpu", val=False, amp=False, queries=40, denoising=10)
+    again = Detector(str(best), verbose=False)
+    again._ensure_net()
+    assert again.net.decoder.num_queries == 40 and again.net.decoder.num_denoising == 10
+    # at 160 px the encoder has more than 300 candidates: only the trim limits it
+    onnx = again.export(format="onnx", imgsz=160, out_dir=tmp_path / "x", verbose=False)
+    import onnxruntime as ort
+
+    out = ort.InferenceSession(str(onnx)).run(None, {"images": np.zeros((1, 3, 160, 160),
+                                                                       np.float32)})
+    assert any(o.shape[1] == 40 for o in out if o.ndim == 3)

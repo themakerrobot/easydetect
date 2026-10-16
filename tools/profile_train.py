@@ -35,6 +35,9 @@ def main():
     parser.add_argument("--steps", type=int, default=40)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--no-amp", action="store_true")
+    parser.add_argument("--freeze", default=None, help="backbone, encoder, …: parts not trained")
+    parser.add_argument("--queries", type=int, help="decoder queries while training (of 300)")
+    parser.add_argument("--denoising", type=int, help="denoising queries while training (100)")
     parser.add_argument("--trace", action="store_true", help="also PyTorch's operator table")
     parser.add_argument("--syncs", action="store_true",
                         help="list the lines of easydetect where a step waits for the GPU")
@@ -44,9 +47,14 @@ def main():
 
     nc = load_data_yaml(args.data)["nc"]
     net = DFINENet(args.model, nc)
+    if args.queries:
+        net.trim(queries=args.queries)
+    if args.denoising is not None:
+        net.decoder.num_denoising = args.denoising
     with tempfile.TemporaryDirectory() as tmp:
         tr = Trainer(net, args.data, epochs=1, imgsz=args.imgsz, batch=args.batch,
-                     workers=args.workers, project=tmp, amp=not args.no_amp)
+                     workers=args.workers, project=tmp, amp=not args.no_amp,
+                     freeze=args.freeze)
         ds = DetDataset(args.data, "train", args.imgsz, augment=True)
         dl = tr._loader(ds)
         net = tr.net.to(tr.device).train()

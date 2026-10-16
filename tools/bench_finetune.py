@@ -141,14 +141,17 @@ def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
     # in a process of its own, as the yolo command is: a crash in what training
     # leaves behind (loader workers, CUDA) then takes only that process down
     started = time.time()
-    code = ("import sys; from easydetect import Detector; "
+    extra = {k: v for k, v in (("queries", args.queries), ("denoising", args.denoising),
+                               ("freeze", args.freeze)) if v is not None}
+    code = ("import json, sys; from easydetect import Detector; "
             "print('BEST', Detector(sys.argv[1], verbose=False).train(data=sys.argv[2], "
             "epochs=int(sys.argv[3]), imgsz=int(sys.argv[4]), batch=int(sys.argv[5]), "
             "patience=int(sys.argv[3]), project=sys.argv[6], name=sys.argv[1], "
-            "workers=int(sys.argv[7])))")
+            "workers=int(sys.argv[7]), **json.loads(sys.argv[8])))")
     best = None
     with subprocess.Popen([sys.executable, "-c", code, args.dfine, str(data), str(args.epochs),
-                           str(args.imgsz), str(args.batch), str(out), str(args.workers)],
+                           str(args.imgsz), str(args.batch), str(out), str(args.workers),
+                           json.dumps(extra)],
                           env=UNBUFFERED, stdout=subprocess.PIPE, text=True) as proc:
         for line in proc.stdout:                    # passed on as it comes
             print(line, end="", flush=True)
@@ -276,6 +279,9 @@ def main():
     parser.add_argument("--yolo", default="yolo26s.pt")
     parser.add_argument("--dfine", default="dfine-s")
     parser.add_argument("--device", default="CPU", help="OpenVINO device for scoring")
+    parser.add_argument("--queries", type=int, help="D-FINE decoder queries (of 300)")
+    parser.add_argument("--denoising", type=int, help="D-FINE denoising queries (100)")
+    parser.add_argument("--freeze", help="D-FINE parts not trained (backbone)")
     parser.add_argument("--rescore", action="store_true",
                         help="score finished datasets again (their trained models are reused)")
     args = parser.parse_args()

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.3
 
 - `train(queries=, denoising=)`: fewer decoder queries (of 300) and denoising
   queries (100) while training. On a CPU most of a step goes to them, not to

@@ -87,3 +87,67 @@ def test_labels_txt_is_optional_when_fetching_an_ir(tmp_path, monkeypatch):
     xml = downloads.download_ir("dfine_s")
     assert xml.name == "dfine-s.xml"
     assert wanted == ["dfine-s.xml", "dfine-s.bin", "labels.txt"]
+
+
+def _serve(routes):
+    """A local HTTP server: ``routes[path] = (status, headers, body)``."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            status, headers, body = routes[self.path]
+            self.send_response(status)
+            for k, v in headers.items():
+                self.send_header(k, v)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+
+def test_a_storage_etag_that_is_not_the_sha256_is_ignored(tmp_path):
+    """Hugging Face redirects to storage whose ETag is another hash: a good
+    file must not be thrown away for it."""
+    import hashlib
+
+    from easydetect.downloads import download
+
+    body = b"model bytes" * 100
+    sha = hashlib.sha256(body).hexdigest()
+    other = hashlib.sha256(b"something else").hexdigest()
+    server, base = _serve({
+        "/hf": (302, {"Location": "/store", "X-Linked-Etag": f'"{sha}"'}, b""),
+        "/store": (200, {"ETag": f'"{other}"'}, body),
+    })
+    try:
+        assert download(f"{base}/hf", tmp_path / "m.bin", progress=False).read_bytes() == body
+    finally:
+        server.shutdown()
+
+
+def test_a_file_that_does_not_match_the_linked_sha256_is_refused(tmp_path):
+    import hashlib
+
+    import pytest
+
+    from easydetect.downloads import download
+    from easydetect.errors import DownloadError
+
+    wrong = hashlib.sha256(b"not it").hexdigest()
+    server, base = _serve({
+        "/hf": (302, {"Location": "/store", "X-Linked-Etag": f'"{wrong}"'}, b""),
+        "/store": (200, {}, b"model bytes"),
+    })
+    try:
+        with pytest.raises(DownloadError):
+            download(f"{base}/hf", tmp_path / "m.bin", progress=False)
+        assert not (tmp_path / "m.bin").exists()
+    finally:
+        server.shutdown()

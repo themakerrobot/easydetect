@@ -80,10 +80,23 @@ def download(url: str, dest: Path, progress: bool = True) -> Path:
     tmp = dest.with_suffix(dest.suffix + f".{os.getpid()}.part")
     request = urllib.request.Request(url, headers={"User-Agent": "easydetect"})
     digest = hashlib.sha256()
+    linked: dict[str, str] = {}
+
+    class _Remember(urllib.request.HTTPRedirectHandler):
+        """Hugging Face states a large file's SHA-256 in ``X-Linked-Etag`` on
+        the redirect to its storage; the storage's own ``ETag`` is some other
+        hash. Keep the first, never trust the second."""
+
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if headers.get("X-Linked-Etag"):
+                linked.setdefault("etag", headers["X-Linked-Etag"])
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    opener = urllib.request.build_opener(_Remember)
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT) as response, open(tmp, "wb") as out:
+        with opener.open(request, timeout=_TIMEOUT) as response, open(tmp, "wb") as out:
             total = int(response.headers.get("Content-Length") or 0)
-            tag = (response.headers.get("X-Linked-Etag") or response.headers.get("ETag") or "")
+            tag = linked.get("etag") or response.headers.get("X-Linked-Etag") or ""
             expected = re.fullmatch(r'(?:W/)?"?([0-9a-f]{64})"?', tag.strip())
             done = 0
             while chunk := response.read(1 << 16):

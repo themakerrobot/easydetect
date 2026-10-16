@@ -33,11 +33,15 @@ def _model_files(spec) -> list[Path]:
             # a model name (dfine-n): the mirror's ready-made IR and ONNX
             from . import downloads
 
+            fetched = []
             for fetch in (downloads.download_ir, downloads.download_onnx):
                 try:
-                    files.append(fetch(str(item)))
-                except Exception:  # noqa: BLE001 — one format missing is fine
-                    pass
+                    fetched.append(fetch(str(item)))
+                except Exception as exc:  # noqa: BLE001 — one format missing is fine
+                    print(f"[easydetect] {item}: {exc}")
+            if not fetched:
+                raise FileNotFoundError(f"could not fetch {item} from the mirror (see above)")
+            files += fetched
             continue
         if path.is_dir():
             files += sorted(p for p in path.rglob("*") if p.suffix in (".xml", ".onnx"))

@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.7.2
+
+- **Fixed: downloads from the mirror could fail since 0.7.0.** The SHA-256
+  check took the storage server's `ETag` (another hash, after Hugging Face's
+  redirect) for the file's SHA-256 and threw a good file away. Only
+  `X-Linked-Etag`, which Hugging Face sends with the redirect, is trusted now.
+- `easydetect benchmark` takes model names (`dfine-n`) and says why one could
+  not be fetched.
 
 - `easydetect benchmark model=<files or folders> threads=4`: times every model
   on every runtime that can read it (OpenVINO, ONNX Runtime): preprocessing,

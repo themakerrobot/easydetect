@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.1
 
 - **Faster training steps on a GPU.** Every layer's matching now crosses to
   the CPU in one copy instead of one per layer; the matched indices go back to
@@ -11,8 +11,9 @@
   decoder's anchors are built once per size (were rebuilt on the CPU every
   step); the network runs channels-last on a GPU; the loss no longer waits
   for the GPU at boolean selections, box checks and a value comparison (78
-  waits a step before). The losses are unchanged (tested equal). dfine-s at
-  batch 16 on an RTX 5090: 172 -> 100 ms a step, then less.
+  waits a step before, 2 now). The losses are unchanged (tested equal).
+  dfine-s at batch 16 on an RTX 5090: 172 -> 97 ms a step (93 -> 166
+  pictures a second), 1.8× faster.
 - `tools/profile_train.py`: where a training step's time goes (data, forward,
   loss, backward, update), `--trace` for PyTorch's operator table.
 

@@ -7,8 +7,9 @@ runtime that can read it (OpenVINO reads .xml and .onnx, ONNX Runtime .onnx),
 on one picture, ``runs`` times after ``warmup``; the medians of preprocessing,
 inference and decoding are printed as a table, fastest first.
 
-``model=`` takes files, folders (every .xml / .onnx inside, at any depth) or
-both. With no
+``model=`` takes files, folders (every .xml / .onnx inside, at any depth),
+model names (``dfine-n``: the mirror's ready-made 640 px IR and ONNX), or a
+mix. With no
 ``source=`` the picture is a synthetic 640×480 frame, the size a Pi camera
 usually delivers; the time a model takes does not depend on what it sees.
 """
@@ -28,6 +29,16 @@ def _model_files(spec) -> list[Path]:
     files: list[Path] = []
     for item in items:
         path = Path(str(item)).expanduser()
+        if not path.exists() and _is_name(str(item)):
+            # a model name (dfine-n): the mirror's ready-made IR and ONNX
+            from . import downloads
+
+            for fetch in (downloads.download_ir, downloads.download_onnx):
+                try:
+                    files.append(fetch(str(item)))
+                except Exception:  # noqa: BLE001 — one format missing is fine
+                    pass
+            continue
         if path.is_dir():
             files += sorted(p for p in path.rglob("*") if p.suffix in (".xml", ".onnx"))
         elif path.exists():
@@ -37,6 +48,12 @@ def _model_files(spec) -> list[Path]:
     if not files:
         raise FileNotFoundError(f"no .xml or .onnx models in {spec}")
     return files
+
+
+def _is_name(text: str) -> bool:
+    from . import downloads
+
+    return downloads.is_model_name(text)
 
 
 def _label(path: Path, spec) -> str:

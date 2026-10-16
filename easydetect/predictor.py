@@ -401,8 +401,10 @@ class OVPredictor(Predictor):
         imgsz: int | None = None,
         names: dict[int, str] | None = None,
         precision: str | None = None,
+        threads: int | None = None,
     ) -> None:
-        """``precision`` overrides what OpenVINO runs the graph in.
+        """``precision`` overrides what OpenVINO runs the graph in;
+        ``threads`` caps the CPU threads it uses (default: all cores).
 
         Left alone, OpenVINO picks: on a CPU that supports it that means
         bfloat16, which is much faster but shifts scores slightly. Pass
@@ -414,6 +416,8 @@ class OVPredictor(Predictor):
         core = ov_core()
         model = core.read_model(str(self.model_path))
         config = {"INFERENCE_PRECISION_HINT": precision} if precision else {}
+        if threads and "CPU" in device.upper():
+            config["INFERENCE_NUM_THREADS"] = int(threads)
         self.compiled = core.compile_model(model, device, config)
         self.input = self.compiled.input(0)
         # CompiledModel.__call__ reuses one InferRequest, so a second thread

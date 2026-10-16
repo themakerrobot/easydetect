@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `easydetect benchmark model=<files or folders> threads=4`: times every model
+  on every runtime that can read it (OpenVINO, ONNX Runtime): preprocessing,
+  inference, decoding and fps, fastest first. Needs no PyTorch, so it runs on
+  the device itself (a Raspberry Pi).
+- `tools/pi_kit.py` (on the PC): exports models × input sizes × lighter
+  decoders, as OpenVINO IR, 8-bit IR and ONNX, and scores each on a val split,
+  so a Pi's timings and the accuracy make one table.
+- `OVPredictor(threads=)` caps OpenVINO's CPU threads.
+
 ## 0.7.1
 
 - **Faster training steps on a GPU.** Every layer's matching now crosses to

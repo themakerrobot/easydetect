@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-MODES = ("predict", "track", "train", "val", "export", "serve")
+MODES = ("predict", "track", "train", "val", "export", "serve", "benchmark")
 
 HELP = """easydetect — real-time object detection (D-FINE), Apache-2.0
 
@@ -27,6 +27,7 @@ Modes:
   val       COCO-style mAP50 / mAP50-95 on the val split
   export    write an OpenVINO IR (or ONNX) next to the checkpoint
   serve     answer POST /predict with detections as JSON (an HTTP server)
+  benchmark time models on this machine (OpenVINO and ONNX Runtime; no PyTorch needed)
 
 Common keys:
   model=dfine-n|s|m|l|x|best.pt|model.xml   source=bus.jpg|dir|video.mp4|0|url
@@ -41,6 +42,7 @@ Examples:
   easydetect val     model=best.pt data=data.yaml
   easydetect export  model=best.pt format=openvino half=true
   easydetect serve   model=best.onnx host=0.0.0.0 port=8000
+  easydetect benchmark model=pi-kit/ runs=50 threads=4
 """
 
 
@@ -103,6 +105,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown mode {mode!r}. Modes: {', '.join(MODES)}\n", file=sys.stderr)
         print(HELP, file=sys.stderr)
         return 2
+
+    if mode == "benchmark":
+        from .benchmark import benchmark
+
+        keys = ("model", "source", "runs", "warmup", "backend", "device", "threads")
+        unknown = set(overrides) - set(keys)
+        if unknown or "model" not in overrides:
+            print(f"benchmark takes model= (files or folders) and {', '.join(keys[1:])}",
+                  file=sys.stderr)
+            return 2
+        benchmark(overrides["model"], source=overrides.get("source"),
+                  runs=int(overrides.get("runs", 50)), warmup=int(overrides.get("warmup", 5)),
+                  backend=overrides.get("backend"), device=str(overrides.get("device", "CPU")),
+                  threads=overrides.get("threads"))
+        return 0
 
     if mode == "serve":
         from .serve import serve

@@ -117,6 +117,9 @@ def main():
               f"{args.batch * 1000 / wall:.0f} pictures/s)")
         print("  data = waiting for the loader; a big number there means more --workers "
               "(or a faster disk) would help")
+        if cuda:
+            peak = torch.cuda.max_memory_allocated(tr.device) / 2**30
+            print(f"  GPU memory at peak: {peak:.1f} GB (this model, batch and size)")
 
         if args.syncs and cuda:
             import collections

@@ -143,6 +143,8 @@ def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
     started = time.time()
     extra = {k: v for k, v in (("queries", args.queries), ("denoising", args.denoising),
                                ("freeze", args.freeze)) if v is not None}
+    if args.no_augment:
+        extra["augment"] = False
     code = ("import json, sys; from easydetect import Detector; "
             "print('BEST', Detector(sys.argv[1], verbose=False).train(data=sys.argv[2], "
             "epochs=int(sys.argv[3]), imgsz=int(sys.argv[4]), batch=int(sys.argv[5]), "
@@ -282,6 +284,9 @@ def main():
     parser.add_argument("--queries", type=int, help="D-FINE decoder queries (of 300)")
     parser.add_argument("--denoising", type=int, help="D-FINE denoising queries (100)")
     parser.add_argument("--freeze", help="D-FINE parts not trained (backbone)")
+    parser.add_argument("--no-augment", action="store_true",
+                        help="D-FINE without zoom, crop and colour jitter (the lab's classroom "
+                             "preset); YOLO keeps its own")
     parser.add_argument("--rescore", action="store_true",
                         help="score finished datasets again (their trained models are reused)")
     args = parser.parse_args()

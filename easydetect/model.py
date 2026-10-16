@@ -574,7 +574,8 @@ class Detector:
             loaded = getattr(self.net.backbone, "imagenet_loaded", False)
             origin = {"kind": "imagenet" if loaded else "scratch"}
         elif self.net.num_classes != cfg["nc"]:
-            self.net = self._reheaded_net(cfg["nc"])
+            self.net = self._reheaded_net(cfg["nc"], cfg["names"])
+            self.names = cfg["names"]
 
         if queries is not None:
             self.net.trim(queries=int(queries))
@@ -691,21 +692,35 @@ class Detector:
             if self.verbose:
                 print(f"{exc}", file=sys.stderr)
             return
+        wanted = dict(self.names)
         self._load_checkpoint(checkpoint)
         if self.net.num_classes != nc:
-            self.net = self._reheaded_net(nc)
+            self.net = self._reheaded_net(nc, wanted)
+        self.names = wanted
 
-    def _reheaded_net(self, nc: int):
-        """Keep backbone/encoder/decoder weights, re-init the class heads for ``nc``."""
+    def _reheaded_net(self, nc: int, names: dict[int, str] | None = None):
+        """Keep backbone/encoder/decoder weights and new class heads for ``nc``;
+        a class the checkpoint already has by name (``apple``, ``사과``) keeps
+        its rows of them."""
+        from .class_names import match_classes
         from .nn import DFINENet
 
+        old = self.net.state_dict()
         fresh = DFINENet(self.variant or "s", nc, pretrained_backbone=False)
-        transferred = transfer_weights(fresh, self.net.state_dict())
+        transferred = transfer_weights(fresh, old)
+        ckpt = getattr(self, "ckpt", None) or {}
+        source = {int(k): str(v) for k, v in ckpt.get("names", {}).items()}
+        known = match_classes(source, names or {}) if source else {}
+        if known:
+            copy_class_rows(fresh, old, self.net.num_classes, known)
         if self.verbose:
             print(
                 f"transferred {transferred} tensors from the "
                 f"{self.net.num_classes}-class checkpoint; class heads re-initialised for {nc}"
             )
+            if known:
+                print("classes the checkpoint knows, kept: " + ", ".join(
+                    f"{names[j]} ← {source[i]}" for j, i in sorted(known.items())))
         return fresh
 
     def val(
@@ -952,6 +967,30 @@ def transfer_weights(net, state_dict) -> int:
     return len(matched)
 
 
+def copy_class_rows(net, state_dict, old_nc: int, rows: dict[int, int]) -> int:
+    """Copy class heads' rows ``{new class: old class}`` from a checkpoint with
+    ``old_nc`` classes: every tensor whose first dimension counts the classes
+    (plus a padding row, as the denoising class embedding has) and whose other
+    dimensions match. Returns how many tensors took rows."""
+    import torch
+
+    target, changed = net.state_dict(), 0
+    nc = net.num_classes
+    for k, old in state_dict.items():
+        new = target.get(k)
+        if new is None or new.shape == old.shape or new.dim() != old.dim():
+            continue
+        extra = old.shape[0] - old_nc
+        if extra not in (0, 1) or new.shape[0] != nc + extra or new.shape[1:] != old.shape[1:]:
+            continue
+        with torch.no_grad():
+            for j, i in rows.items():
+                new[j] = old[i]
+        changed += 1
+    net.load_state_dict(target)
+    return changed
+
+
 def _import_torch():
     try:
         import torch
@@ -961,4 +1000,4 @@ def _import_torch():
         raise ImportError(_TORCH_HINT) from exc
 
 
-__all__ = ["Detector", "increment_path", "transfer_weights"]
+__all__ = ["Detector", "copy_class_rows", "increment_path", "transfer_weights"]

@@ -83,6 +83,14 @@ def _picture(source) -> np.ndarray:
     return img
 
 
+def _cause(exc: Exception) -> str:
+    """The line of an error that says what went wrong: OpenVINO nests its
+    messages, each starting with where it was raised, and the cause is last."""
+    lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
+    told = [ln for ln in lines if not ln.startswith("Exception from ")]
+    return (told[-1] if told else lines[-1] if lines else type(exc).__name__)[:200]
+
+
 def _predictor(path: Path, backend: str, device: str, threads: int | None):
     from .predictor import ORTPredictor, OVPredictor
 
@@ -110,7 +118,7 @@ def benchmark(model, source=None, runs: int = 50, warmup: int = 5,
                 predictor = _predictor(path, name, device, threads)
             except Exception as exc:  # noqa: BLE001 — one model failing must not stop the rest
                 rows.append({"model": _label(path, model), "backend": name,
-                             "error": str(exc)[:120]})
+                             "error": _cause(exc)})
                 continue
             for _ in range(warmup):
                 predictor(img, conf=0.25)

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.5
+
+- **Classes the COCO weights already know keep what they know.** Fine-tuning
+  on a dataset with other classes gave every class a fresh head; now a class
+  named like one of COCO's 80 (`apple`, `Bottles`, `mobile_phone`, and the
+  Korean names, `사과`, `컵`, `사람` …) starts from that class's rows. On 100
+  african-wildlife pictures (elephant and zebra are COCO classes) dfine-n at
+  320 px scored 0.25 mAP50-95 after the first epoch instead of 0.02, and 0.40
+  instead of 0.12 after six. `easydetect.class_names.match_classes`,
+  `easydetect.model.copy_class_rows`.
+- **Fixed: the last tenth of training (plain pictures) lost accuracy.** The
+  batch-norm statistics were re-estimated from plain-picture batches and the
+  score fell, every run (100 pictures: 0.48 → 0.40 mAP50-95 in three epochs).
+  Those epochs now keep the statistics the augmented ones gathered (0.48 held).
+  `best.pt` was never the worse model; the drop cost the chance to improve.
+- `easydetect benchmark`: a model that fails says why (the cause, the last line
+  of OpenVINO's message, not its first).
+- `tools/long_run.py`: a week of unattended runs on one GPU machine — COCO
+  fine-tuned at 320/416/640 px, every benchmark again — resuming after a crash
+  or a reboot. `tools/bench_finetune.py --no-augment`.
+
 ## 0.7.4
 
 - **Fixed: pictures in a folder with Hangul in its path could not be read on

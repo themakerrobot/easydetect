@@ -494,3 +494,22 @@ def test_fewer_queries_train_and_stay_with_the_model(dataset, tmp_path, monkeypa
     out = ort.InferenceSession(str(onnx)).run(None, {"images": np.zeros((1, 3, 160, 160),
                                                                        np.float32)})
     assert any(o.shape[1] == 40 for o in out if o.ndim == 3)
+
+
+def test_plain_picture_epochs_keep_the_batch_norm_statistics(dataset, tmp_path):
+    """The last tenth trains on plain pictures with the augmented epochs'
+    batch-norm statistics: re-estimating them there lost most of the score."""
+    import torch
+
+    model = Detector("dfine-n", verbose=False)
+    model.net = _blank_net(1)
+    seen = []
+
+    def stats(row):
+        bn = [m for m in model.net.modules() if isinstance(m, torch.nn.BatchNorm2d)]
+        seen.append(torch.cat([m.running_mean.clone() for m in bn]))
+
+    model.train(data=str(dataset), project=str(tmp_path), on_epoch_end=stats,
+                **{**TRAIN_KWARGS, "epochs": 4})
+    assert not torch.equal(seen[1], seen[2])   # augmented epochs: they adapt
+    assert torch.equal(seen[2], seen[3])       # the plain last epoch: kept

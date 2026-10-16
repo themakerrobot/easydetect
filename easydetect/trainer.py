@@ -610,6 +610,14 @@ class Trainer:
             net.train()
             for module in self.frozen:  # frozen batch norms must not keep adapting
                 module.eval()
+            if self.augment and epoch >= self.clean_from:
+                # the plain-picture epochs keep the batch-norm statistics the
+                # augmented ones gathered: re-estimated from plain batches they
+                # cost 0.48 -> 0.40 mAP in three epochs on a 100-picture set
+                # (kept, the score held at 0.48)
+                for module in net.modules():
+                    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                        module.eval()
             t0, running, reported = time.time(), 0.0, 0.0
             for step, (imgs, targets) in enumerate(dl):
                 self._set_lr(epoch, step, len(dl))

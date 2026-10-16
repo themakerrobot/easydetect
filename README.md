@@ -187,10 +187,32 @@ Read it plainly:
   tasks (oriented boxes, classification, depth), and a far larger ecosystem.
 
 COCO is a guide, not your answer. What matters is the model you get from a
-few hundred pictures of your own: `tools/bench_finetune.py` fine-tunes
-dfine-s and YOLO26s on the same public datasets (from 92 to 1,132 pictures)
-with each trainer's own defaults and scores both with one evaluator on the
-CPU. Its results will be published here.
+few hundred pictures of your own. `tools/bench_finetune.py` fine-tunes
+dfine-s (easydetect 0.7.0) and YOLO26s (Ultralytics 8.4) on the same public
+datasets, each with its own trainer's defaults (100 epochs, 640 px, batch 16,
+one RTX 5090), and scores both with one evaluator on the val split:
+
+| dataset | train pictures | YOLO26s mAP50-95 | dfine-s mAP50-95 | YOLO26s, one class a box | dfine-s, one class a box |
+| --- | --- | --- | --- | --- | --- |
+| african-wildlife | 1,052 | 0.830 | **0.866** | 0.828 | **0.855** |
+| construction-ppe | 1,132 | 0.289 | **0.303** | 0.288 | **0.303** |
+| brain-tumor | 893 | 0.357 | **0.466** | 0.264 | **0.379** |
+| signature | 143 | 0.984 | **0.991** | 0.984 | **0.991** |
+| medical-pills | 92 | 0.801 | **0.806** | 0.801 | **0.806** |
+| african-wildlife, 100 at random | 100 | 0.674 | **0.790** | 0.662 | **0.777** |
+
+| | YOLO26s | dfine-s |
+| --- | --- | --- |
+| inference, a picture (OpenVINO, Core Ultra 5 250K, 640 px) | **23–25 ms** | 28–32 ms |
+| training, 1,000 pictures × 100 epochs (RTX 5090) | **5 min** | 18 min |
+
+* **Accuracy: dfine-s ahead on all six**, by little where both are near the
+  ceiling (signature, pills) and by 11–12 points where it is hard: two
+  look-alike classes (brain-tumor) and 100 pictures for four classes.
+* **YOLO is about 20% faster to run and 3–4× faster to train.**
+* mAP50-95 counts a box for every class it scores, as each project scores
+  itself; "one class a box" is what `predict` hands out. The 100-picture set
+  is noisy: the same code trained twice gave 0.790 and 0.815.
 
 ## Command line
 

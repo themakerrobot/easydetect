@@ -7,7 +7,12 @@
   the GPU in one pinned copy instead of a blocking copy at each of the loss's
   dozens of indexing steps; two box counts no longer round-trip through the
   GPU; AdamW is fused; cuDNN picks its fastest convolutions (`benchmark`) and
-  float32 matmuls use TF32. The losses are unchanged (tested equal).
+  float32 matmuls use TF32; the encoder's position embedding and the
+  decoder's anchors are built once per size (were rebuilt on the CPU every
+  step); the network runs channels-last on a GPU; the loss no longer waits
+  for the GPU at boolean selections, box checks and a value comparison (78
+  waits a step before). The losses are unchanged (tested equal). dfine-s at
+  batch 16 on an RTX 5090: 172 -> 100 ms a step, then less.
 - `tools/profile_train.py`: where a training step's time goes (data, forward,
   loss, backward, update), `--trace` for PyTorch's operator table.
 

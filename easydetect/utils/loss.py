@@ -357,13 +357,16 @@ class DFINECriterion(nn.Module):
             if "teacher_corners" in outputs:
                 pred_corners = outputs["pred_corners"].reshape(-1, (self.reg_max + 1))
                 target_corners = outputs["teacher_corners"].reshape(-1, (self.reg_max + 1))
-                if torch.equal(pred_corners, target_corners):
+                # the same tensor (a layer that is its own teacher): D-FINE
+                # compared the values, which waits for the GPU; for two
+                # different layers the KL term is computed (0 if they agree)
+                if outputs["pred_corners"] is outputs["teacher_corners"]:
                     losses["loss_ddf"] = pred_corners.sum() * 0
                 else:
                     weight_targets_local = outputs["teacher_logits"].sigmoid().max(dim=-1)[0]
 
                     mask = torch.zeros_like(weight_targets_local, dtype=torch.bool)
-                    mask[idx] = True
+                    mask[idx] = torch.ones((), dtype=torch.bool, device=mask.device)
                     mask = mask.unsqueeze(-1).repeat(1, 1, 4).reshape(-1)
 
                     weight_targets_local[idx] = ious.reshape_as(weight_targets_local[idx]).to(
@@ -391,8 +394,12 @@ class DFINECriterion(nn.Module):
                             (mask.sum() * batch_scale) ** 0.5,
                             ((~mask).sum() * batch_scale) ** 0.5,
                         )
-                    loss_match_local1 = loss_match_local[mask].mean() if mask.any() else 0
-                    loss_match_local2 = loss_match_local[~mask].mean() if (~mask).any() else 0
+                    # means over the matched and the other entries (0 when
+                    # none), as sums: no boolean selection, so no waiting
+                    on = mask.to(loss_match_local.dtype)
+                    loss_match_local1 = (loss_match_local * on).sum() / on.sum().clamp(min=1)
+                    loss_match_local2 = ((loss_match_local * (1 - on)).sum()
+                                         / (1 - on).sum().clamp(min=1))
                     losses["loss_ddf"] = (
                         loss_match_local1 * self.num_pos + loss_match_local2 * self.num_neg
                     ) / (self.num_pos + self.num_neg)

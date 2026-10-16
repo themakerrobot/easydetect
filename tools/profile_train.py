@@ -38,8 +38,8 @@ def main():
     parser.add_argument("--trace", action="store_true", help="also PyTorch's operator table")
     parser.add_argument("--syncs", action="store_true",
                         help="list the lines of easydetect where a step waits for the GPU")
-    parser.add_argument("--channels-last", action="store_true",
-                        help="network and pictures in channels-last memory layout")
+    parser.add_argument("--no-channels-last", action="store_true",
+                        help="keep the network in the default (NCHW) memory layout")
     args = parser.parse_args()
 
     nc = load_data_yaml(args.data)["nc"]
@@ -51,9 +51,10 @@ def main():
         dl = tr._loader(ds)
         net = tr.net.to(tr.device).train()
         cuda = tr.device.type == "cuda"
-        layout = torch.channels_last if args.channels_last else torch.contiguous_format
-        if args.channels_last:
-            net = net.to(memory_format=torch.channels_last)
+        if args.no_channels_last and cuda:
+            net = net.to(memory_format=torch.contiguous_format)
+            tr.channels_last = False
+        layout = torch.channels_last if tr.channels_last else torch.contiguous_format
 
         def sync():
             if cuda:

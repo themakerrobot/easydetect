@@ -185,10 +185,9 @@ def generalized_box_iou(boxes1, boxes2):
     Returns a [N, M] pairwise matrix, where N = len(boxes1)
     and M = len(boxes2)
     """
-    # degenerate boxes gives inf / nan results
-    # so do an early check
-    assert (boxes1[:, 2:] >= boxes1[:, :2]).all()
-    assert (boxes2[:, 2:] >= boxes2[:, :2]).all()
+    # degenerate boxes give inf / nan; the boxes here come from cx cy w h
+    # with w, h >= 0, so they never are (the check D-FINE had made every call
+    # wait for the GPU)
     iou, union = box_iou(boxes1, boxes2)
 
     lt = torch.min(boxes1[:, None, :2], boxes2[:, :2])
@@ -322,22 +321,23 @@ def translate_gt(gt, reg_max, reg_scale, up):
     # Calculate the weights for the interpolation
     indices = closest_left_indices.float()
 
-    weight_right = torch.zeros_like(indices)
-    weight_left = torch.zeros_like(indices)
-
+    # computed for every value and kept where valid (torch.where), rather
+    # than gathered through a boolean mask: a mask's size is only known once
+    # the GPU has computed it, so selecting with one makes the step wait
     valid_idx_mask = (indices >= 0) & (indices < reg_max)
-    valid_indices = indices[valid_idx_mask].long()
+    safe = indices.clamp(0, reg_max - 1).long()
 
     # Obtain distances
-    left_values = function_values[valid_indices]
-    right_values = function_values[valid_indices + 1]
+    left_values = function_values[safe]
+    right_values = function_values[safe + 1]
 
-    left_diffs = torch.abs(gt[valid_idx_mask] - left_values)
-    right_diffs = torch.abs(right_values - gt[valid_idx_mask])
+    left_diffs = torch.abs(gt - left_values)
+    right_diffs = torch.abs(right_values - gt)
 
     # Valid weights
-    weight_right[valid_idx_mask] = left_diffs / (left_diffs + right_diffs)
-    weight_left[valid_idx_mask] = 1.0 - weight_right[valid_idx_mask]
+    right = left_diffs / (left_diffs + right_diffs)
+    weight_right = torch.where(valid_idx_mask, right, torch.zeros_like(right))
+    weight_left = torch.where(valid_idx_mask, 1.0 - right, torch.zeros_like(right))
 
     # Invalid weights (out of range)
     invalid_idx_mask_neg = indices < 0

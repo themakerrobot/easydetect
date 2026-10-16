@@ -23,6 +23,21 @@ from scipy.optimize import linear_sum_assignment
 from ..nn.ops import bbox2distance, box_cxcywh_to_xyxy, box_iou, generalized_box_iou
 
 
+def _indices_to(device, groups):
+    """Each layer's ``[(query idx, target idx), ...]``, moved to ``device`` in
+    one transfer (pinned, so it does not wait for the GPU)."""
+    flat = [t for group in groups for pair in group for t in pair]
+    if not flat:
+        return groups
+    joined = torch.cat([t.reshape(-1).long() for t in flat])
+    if device.type == "cuda":
+        joined = joined.pin_memory().to(device, non_blocking=True)
+    else:
+        joined = joined.to(device)
+    parts = iter(joined.split([t.numel() for t in flat]))
+    return [[(next(parts), next(parts)) for _ in group] for group in groups]
+
+
 class HungarianMatcher(nn.Module):
     """This class computes an assignment between the targets and the predictions of the network
 
@@ -73,6 +88,28 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
+        C = self._cost(outputs, targets).cpu()
+        sizes = [len(v["boxes"]) for v in targets]
+        indices_pre = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+        indices = [
+            (torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64))
+            for i, j in indices_pre
+        ]
+
+        # Compute topk indices
+        if return_topk:
+            return {
+                "indices_o2m": self.get_top_k_matches(
+                    C, sizes=sizes, k=return_topk, initial_indices=indices_pre
+                )
+            }
+
+        return {"indices": indices}  # , 'indices_o2m': C.min(-1)[1]}
+
+    @torch.no_grad()
+    def _cost(self, outputs, targets):
+        """The matching cost of every query against every target box in the
+        batch, ``(batch, queries, all targets)``, on the outputs' device."""
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
         # We flatten to compute the cost matrices in a batch
@@ -112,25 +149,24 @@ class HungarianMatcher(nn.Module):
 
         # Final cost matrix 3 * self.cost_bbox + 2 * self.cost_class + self.cost_giou
         C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou
-        C = C.view(bs, num_queries, -1).cpu()
+        return torch.nan_to_num(C.view(bs, num_queries, -1), nan=1.0)
 
+    @torch.no_grad()
+    def match_many(self, outputs_list, targets):
+        """``forward``'s indices for several layers' outputs at once: the cost
+        matrices cross to the CPU in one transfer, not one per layer (each
+        transfer waits for the GPU)."""
         sizes = [len(v["boxes"]) for v in targets]
-        C = torch.nan_to_num(C, nan=1.0)
-        indices_pre = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
-        indices = [
-            (torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64))
-            for i, j in indices_pre
-        ]
-
-        # Compute topk indices
-        if return_topk:
-            return {
-                "indices_o2m": self.get_top_k_matches(
-                    C, sizes=sizes, k=return_topk, initial_indices=indices_pre
-                )
-            }
-
-        return {"indices": indices}  # , 'indices_o2m': C.min(-1)[1]}
+        costs = [self._cost(o, targets) for o in outputs_list]
+        flat = torch.cat([c.reshape(-1) for c in costs]).cpu()
+        out, start = [], 0
+        for c in costs:
+            C = flat[start:start + c.numel()].view(c.shape)
+            start += c.numel()
+            pairs = [linear_sum_assignment(m[i]) for i, m in enumerate(C.split(sizes, -1))]
+            out.append([(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64))
+                        for i, j in pairs])
+        return out
 
     def get_top_k_matches(self, C, sizes, k=1, initial_indices=None):
         indices_list = []
@@ -422,37 +458,37 @@ class DFINECriterion(nn.Module):
         """
         outputs_without_aux = {k: v for k, v in outputs.items() if "aux" not in k}
 
-        # Retrieve the matching between the outputs of the last layer and the targets
-        indices = self.matcher(outputs_without_aux, targets)["indices"]
+        # Retrieve the matching between the outputs of the last layer and the
+        # targets, and of every other layer: all in one go (one GPU -> CPU copy)
         self._clear_cache()
+        layers = [outputs_without_aux]
+        if "aux_outputs" in outputs:
+            decoder = outputs["aux_outputs"] + [outputs["pre_outputs"]]
+            layers += decoder + list(outputs["enc_aux_outputs"])
+        matched = self.matcher.match_many(layers, targets)
+        indices = matched[0]
 
         # Get the matching union set across all decoder layers.
         if "aux_outputs" in outputs:
-            indices_aux_list, cached_indices, cached_indices_enc = [], [], []
-            for i, aux_outputs in enumerate(outputs["aux_outputs"] + [outputs["pre_outputs"]]):
-                indices_aux = self.matcher(aux_outputs, targets)["indices"]
-                cached_indices.append(indices_aux)
-                indices_aux_list.append(indices_aux)
-            for i, aux_outputs in enumerate(outputs["enc_aux_outputs"]):
-                indices_enc = self.matcher(aux_outputs, targets)["indices"]
-                cached_indices_enc.append(indices_enc)
-                indices_aux_list.append(indices_enc)
+            cached_indices = matched[1:1 + len(decoder)]
+            cached_indices_enc = matched[1 + len(decoder):]
+            indices_aux_list = cached_indices + cached_indices_enc
             indices_go = self._get_go_indices(indices, indices_aux_list)
 
-            num_boxes_go = sum(len(x[0]) for x in indices_go)
-            num_boxes_go = torch.as_tensor(
-                [num_boxes_go], dtype=torch.float, device=next(iter(outputs.values())).device
-            )
-            num_boxes_go = torch.clamp(num_boxes_go, min=1).item()
+            # counted on the CPU: a round trip through the GPU would wait for it
+            num_boxes_go = float(max(sum(len(x[0]) for x in indices_go), 1))
+            # the losses index GPU tensors with these: send them over in one
+            # copy now, instead of one blocking copy at every indexing
+            moved = _indices_to(outputs["pred_logits"].device,
+                                [indices, indices_go, *cached_indices, *cached_indices_enc])
+            indices, indices_go = moved[0], moved[1]
+            cached_indices = moved[2:2 + len(cached_indices)]
+            cached_indices_enc = moved[2 + len(cached_indices):]
         else:
             assert "aux_outputs" in outputs, ""
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
-        num_boxes = sum(len(t["labels"]) for t in targets)
-        num_boxes = torch.as_tensor(
-            [num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device
-        )
-        num_boxes = torch.clamp(num_boxes, min=1).item()
+        num_boxes = float(max(sum(len(t["labels"]) for t in targets), 1))
 
         # Compute all the requested losses
         losses = {}

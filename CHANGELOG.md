@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Faster training steps on a GPU.** Every layer's matching now crosses to
+  the CPU in one copy instead of one per layer; the matched indices go back to
+  the GPU in one pinned copy instead of a blocking copy at each of the loss's
+  dozens of indexing steps; two box counts no longer round-trip through the
+  GPU; AdamW is fused; cuDNN picks its fastest convolutions (`benchmark`) and
+  float32 matmuls use TF32. The losses are unchanged (tested equal).
+- `tools/profile_train.py`: where a training step's time goes (data, forward,
+  loss, backward, update), `--trace` for PyTorch's operator table.
+
 - `tools/bench_finetune.py`: each model is scored both as its own project
   scores it (a box counts for every class above conf) and as `predict` hands
   boxes out (one class a box); `--rescore` scores finished runs again; the

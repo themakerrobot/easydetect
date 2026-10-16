@@ -297,6 +297,13 @@ class Trainer:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.workers = workers
         self.amp = amp and self.device.type == "cuda"
+        if self.device.type == "cuda":
+            # the input size is fixed (or one of a few, multi-scale): let cuDNN
+            # time its convolution algorithms once and keep the fastest; and
+            # let float32 matmuls (the loss, the parts autocast leaves) use TF32
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
         # bfloat16 where the GPU has it (RTX 30 and later): float32's range, so
         # no loss scaling and no overflow; float16 with a GradScaler otherwise
         self.amp_dtype = (torch.bfloat16 if self.amp and torch.cuda.is_bf16_supported()
@@ -319,7 +326,9 @@ class Trainer:
             lr_backbone_mult = BACKBONE_LR_MULT.get(getattr(net, "variant", ""), 0.1)
         self.lr_backbone_mult = lr_backbone_mult
         self.opt = torch.optim.AdamW(
-            _param_groups(net, lr, lr * lr_backbone_mult), lr=lr, weight_decay=weight_decay
+            _param_groups(net, lr, lr * lr_backbone_mult), lr=lr, weight_decay=weight_decay,
+            # one kernel for every parameter on a GPU, instead of a few per tensor
+            fused=self.device.type == "cuda",
         )
         self.criterion = DetectionLoss(net.num_classes, reg_max=net.decoder.reg_max)
         self.ema = ModelEMA(net)

@@ -208,3 +208,31 @@ def test_the_plain_epochs_restart_from_the_best_weights(tmp_path):
     before = other.weight.clone()
     Trainer._restart_from_best(stub, other)
     assert torch.equal(other.weight, before)
+
+
+@needs_torch
+def test_matching_all_layers_at_once_gives_the_same_loss():
+    import torch
+
+    from easydetect.nn import DFINENet
+    from easydetect.trainer import _float32
+    from easydetect.utils.loss import DetectionLoss
+
+    torch.manual_seed(0)
+    net = DFINENet("n", 3, pretrained_backbone=False).train()
+    targets = [{"labels": torch.tensor([0, 2]),
+                "boxes": torch.tensor([[.3, .3, .2, .2], [.6, .6, .3, .2]])},
+               {"labels": torch.tensor([1]), "boxes": torch.tensor([[.5, .5, .4, .4]])}]
+    out = _float32(net(torch.rand(2, 3, 128, 128), targets))
+    crit = DetectionLoss(3, reg_max=net.decoder.reg_max)
+    together, _ = crit(out, targets)
+    matcher, calls = crit.criterion.matcher, []
+
+    def one_by_one(layers, t):
+        calls.append(len(layers))
+        return [matcher(o, t)["indices"] for o in layers]
+
+    matcher.match_many = one_by_one
+    apart, _ = crit(out, targets)
+    assert calls and calls[0] > 2                    # the last layer, the others, the encoder
+    assert torch.allclose(together, apart)

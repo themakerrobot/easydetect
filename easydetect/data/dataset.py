@@ -19,6 +19,8 @@ import torch
 import yaml
 from torch.utils.data import Dataset
 
+from easydetect.utils.imageio import imread  # any path, Hangul included
+
 from . import augment as aug
 from .labels import label_path, label_row_to_box
 
@@ -201,7 +203,7 @@ class DetDataset(Dataset):
 
     def _raw(self, i):
         f = self.files[i]
-        img = cv2.imread(str(f))
+        img = imread(str(f))
         if img is None:
             raise FileNotFoundError(f)
         return img, self._load_labels(f)  # cls, cx, cy, w, h (normalized)

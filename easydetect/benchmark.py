@@ -23,6 +23,8 @@ from pathlib import Path
 
 import numpy as np
 
+from easydetect.utils.imageio import imread  # any path, Hangul included
+
 
 def _model_files(spec) -> list[Path]:
     items = spec if isinstance(spec, (list, tuple)) else [spec]
@@ -75,7 +77,7 @@ def _picture(source) -> np.ndarray:
         return cv2.GaussianBlur(noise, (0, 0), 3)
     import cv2
 
-    img = cv2.imread(str(source))
+    img = imread(str(source))
     if img is None:
         raise FileNotFoundError(f"cannot read {source}")
     return img

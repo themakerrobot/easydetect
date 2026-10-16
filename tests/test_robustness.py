@@ -236,3 +236,37 @@ def test_matching_all_layers_at_once_gives_the_same_loss():
     apart, _ = crit(out, targets)
     assert calls and calls[0] > 2                    # the last layer, the others, the encoder
     assert torch.allclose(together, apart)
+
+
+def test_pictures_in_a_hangul_folder_read_and_write(tmp_path):
+    """Windows' OpenCV cannot open such a path itself (바탕 화면, a Korean OneDrive)."""
+    import numpy as np
+
+    from easydetect.utils.imageio import cv2_path, imread, imwrite
+
+    folder = tmp_path / "바탕 화면" / "사진"
+    folder.mkdir(parents=True)
+    img = np.full((20, 30, 3), 120, np.uint8)
+    assert imwrite(folder / "고양이.png", img)
+    back = imread(folder / "고양이.png")
+    assert back is not None and back.shape == img.shape and (back == img).all()
+    assert imread(folder / "없음.jpg") is None
+    assert imread(folder / "고양이.png").dtype == np.uint8
+    assert cv2_path(folder / "a.mp4").endswith("a.mp4")
+
+
+@needs_torch
+def test_a_dataset_in_a_hangul_folder_trains(dataset, tmp_path):
+    import shutil
+
+    import yaml
+
+    from easydetect.data.dataset import DetDataset
+
+    root = tmp_path / "바탕 화면" / "데이터"
+    shutil.copytree(dataset.parent, root)
+    cfg = yaml.safe_load(dataset.read_text())
+    (root / "data.yaml").write_text(yaml.safe_dump(dict(cfg, path=str(root))), encoding="utf-8")
+    ds = DetDataset(root / "data.yaml", "train", 64, augment=True)
+    img, labels = ds[0]
+    assert img.shape[-2:] == (64, 64)

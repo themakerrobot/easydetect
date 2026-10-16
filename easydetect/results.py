@@ -20,6 +20,8 @@ from typing import Any
 
 import numpy as np
 
+from easydetect.utils.imageio import imwrite  # any path, Hangul included
+
 
 class Boxes:
     """Detected boxes for one image.
@@ -223,14 +225,13 @@ class Results:
 
     def save(self, filename: str | Path | None = None) -> Path:
         """Write the annotated image; returns the path written."""
-        import cv2
 
         if filename is None:
             stem = Path(self.path).stem or "image"
             filename = Path(f"{stem}.jpg")
         filename = Path(filename)
         filename.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(filename), self.plot())
+        imwrite(str(filename), self.plot())
         return filename
 
     def show(self, title: str | None = None) -> None:

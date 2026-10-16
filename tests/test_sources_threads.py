@@ -114,9 +114,11 @@ def pictures(tmp_path):
 
 
 def test_pictures_are_read_ahead_of_the_model(pictures, monkeypatch):
+    from easydetect import sources
+
     read = []
-    real = cv2.imread
-    monkeypatch.setattr(cv2, "imread", lambda p, *a: read.append(p) or real(p, *a))
+    real = sources.imread
+    monkeypatch.setattr(sources, "imread", lambda p, *a: read.append(p) or real(p, *a))
     frames = iter(SourceLoader(pictures))
     first = next(frames)
     deadline = time.time() + 3

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.4
+
+- **Fixed: pictures in a folder with Hangul in its path could not be read on
+  Windows** (a desktop called `바탕 화면`, a Korean OneDrive): OpenCV's
+  `imread` takes the path in the system code page and returned nothing, and
+  training stopped with "unreadable pictures". Pictures are now read and
+  written through Python (`easydetect.utils.imageio.imread` / `imwrite`), and
+  videos open through the folder's short path on Windows (`cv2_path`).
+
 ## 0.7.3
 
 - `train(queries=, denoising=)`: fewer decoder queries (of 300) and denoising

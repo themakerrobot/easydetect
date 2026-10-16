@@ -33,6 +33,8 @@ from typing import Any
 
 import numpy as np
 
+from easydetect.utils.imageio import cv2_path, imread  # any path, Hangul included
+
 IMG_FORMATS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".dng", ".pfm"}
 VID_FORMATS = {".mp4", ".avi", ".mov", ".mkv", ".mpg", ".mpeg", ".m4v", ".wmv", ".webm", ".gif"}
 _URL_RE = re.compile(r"^(https?|rtsp|rtmp|tcp|udp)://", re.IGNORECASE)
@@ -252,12 +254,12 @@ class SourceLoader:
             elif kind == "url-image":
                 yield Frame(_read_url_image(payload), payload, i, self.total, "image")
             elif kind == "image":
-                img = cv2.imread(str(payload))
+                img = imread(str(payload))
                 if img is None:
                     raise ValueError(f"could not read image: {payload}")
                 yield Frame(img, payload, i, self.total, "image")
             else:  # video file, webcam index, or network stream
-                cap = cv2.VideoCapture(payload if isinstance(payload, int) else str(payload))
+                cap = cv2.VideoCapture(payload if isinstance(payload, int) else cv2_path(payload))
                 if not cap.isOpened():
                     raise ValueError(f"could not open {payload!r}")
                 frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if kind == "video" else 0

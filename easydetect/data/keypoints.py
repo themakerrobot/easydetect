@@ -22,6 +22,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from easydetect.utils.imageio import imread  # any path, Hangul included
+
 from ..pose import COCO, INPUT, KeypointSpec, box_to_crop, crop, crop_matrix
 from .augment import photometric
 
@@ -68,7 +70,7 @@ def _image_size(path: Path) -> tuple[int, int]:
         with Image.open(path) as im:
             return im.size
     except Exception:  # noqa: BLE001 — any reader trouble: decode it
-        img = cv2.imread(str(path))
+        img = imread(str(path))
         if img is None:
             raise FileNotFoundError(path) from None
         return img.shape[1], img.shape[0]
@@ -178,7 +180,7 @@ class KeypointDataset:
 
     def __getitem__(self, i: int):
         image_id, ann = self.items[i]
-        img = cv2.imread(str(self.images[image_id]))
+        img = imread(str(self.images[image_id]))
         if img is None:
             raise FileNotFoundError(self.images[image_id])
         kpts = np.asarray(ann["keypoints"], np.float64).reshape(-1, 3)

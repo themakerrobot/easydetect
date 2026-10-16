@@ -9,6 +9,8 @@ import threading
 import warnings
 from pathlib import Path
 
+from easydetect.utils.imageio import imread  # any path, Hangul included
+
 #: torch.onnx keeps global state while exporting ("in_onnx_export"), so two
 #: exports at once fail an assertion deep inside it. Serialise them — the
 #: whole export, names and conversion included, so that two threads exporting
@@ -168,7 +170,6 @@ def _int8_agreement(fp32, int8, images, imgsz) -> tuple[int, int]:
     """How many of the FP32 model's boxes (conf 0.5) the INT8 one finds again
     (same class, IoU 0.5) on some of the calibration pictures: NNCF quantizes
     without checking, and a model that loses objects should say so."""
-    import cv2
     import numpy as np
     import openvino as ov
 
@@ -181,7 +182,7 @@ def _int8_agreement(fp32, int8, images, imgsz) -> tuple[int, int]:
     step = max(len(images) // AGREEMENT_PICTURES, 1)
     found = total = 0
     for path in images[::step][:AGREEMENT_PICTURES]:
-        img = cv2.imread(str(path))
+        img = imread(str(path))
         if img is None:
             continue
         x = preprocess_image(img, imgsz)
@@ -202,7 +203,6 @@ def _int8_agreement(fp32, int8, images, imgsz) -> tuple[int, int]:
 
 def _quantize(model, images, imgsz):
     """8-bit weights and activations, calibrated on ``images`` (paths)."""
-    import cv2
     import nncf
 
     from .predictor import preprocess_image
@@ -212,7 +212,7 @@ def _quantize(model, images, imgsz):
         raise ValueError("int8 needs pictures to calibrate on: give data=")
 
     def transform(path):
-        img = cv2.imread(path)
+        img = imread(path)
         if img is None:
             raise ValueError(f"cannot read {path}")
         return preprocess_image(img, imgsz)

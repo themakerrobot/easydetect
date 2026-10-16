@@ -26,6 +26,8 @@ from typing import Any
 
 import numpy as np
 
+from easydetect.utils.imageio import cv2_path, imwrite  # any path, Hangul included
+
 from . import downloads
 from .errors import ModelNotFoundError
 from .metrics import DetMetrics
@@ -915,7 +917,7 @@ class _OutputWriter:
             out = self.save_dir / f"{stem}.jpg"
             if out.exists():
                 out = self.save_dir / f"{stem}_{frame.index}.jpg"
-            cv2.imwrite(str(out), img)
+            imwrite(str(out), img)
             return
         writer = self.videos.get(frame.path)
         if writer is None:
@@ -923,7 +925,7 @@ class _OutputWriter:
             h, w = img.shape[:2]
             # H.264 plays in browsers; OpenCV's pip wheels often lack it, so fall back
             for codec in ("avc1", "mp4v"):
-                writer = cv2.VideoWriter(str(self.save_dir / f"{stem}.mp4"),
+                writer = cv2.VideoWriter(cv2_path(self.save_dir / f"{stem}.mp4"),
                                          cv2.VideoWriter_fourcc(*codec),
                                          frame.fps or 25.0,  # keep the source's timing
                                          (w, h))

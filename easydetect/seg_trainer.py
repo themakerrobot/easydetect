@@ -25,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
+from easydetect.utils.imageio import imread  # any path, Hangul included
+
 from .nn.sam_decoder import GRID, IMG_SIZE, LOW_RES, MASK_CHOICES
 
 BOX_JITTER = 0.05  # Gaussian sigma of each edge's shift, as a share of the box's side
@@ -103,13 +105,12 @@ class EmbeddingCache:
     def file(self, path: Path) -> tuple[Path, tuple[int, int]]:
         """``(the .npy file of the picture's embedding, (height, width))``,
         encoding the picture first if it has not been."""
-        import cv2
 
         file = self._key(path)
         meta = file.with_suffix(".json")
         if file.exists() and meta.exists():
             return file, tuple(json.loads(meta.read_text()))
-        img = cv2.imread(str(path))
+        img = imread(str(path))
         if img is None:
             raise FileNotFoundError(path)
         tensor, _ = self.segmenter.preprocess(img)

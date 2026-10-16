@@ -757,7 +757,12 @@ class DFINETransformer(nn.Module):
     ):
         # prepare input for decoder
         if self.training or self.eval_spatial_size is None:
-            anchors, valid_mask = self._generate_anchors(spatial_shapes, device=memory.device)
+            # the same for every step at a given size: built once (as above)
+            key = (tuple(map(tuple, spatial_shapes)), memory.device)
+            cache = self.__dict__.setdefault("_anchor_cache", {})
+            if key not in cache:
+                cache[key] = self._generate_anchors(spatial_shapes, device=memory.device)
+            anchors, valid_mask = cache[key]
         else:
             anchors = self.anchors
             valid_mask = self.valid_mask

@@ -36,6 +36,10 @@ def main():
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--trace", action="store_true", help="also PyTorch's operator table")
+    parser.add_argument("--syncs", action="store_true",
+                        help="list the lines of easydetect where a step waits for the GPU")
+    parser.add_argument("--channels-last", action="store_true",
+                        help="network and pictures in channels-last memory layout")
     args = parser.parse_args()
 
     nc = load_data_yaml(args.data)["nc"]
@@ -47,6 +51,9 @@ def main():
         dl = tr._loader(ds)
         net = tr.net.to(tr.device).train()
         cuda = tr.device.type == "cuda"
+        layout = torch.channels_last if args.channels_last else torch.contiguous_format
+        if args.channels_last:
+            net = net.to(memory_format=torch.channels_last)
 
         def sync():
             if cuda:
@@ -57,6 +64,7 @@ def main():
         def step(imgs, targets, times):
             t = time.perf_counter()
             imgs = DetDataset.as_float(imgs.to(tr.device, non_blocking=True))
+            imgs = imgs.contiguous(memory_format=layout)
             targets = [{k: v.to(tr.device) for k, v in tt.items()} for tt in targets]
             with torch.amp.autocast(tr.device.type, dtype=tr.amp_dtype, enabled=tr.amp):
                 out = net(imgs, targets)
@@ -108,6 +116,32 @@ def main():
               f"{args.batch * 1000 / wall:.0f} pictures/s)")
         print("  data = waiting for the loader; a big number there means more --workers "
               "(or a faster disk) would help")
+
+        if args.syncs and cuda:
+            import collections
+            import traceback
+            import warnings
+
+            where = collections.Counter()
+
+            def note(message, category, filename, lineno, file=None, line=None):
+                frames = [f for f in traceback.extract_stack()
+                          if "easydetect" in f.filename and "profile_train" not in f.filename]
+                if frames:
+                    f = frames[-1]
+                    where[f"{f.filename.split('easydetect/')[-1]}:{f.lineno}  {f.line}"] += 1
+
+            warnings.showwarning = note
+            warnings.simplefilter("always")
+            imgs, targets = next(it)
+            torch.cuda.set_sync_debug_mode(1)
+            try:
+                step(imgs, targets, {})
+            finally:
+                torch.cuda.set_sync_debug_mode(0)
+            print(f"\nGPU waits in one step: {sum(where.values())}")
+            for place, n in where.most_common(30):
+                print(f"  {n:4d}  {place}")
 
         if args.trace:
             from torch.profiler import ProfilerActivity, profile

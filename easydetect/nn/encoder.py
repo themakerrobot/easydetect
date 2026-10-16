@@ -448,9 +448,16 @@ class HybridEncoder(nn.Module):
                 # flatten [B, C, H, W] to [B, HxW, C]
                 src_flatten = proj_feats[enc_ind].flatten(2).permute(0, 2, 1)
                 if self.training or self.eval_spatial_size is None:
-                    pos_embed = self.build_2d_sincos_position_embedding(
-                        w, h, self.hidden_dim, self.pe_temperature
-                    ).to(src_flatten.device)
+                    # the same for every step at a given size: built once, kept
+                    # on the device (it was rebuilt on the CPU and copied over
+                    # every training step)
+                    key = (w, h, src_flatten.device)
+                    cache = self.__dict__.setdefault("_pos_cache", {})
+                    if key not in cache:
+                        cache[key] = self.build_2d_sincos_position_embedding(
+                            w, h, self.hidden_dim, self.pe_temperature
+                        ).to(src_flatten.device)
+                    pos_embed = cache[key]
                 else:
                     pos_embed = getattr(self, f"pos_embed{enc_ind}", None).to(src_flatten.device)
 

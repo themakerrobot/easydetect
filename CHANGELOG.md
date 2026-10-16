@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- `tools/bench_finetune.py`: each model is scored both as its own project
+  scores it (a box counts for every class above conf) and as `predict` hands
+  boxes out (one class a box); `--rescore` scores finished runs again; the
+  low-data set is 100 pictures drawn at random (the first 100 of
+  african-wildlife are all buffalo); D-FINE trains in its own process.
+- Note on 0.7.0's COCO-style AP: before it, a class the model never predicted
+  scored 0.5 instead of 0 (the precision curve was drawn down to recall 1),
+  and every class whose recall stopped short of 1 scored a little high. mAP
+  printed by 0.6 and earlier, during training and by `val`, reads higher than
+  the same model scores now; compare runs with one version.
+
 ## 0.7.0
 
 Tracking, masks and video

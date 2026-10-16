@@ -20,8 +20,8 @@ signature          1        143 / 35      documents, few pictures
 medical-pills      1        92 / 23       many small, similar objects
 =================  =======  ============  ========================
 
-and, with ``--low-data N``, on african-wildlife cut to its first N training
-pictures (the same val split).
+and, with ``--low-data N``, on african-wildlife cut to N training pictures
+drawn at random (the same val split).
 
 Each model is fine-tuned from its COCO weights by its own trainer, with its
 own defaults (augmentation, learning rate, schedule), at the same image size,
@@ -104,14 +104,20 @@ def fetch(name: str, root: Path) -> Path:
 
 
 def subset(data: Path, n: int) -> Path:
-    """A copy of a dataset with only its first ``n`` training pictures (links, not copies)."""
+    """A copy of a dataset with ``n`` training pictures drawn at random (seed 0;
+    links, not copies). Not the first ``n``: files are often named by class,
+    and the first 100 of african-wildlife are all buffalo."""
+    import random
+
     from easydetect.data.labels import label_path
 
     cfg = yaml.safe_load(data.read_text())
     src = Path(cfg["path"])
-    dst = src.parent / f"{src.name}-{n}"
+    dst = src.parent / f"{src.name}-{n}-random"
     for split, keep in (("train", n), ("val", None)):
-        pics = sorted(p for p in (src / cfg[split]).iterdir() if p.is_file())[:keep]
+        pics = sorted(p for p in (src / cfg[split]).iterdir() if p.is_file())
+        if keep is not None:
+            pics = sorted(random.Random(0).sample(pics, min(keep, len(pics))))
         for pic in pics:
             label = Path(label_path(pic))
             for a in (pic, label):
@@ -284,8 +290,13 @@ def main():
     results = json.loads(record.read_text()) if record.exists() else {}
 
     plan = [(name, fetch(name, root)) for name in args.datasets]
+    for stale in [k for k in results if k == f"african-wildlife-{args.low_data}"]:
+        # before 0.7.1 this was the first pictures, all of one class
+        print(f"{stale}: dropped (it was one class only); now african-wildlife-"
+              f"{args.low_data}-random", flush=True)
+        del results[stale]
     if args.low_data:
-        plan.append((f"african-wildlife-{args.low_data}",
+        plan.append((f"african-wildlife-{args.low_data}-random",
                      subset(fetch("african-wildlife", root), args.low_data)))
     for name, data in plan:
         if name in results and not args.rescore:

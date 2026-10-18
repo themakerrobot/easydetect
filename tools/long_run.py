@@ -108,7 +108,7 @@ for _seed in (0, 1, 2):
     ]
 
 #: also trained with 100 decoder queries from the start (what the Pi runs fastest)
-QUERY_RUNS = [("n", 320), ("n", 416)]
+QUERY_RUNS = [("n", 320), ("n", 416), ("s", 320), ("s", 416)]
 
 
 def plan() -> list[tuple[str, list[str], list[str]]]:

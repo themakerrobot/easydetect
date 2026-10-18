@@ -19,7 +19,10 @@
   of OpenVINO's message, not its first).
 - `tools/long_run.py`: a week of unattended runs on one GPU machine — COCO
   fine-tuned at 320/416/640 px, every benchmark again — resuming after a crash
-  or a reboot. `tools/bench_finetune.py --no-augment`.
+  or a reboot; the same benchmarks again with other seeds, summed up as
+  mean ± spread. `tools/bench_finetune.py --no-augment --seed --clean-bn`
+  (`Trainer(clean_bn="adapt")` re-estimates the statistics as before, to
+  compare).
 
 ## 0.7.4
 

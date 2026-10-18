@@ -78,6 +78,35 @@ BENCHES = [
     bench("bench-m640", "--dfine", "dfine-m", "--yolo", "yolo26m.pt", "--imgsz", "640",
           "--epochs", "100", "--batch", "16"),
 ]
+N320 = ("--dfine", "dfine-n", "--yolo", "yolo26n.pt", "--imgsz", "320", "--batch", "8")
+CLASS = ("--queries", "100", "--denoising", "30", "--freeze", "backbone")
+SMALL = ("--datasets", "signature", "medical-pills")   # and 100 african-wildlife pictures
+#: the same runs with other seeds: a dataset of 23 val pictures moves a lot
+#: from one run to the next, and one run cannot tell a change from luck.
+#: "-seedN" runs are summed up with the run of the same name without it.
+REPEATS = []
+for _seed in (1, 2):
+    REPEATS += [
+        bench(f"bench-n320-seed{_seed}", *N320, "--epochs", "30", "--seed", str(_seed)),
+        bench(f"bench-n320-class-seed{_seed}", *N320, *CLASS, "--epochs", "30",
+              "--seed", str(_seed)),
+        bench(f"bench-n320-class-70ep-seed{_seed}", *N320, *CLASS, "--epochs", "70", *SMALL,
+              "--seed", str(_seed)),
+    ]
+for _seed in (0, 1, 2):
+    REPEATS += [
+        # the batch-norm change of 0.7.5 against the way before it
+        bench(f"bench-n320-adaptbn-seed{_seed}", *N320, "--epochs", "30", *SMALL,
+              "--clean-bn", "adapt", "--seed", str(_seed)),
+        bench(f"bench-n320-class-adaptbn-seed{_seed}", *N320, *CLASS, "--epochs", "30", *SMALL,
+              "--clean-bn", "adapt", "--seed", str(_seed)),
+        # how long a classroom run should be
+        bench(f"bench-n320-class-100ep-seed{_seed}", *N320, *CLASS, "--epochs", "100", *SMALL,
+              "--seed", str(_seed)),
+        bench(f"bench-n320-classroom-70ep-seed{_seed}", *N320, *CLASS, "--epochs", "70", *SMALL,
+              "--no-augment", "--seed", str(_seed)),
+    ]
+
 #: also trained with 100 decoder queries from the start (what the Pi runs fastest)
 QUERY_RUNS = [("n", 320), ("n", 416)]
 
@@ -93,6 +122,7 @@ def plan() -> list[tuple[str, list[str], list[str]]]:
         steps.append((f"coco-{v}{size}-q100", ["coco-train", v, str(size), "100"],
                       ["coco-data"]))
     steps.append(("coco-score", ["coco-score"], ["coco-data"]))
+    steps += [(name, args, []) for name, args in REPEATS]
     steps += [(name, args, []) for name, args in BENCHES[4:]]
     return steps
 
@@ -293,6 +323,7 @@ def report(root: Path) -> None:
         mark = ("done" if (state / f"{name}.done").exists() else
                 "FAILED" if (state / f"{name}.failed").exists() else "waiting")
         lines.append(f"- {name}: {mark}")
+    lines += _repeats(root)
     for md in sorted((root / "bench").glob("*/results.md")):
         lines += ["", f"## {md.parent.name}", "", md.read_text()]
     scores = root / "coco" / "scores.json"
@@ -302,6 +333,34 @@ def report(root: Path) -> None:
         for k, v in json.loads(scores.read_text()).items():
             lines.append(f"| {k} | {v['map']:.3f} | {v['map50']:.3f} | {v['ms_here']} |")
     (root / "REPORT.md").write_text("\n".join(lines) + "\n")
+
+
+def _repeats(root: Path) -> list[str]:
+    """Each benchmark's runs over seeds: mean ± spread a dataset."""
+    import re
+    import statistics
+
+    groups: dict[str, list[dict]] = {}
+    for rec in sorted((root / "bench").glob("*/results.json")):
+        key = re.sub(r"-seed\d+$", "", rec.parent.name)
+        groups.setdefault(key, []).append(json.loads(rec.read_text()))
+    lines = []
+    for key, runs in groups.items():
+        if len(runs) < 2:
+            continue
+        lines += ["", f"## {key}: {len(runs)} runs (seeds), mAP50-95 mean ± spread", "",
+                  "| dataset | runs | YOLO | D-FINE | D-FINE − YOLO |",
+                  "| --- | --- | --- | --- | --- |"]
+        for ds in runs[0]:
+            y = [r[ds]["yolo"]["map"] for r in runs if ds in r]
+            d = [r[ds]["dfine"]["map"] for r in runs if ds in r]
+
+            def fmt(v):
+                return f"{statistics.mean(v):.3f} ± {statistics.pstdev(v):.3f}"
+
+            diff = statistics.mean(d) - statistics.mean(y)
+            lines.append(f"| {ds} | {len(d)} | {fmt(y)} | {fmt(d)} | {diff:+.3f} |")
+    return lines
 
 
 def main():

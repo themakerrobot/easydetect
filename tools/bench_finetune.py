@@ -145,6 +145,10 @@ def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
                                ("freeze", args.freeze)) if v is not None}
     if args.no_augment:
         extra["augment"] = False
+    if args.seed:
+        extra["seed"] = args.seed
+    if args.clean_bn:
+        extra["clean_bn"] = args.clean_bn
     code = ("import json, sys; from easydetect import Detector; "
             "print('BEST', Detector(sys.argv[1], verbose=False).train(data=sys.argv[2], "
             "epochs=int(sys.argv[3]), imgsz=int(sys.argv[4]), batch=int(sys.argv[5]), "
@@ -179,7 +183,8 @@ def train_yolo(data: Path, out: Path, args) -> tuple[Path, float]:
                              f"epochs={args.epochs}", f"imgsz={args.imgsz}",
                              f"batch={args.batch}", f"patience={args.epochs}",
                              f"project={out.resolve()}", f"name={name}",
-                             f"workers={args.workers}", "exist_ok=True", "plots=False"],
+                             f"workers={args.workers}", f"seed={args.seed}", "exist_ok=True",
+                             "plots=False"],
                             env=UNBUFFERED)
     finished = None
     while proc.poll() is None:
@@ -284,6 +289,10 @@ def main():
     parser.add_argument("--queries", type=int, help="D-FINE decoder queries (of 300)")
     parser.add_argument("--denoising", type=int, help="D-FINE denoising queries (100)")
     parser.add_argument("--freeze", help="D-FINE parts not trained (backbone)")
+    parser.add_argument("--seed", type=int, default=0, help="both trainers' seed")
+    parser.add_argument("--clean-bn", choices=["keep", "adapt"],
+                        help="D-FINE's last plain-picture epochs: keep the batch-norm "
+                             "statistics (0.7.5) or re-estimate them (before)")
     parser.add_argument("--no-augment", action="store_true",
                         help="D-FINE without zoom, crop and colour jitter (the lab's classroom "
                              "preset); YOLO keeps its own")

@@ -116,6 +116,14 @@ FROM320 = [bench(f"bench-n320-classroom-70ep-from320-seed{_seed}", "--dfine",
                  "--seed", str(_seed))
            for _seed in (0, 1, 2)]
 
+#: dfine-n at 320 taught by dfine-s at 320 (both COCO fine-tunes, 100 queries),
+#: and the same epochs without the teacher: what the teaching adds, apart from
+#: training longer. Then every candidate for the Pi, scored the way it runs there.
+DISTILL_EPOCHS = 24
+DISTILL = [("coco-n320-kd", ["coco-distill", "kd"], ["coco-n320-q100", "coco-s320-q100"]),
+           ("coco-n320-more", ["coco-distill", "more"], ["coco-n320-q100"]),
+           ("speed-n320", ["speed"], ["coco-n320-kd", "coco-n320-more"])]
+
 #: also trained with 100 decoder queries from the start (what the Pi runs fastest)
 QUERY_RUNS = [("n", 320), ("n", 416), ("s", 320), ("s", 416)]
 
@@ -133,6 +141,7 @@ def plan() -> list[tuple[str, list[str], list[str]]]:
     steps.append(("coco-score", ["coco-score"], ["coco-data"]))
     steps += [(name, args, []) for name, args in REPEATS]
     steps += [(name, args, ["coco-n320-q100"]) for name, args in FROM320]
+    steps += DISTILL
     steps += [(name, args, []) for name, args in BENCHES[4:]]
     return steps
 
@@ -204,6 +213,75 @@ def step_coco_train(root: Path, args, v: str, size: str, queries: str | None = N
         workers=args.workers, project=str(project), name=name, resume=resume,
         patience=COCO_PATIENCE, queries=int(queries) if queries else None)
     print(f"BEST {best}", flush=True)
+
+
+def step_coco_distill(root: Path, args, kind: str) -> None:
+    """dfine-nq-320 trained DISTILL_EPOCHS more on COCO, taught by dfine-sq-320
+    (``kd``) or alone (``more``); everything else the same."""
+    from easydetect import Detector
+    from easydetect.distill import Distiller
+
+    coco_yaml = Path(args.coco).expanduser() / "data.yaml"
+    project = root / "coco"
+    name = f"dfine-nq-320-{kind}"
+    run = project / name
+    resume = (run / "weights" / "last.pt").exists()
+    if run.exists() and not resume:
+        shutil.rmtree(run)
+    student = Detector(str(project / "dfine-nq-320" / "weights" / "best.pt"))
+    extra = {}
+    if kind == "kd":
+        teacher = Detector(str(project / "dfine-sq-320" / "weights" / "best.pt"))
+        extra["extra_loss"] = Distiller(teacher, student)
+    best = student.train(
+        data=str(coco_yaml), epochs=DISTILL_EPOCHS, imgsz=320, batch=VARIANTS["n"],
+        workers=args.workers, project=str(project), name=name, resume=resume, patience=0,
+        **extra)
+    print(f"BEST {best}", flush=True)
+
+
+def step_speed(root: Path, args) -> None:
+    """Every dfine-n candidate for the Pi at 320, as .onnx: the fine-tune, the
+    taught one and the one trained longer, each whole, with 2 decoder layers,
+    with 50 queries, and 8-bit for ONNX Runtime. Scored on all of COCO val
+    with ONNX Runtime (as Pibo runs it); the folder goes to the Pi for timing."""
+    sys.path.insert(0, str(HERE))
+    from pi_kit import ort_int8, score
+
+    from easydetect import Detector
+    from easydetect.data.dataset import DetDataset
+
+    coco_yaml = str(Path(args.coco).expanduser() / "data.yaml")
+    kit = root / "pi-kit-speed"
+    record = kit / "scores.json"
+    kit.mkdir(parents=True, exist_ok=True)
+    scores = json.loads(record.read_text()) if record.exists() else {}
+    calib = DetDataset(coco_yaml, "train", 320, augment=False).files[::400][:300]
+    for run in ("dfine-nq-320", "dfine-nq-320-kd", "dfine-nq-320-more"):
+        best = root / "coco" / run / "weights" / "best.pt"
+        if not best.exists():
+            continue
+        for tag, extra in (("", {}), ("-l2", {"layers": 2}), ("-q50", {"queries": 50})):
+            key = f"{run}{tag}"
+            if key not in scores:
+                onnx = Path(Detector(str(best), verbose=False).export(
+                    format="onnx", imgsz=320, out_dir=kit / key, verbose=False, **extra))
+                scores[key] = {"file": f"{key}/{onnx.name}",
+                               **score(onnx, coco_yaml, None, backend="onnxruntime")}
+                record.write_text(json.dumps(scores, indent=2))
+                print(f"{key}: {scores[key]}", flush=True)
+            if tag == "" and f"{key}-int8" not in scores:
+                onnx = kit / scores[key]["file"]
+                q8 = ort_int8(onnx, kit / f"{key}-int8" / f"{onnx.stem}-int8.onnx", calib, 320)
+                scores[f"{key}-int8"] = {"file": f"{key}-int8/{q8.name}",
+                                         **score(q8, coco_yaml, None, backend="onnxruntime")}
+                record.write_text(json.dumps(scores, indent=2))
+                print(f"{key}-int8: {scores[key + '-int8']}", flush=True)
+    lines = ["| model | COCO mAP50-95 | mAP50 | file |", "| --- | --- | --- | --- |"]
+    lines += [f"| {k} | {v['map']:.3f} | {v['map50']:.3f} | {v['file']} |"
+              for k, v in scores.items()]
+    (kit / "accuracy.md").write_text("\n".join(lines) + "\n")
+    print("\n".join(lines), flush=True)
 
 
 def step_coco_score(root: Path, args) -> None:
@@ -403,6 +481,10 @@ def main():
             step_coco_train(root, args, *rest)
         elif kind == "coco-score":
             step_coco_score(root, args)
+        elif kind == "coco-distill":
+            step_coco_distill(root, args, *rest)
+        elif kind == "speed":
+            step_speed(root, args)
         return
 
     if args.status:

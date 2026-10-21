@@ -24,8 +24,9 @@ import sys
 from pathlib import Path
 
 
-def score(path: Path, data: str, limit: int | None) -> dict:
-    """mAP of one exported model on the val split, as tools/compare_yolo.py scores."""
+def score(path: Path, data: str, limit: int | None, backend: str | None = None) -> dict:
+    """mAP of one exported model on the val split, as tools/compare_yolo.py scores.
+    ``backend="onnxruntime"`` scores an .onnx the way the Pibo robot runs it."""
     import cv2
     import numpy as np
 
@@ -43,7 +44,8 @@ def score(path: Path, data: str, limit: int | None) -> dict:
         cx, cy, bw, bh = lab[:, 1], lab[:, 2], lab[:, 3], lab[:, 4]
         truth.append((np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1),
                       lab[:, 0].astype(int)))
-    model = Detector(str(path), device="CPU", verbose=False)
+    model = Detector(str(path), device="CPU", verbose=False,
+                     **({"backend": backend} if backend else {}))
     model(np.zeros((32, 32, 3), np.uint8))
 
     class Runner:
@@ -56,6 +58,48 @@ def score(path: Path, data: str, limit: int | None) -> dict:
     del cv2
     m50, m, ms = evaluate(path.name, Runner(), files, truth, ds.nc)
     return {"map50": round(m50, 4), "map": round(m, 4), "ms_here": round(ms, 1)}
+
+
+def ort_int8(onnx: Path, out: Path, pictures: list, size: int) -> Path:
+    """An 8-bit copy of an .onnx for ONNX Runtime (what a Pi runs), calibrated
+    on ``pictures``: the convolutions and matrix products only, per channel,
+    as QDQ — the box decoding and the top-k selection stay in float."""
+    import cv2
+    import numpy as np
+    from onnxruntime.quantization import (
+        CalibrationDataReader,
+        QuantFormat,
+        QuantType,
+        quantize_static,
+    )
+    from onnxruntime.quantization.shape_inference import quant_pre_process
+
+    from easydetect.utils.imageio import imread
+
+    class Reader(CalibrationDataReader):
+        def __init__(self):
+            self.files = iter(pictures)
+
+        def get_next(self):
+            for f in self.files:
+                img = imread(str(f))
+                if img is None:
+                    continue
+                x = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (size, size))
+                return {"images": (x.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]}
+            return None
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pre = out.with_name(out.stem + "-pre.onnx")
+    quant_pre_process(str(onnx), str(pre), skip_symbolic_shape=True)
+    quantize_static(str(pre), str(out), Reader(), quant_format=QuantFormat.QDQ,
+                    op_types_to_quantize=["Conv", "MatMul"], per_channel=True,
+                    activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8)
+    pre.unlink(missing_ok=True)
+    names = onnx.with_name(onnx.stem + ".names.json")   # the classes travel beside it
+    if names.exists():
+        out.with_name(out.stem + ".names.json").write_text(names.read_text())
+    return out
 
 
 def _ir(xml) -> Path:

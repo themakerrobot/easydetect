@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `easydetect.distill.Distiller`: a larger detector teaching a smaller one,
+  `train(extra_loss=Distiller(teacher, student))` — the encoder's per-position
+  class scores and the final boxes, matched query to query. `Trainer` takes
+  any `extra_loss(images, outputs) -> (loss, logs)`.
+- `tools/long_run.py`: dfine-n at 320 taught by dfine-s at 320 on COCO,
+  against the same epochs untaught; every Pi candidate (2 decoder layers,
+  50 queries, 8-bit for ONNX Runtime) scored on COCO val with ONNX Runtime
+  (`tools/pi_kit.py ort_int8`); the classroom benchmark started from the
+  320 px COCO fine-tune.
+
 ## 0.7.7
 
 - `resume=True` carries on with the run's own frozen parts, queries and

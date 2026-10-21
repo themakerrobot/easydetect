@@ -286,6 +286,7 @@ class Trainer:
         on_progress=None,
         origin=None,
         clean_bn="auto",
+        extra_loss=None,
     ):
         seed_everything(seed)
         self.augment = augment
@@ -299,6 +300,9 @@ class Trainer:
         if clean_bn not in ("auto", "keep", "adapt"):
             raise ValueError(f'clean_bn must be "auto", "keep" or "adapt", not {clean_bn!r}')
         self.clean_bn = clean_bn
+        # another loss on each batch, as (images, outputs) -> (loss, logs):
+        # easydetect.distill.Distiller is one
+        self.extra_loss = extra_loss
         self.multiscale, self.mosaic, self.mixup = bool(multiscale), float(mosaic), float(mixup)
         self.seed, self.freeze, self.origin = seed, freeze, origin
         self.lr_auto = lr is None
@@ -678,6 +682,10 @@ class Trainer:
                 # cost's log(1 - p) to -inf, and the box costs stop counting
                 # in the matching; the IoU targets lose precision too
                 loss, logs = self.criterion(_float32(out), targets)
+                if self.extra_loss is not None:
+                    extra, extra_logs = self.extra_loss(imgs, out)
+                    loss = loss + extra
+                    logs = {**logs, **extra_logs}
 
                 self.opt.zero_grad(set_to_none=True)
                 self.scaler.scale(loss).backward()
@@ -699,7 +707,8 @@ class Trainer:
             avg = float(running) / max(len(dl), 1)
             msg = (
                 f"epoch {epoch + 1}/{self.epochs}  loss {avg:.3f}  "
-                + " ".join(f"{k} {float(logs.get(k, 0.0)):.3f}" for k in LOGGED) + "  "
+                + " ".join(f"{k} {float(logs.get(k, 0.0)):.3f}" for k in LOGGED
+                           + tuple(k for k in logs if k.startswith("kd_"))) + "  "
                 f"{time.time() - t0:.1f}s"
             )
 

@@ -760,9 +760,12 @@ class Detector:
             return
         wanted = dict(self.names)
         self._load_checkpoint(checkpoint)
-        if self.net.num_classes != nc:
+        if self.net.num_classes != nc or self._names_moved(wanted):
             self.net = self._reheaded_net(nc, wanted)
         self.names = wanted
+        # the network now has these classes: train() must not re-head it again
+        # from COCO's names (their rows are no longer where those say)
+        self.ckpt = dict(self.ckpt or {}, names=dict(wanted), num_classes=nc)
 
     def _reheaded_net(self, nc: int, names: dict[int, str] | None = None):
         """Keep backbone/encoder/decoder weights and new class heads for ``nc``;
@@ -1015,6 +1018,11 @@ class _OutputWriter:
         if entry is None:
             stem = Path(frame.path).stem or "stream"
             final = self.save_dir / f"{stem}.mp4"
+            taken = {f for _, _, f in self.videos.values()}
+            n = 2
+            while final in taken or final.exists():   # a/clip.mp4 and b/clip.mp4
+                final = self.save_dir / f"{stem}_{n}.mp4"
+                n += 1
             # OpenCV's writer takes a narrow path: a Korean file name would not
             # open on Windows. It writes under a plain name and is renamed after.
             tmp = self.save_dir / f".easydetect-{len(self.videos)}-{os.getpid()}.mp4"
@@ -1028,16 +1036,22 @@ class _OutputWriter:
                     break
                 writer.release()
             else:
-                print(f"[easydetect] could not write a video in {self.save_dir}: "
-                      "this OpenCV has no mp4 encoder", file=sys.stderr)
+                print(f"[easydetect] could not open a video writer for {final} "
+                      "(no mp4 encoder in this OpenCV, or the folder is not writable)",
+                      file=sys.stderr)
             entry = self.videos[frame.path] = (writer, tmp, final)
         entry[0].write(img)
 
     def close(self) -> None:
+        # each on its own: one that cannot be renamed (the old file open in a
+        # player on Windows) must not keep the others from being finished
         for writer, tmp, final in self.videos.values():
-            writer.release()
-            if tmp.exists():
-                os.replace(tmp, final)
+            try:
+                writer.release()
+                if tmp.exists():
+                    os.replace(tmp, final)
+            except OSError as exc:
+                print(f"[easydetect] the video stays at {tmp}: {exc}", file=sys.stderr)
         self.videos.clear()
 
 

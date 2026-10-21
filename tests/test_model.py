@@ -264,6 +264,13 @@ class TestAgainstARealModel:
         out = tmp_path / "runs" / "detect" / "predict"
         assert sorted(p.name for p in out.iterdir()) == ["사과.mp4"]
         assert cv2.VideoCapture(cv2_path(out / "사과.mp4")).read()[0]
+        # a second video of the same name, from another folder, is not written over it
+        other = tmp_path / "b" / "사과.mp4"
+        other.parent.mkdir()
+        other.write_bytes(clip.read_bytes())
+        model.predict([clip, other], save=True, project=str(tmp_path / "runs"), name="two")
+        out = tmp_path / "runs" / "detect" / "two"
+        assert sorted(p.name for p in out.iterdir()) == ["사과.mp4", "사과_2.mp4"]
 
     def test_track_takes_iou_as_the_duplicate_filter_and_match_iou_for_the_tracker(
             self, tiny_ir, tmp_path, monkeypatch):

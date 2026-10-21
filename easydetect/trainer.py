@@ -9,6 +9,7 @@ and ``resume=True`` to pick a killed run back up where it stopped.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import json
 import math
@@ -372,15 +373,17 @@ class Trainer:
 
     @staticmethod
     def _resume_dir(p: Path) -> Path:
-        """The ``name``/``name2``/``name3``... directory whose last.pt was written
-        last — not ``name_backup`` or ``name10`` sorted before ``name9``."""
-        import re
-
-        pattern = re.compile(re.escape(p.name) + r"\d*")
-        candidates = [
-            d for d in p.parent.glob(f"{p.name}*")
-            if pattern.fullmatch(d.name) and (d / "weights" / "last.pt").exists()
-        ]
+        """The run to carry on: ``p`` itself when it has a last.pt — exactly
+        that one, never ``p`` followed by more digits (the lab's ``job5`` is
+        not ``job57``). Otherwise the newest of ``p2``, ``p3``, … as
+        ``_unique_dir`` made them, one after another."""
+        if (p / "weights" / "last.pt").exists():
+            return p
+        candidates, i = [], 2
+        while (q := p.with_name(f"{p.name}{i}")).exists():
+            if (q / "weights" / "last.pt").exists():
+                candidates.append(q)
+            i += 1
         if not candidates:
             return p
         return max(candidates, key=lambda d: (d / "weights" / "last.pt").stat().st_mtime)
@@ -404,8 +407,12 @@ class Trainer:
         # a resumed run carries on as the uninterrupted one would: the same
         # random stream, and early stopping counting from where it was
         self.since_improved = int(ckpt.get("since_improved", 0))
-        planned = int(ckpt.get("epochs", self.epochs))
-        if self.epochs > planned:
+        planned = ckpt.get("epochs")
+        if planned is None:              # saved before 0.7.7: the run's record says it
+            with contextlib.suppress(OSError, ValueError, AttributeError):
+                planned = json.loads((self.save_dir / "run.json").read_text(
+                    encoding="utf-8")).get("epochs")
+        if planned is not None and self.epochs > int(planned):
             # asked for more epochs than the run planned: a run that stopped
             # early would otherwise stop again after one epoch
             self.since_improved = 0

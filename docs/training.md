@@ -25,8 +25,9 @@ best = model.train(
 # runs/train/weights/best.pt  (last.pt too — resume=True picks the run back up)
 ```
 
-`resume=True` carries on the most recent `runs/train`, `train2`, … that has a
-`last.pt`, with the frozen parts, queries and denoising it trained with
+`resume=True` carries on `runs/train` (`project/name`) when it has a
+`last.pt`, otherwise the newest of `train2`, `train3`, …, with the frozen
+parts, queries and denoising it trained with
 (left out of the call, they are read from its `run.json`). Asked for more
 epochs than it planned, an early-stopped run gets its full `patience` again.
 

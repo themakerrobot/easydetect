@@ -99,16 +99,26 @@ def test_resuming_keeps_the_run_s_own_queries_and_frozen_parts(dataset, tmp_path
     assert ckpt["queries"] == 40 and ckpt["epoch"] == 1
 
 
-def test_resume_picks_the_run_written_last_and_only_numbered_ones(tmp_path):
-    for i, name in enumerate(["train", "train9", "train10", "train_backup", "trainx"]):
+def test_resume_carries_on_the_named_run_and_never_another_with_more_digits(tmp_path):
+    def run(name, mtime):
         last = tmp_path / name / "weights" / "last.pt"
         last.parent.mkdir(parents=True)
         last.write_bytes(b"")
-        os.utime(last, (1000 + i, 1000 + i))
-    # train_backup and trainx are newer, but not this run's
-    assert Trainer._resume_dir(tmp_path / "train").name == "train10"
-    os.utime(tmp_path / "train9" / "weights" / "last.pt", (5000, 5000))
-    assert Trainer._resume_dir(tmp_path / "train").name == "train9"
+        os.utime(last, (mtime, mtime))
+
+    run("job5", 1000)
+    run("job57", 5000)                                   # another lab job, newer
+    assert Trainer._resume_dir(tmp_path / "job5").name == "job5"
+    # train has no last.pt (killed before its first epoch went by): the newest of
+    # train2, train3 ... as they were made, and not train_backup or trainx
+    (tmp_path / "train").mkdir()
+    run("train2", 1000)
+    run("train3", 3000)
+    run("train_backup", 9000)
+    run("trainx", 9000)
+    assert Trainer._resume_dir(tmp_path / "train").name == "train3"
+    os.utime(tmp_path / "train2" / "weights" / "last.pt", (8000, 8000))
+    assert Trainer._resume_dir(tmp_path / "train").name == "train2"
     assert Trainer._resume_dir(tmp_path / "other") == tmp_path / "other"
 
 
@@ -252,3 +262,92 @@ def test_a_last_batch_of_two_is_trained_on_and_a_last_batch_of_one_is_not():
     assert t._loader(Sized(range(5))).drop_last is True
     t.batch = 4
     assert t._loader(Sized(range(6))).drop_last is False
+
+
+def _fake_coco(tmp_path, monkeypatch, at):
+    """A COCO-like 80-class checkpoint whose classes ``at`` sit at given rows."""
+    import torch
+
+    names = {i: f"c{i}" for i in range(80)}
+    names.update(at)
+    net = _blank_net(80)
+    path = tmp_path / "coco.pt"
+    torch.save({"variant": "n", "num_classes": 80, "names": names,
+                "model": net.state_dict()}, path)
+    monkeypatch.setattr("easydetect.downloads.download_checkpoint", lambda name: path)
+    return net.state_dict()
+
+
+def _data_named(dataset, tmp_path, names):
+    cfg = yaml.safe_load(dataset.read_text())
+    cfg["names"] = names
+    data = tmp_path / "named.yaml"
+    data.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    return data
+
+
+@pytest.mark.parametrize("names", [{0: "cat", 1: "dog"}, {0: "bicycle", 1: "person"}])
+def test_a_coco_start_gives_each_named_class_its_coco_row(dataset, tmp_path, monkeypatch,
+                                                         names):
+    """The default start (the mirror's COCO weights): re-headed once, each class
+    from its own COCO row — it crashed (index past the class count) or swapped
+    rows when train() re-headed a second time from COCO's names."""
+    import torch
+
+    coco = _fake_coco(tmp_path, monkeypatch, {15: "cat", 16: "dog", 1: "bicycle", 0: "person"})
+    rows = {"cat": 15, "dog": 16, "bicycle": 1, "person": 0}
+    model = Detector("dfine-n", verbose=False)
+    captured = {}
+    real = Detector._reheaded_net
+
+    def spy(self, nc, wanted=None):
+        net = real(self, nc, wanted)
+        captured.setdefault("head", net.decoder.enc_score_head.weight.detach().clone())
+        captured["calls"] = captured.get("calls", 0) + 1
+        return net
+
+    monkeypatch.setattr(Detector, "_reheaded_net", spy)
+    best = model.train(data=str(_data_named(dataset, tmp_path, names)), project=str(tmp_path),
+                       epochs=1, val=False, **FAST)
+    assert captured["calls"] == 1
+    for j, name in names.items():
+        assert torch.equal(captured["head"][j], coco["decoder.enc_score_head.weight"][rows[name]])
+    setup = json.loads((best.parent.parent / "run.json").read_text(encoding="utf-8"))
+    assert setup["start"]["kind"] == "coco"
+    assert setup["start"]["class_rows"] == {n: n for n in names.values()}
+
+
+def test_a_coco_start_with_80_classes_in_another_order_is_re_headed(dataset, tmp_path,
+                                                                   monkeypatch):
+
+    coco = _fake_coco(tmp_path, monkeypatch, {0: "person", 1: "bicycle"})
+    names = {i: f"c{i}" for i in range(80)}
+    names[0], names[1] = "bicycle", "person"
+    model = Detector("dfine-n", verbose=False)
+    model.train(data=str(_data_named(dataset, tmp_path, names)), project=str(tmp_path),
+                epochs=1, val=False, **FAST)
+    # trained one epoch since: compare where the rows went, not their values
+    head = model.net.decoder.enc_score_head.weight.detach()
+    old = coco["decoder.enc_score_head.weight"]
+    assert (head[0] - old[1]).abs().max() < (head[0] - old[0]).abs().max()
+
+
+def test_an_older_run_without_its_plan_in_last_pt_gets_its_patience_back(
+        dataset, tmp_path, monkeypatch):
+    """A last.pt from 0.7.6 has no "epochs": run.json says what was planned."""
+    import torch
+
+    _scripted_val(monkeypatch, [0.5, 0.1])
+    model = Detector("dfine-n", verbose=False)
+    model.net = _blank_net(1)
+    best = model.train(data=str(dataset), project=str(tmp_path), epochs=10, patience=2,
+                       val=True, **FAST)
+    run = best.parent.parent
+    last = run / "weights" / "last.pt"
+    ckpt = torch.load(last, map_location="cpu", weights_only=False)
+    del ckpt["epochs"]
+    torch.save(ckpt, last)
+    Detector(str(best), verbose=False).train(data=str(dataset), project=str(tmp_path),
+                                              epochs=13, patience=2, val=True, resume=True,
+                                              **FAST)
+    assert _epochs_in(run) == 5

@@ -5,16 +5,19 @@
 - `resume=True` carries on with the run's own frozen parts, queries and
   denoising when the call leaves them out (from `run.json`); before, a run
   resumed from a plain `Detector("dfine-n")` failed to load its optimizer or
-  went on with 300 queries. It picks the run whose `last.pt` was written last
-  among `train`, `train2`, … — not `train_backup`, and `train10` after
-  `train9`. Resumed with more epochs than planned, an early-stopped run gets
-  its full patience again instead of stopping after one epoch.
+  went on with 300 queries. It carries on `project/name` itself when that has
+  a `last.pt` — never another run whose name starts the same (the lab's
+  `job5` resumed `job57` when that one was newer) — and otherwise the newest
+  of `name2`, `name3`, … Resumed with more epochs than planned, an
+  early-stopped run gets its full patience again instead of stopping after
+  one epoch (for a run saved before 0.7.7, the plan is read from `run.json`).
 - The restart from the best epoch at the start of the plain-picture epochs
   resets the patience count: a run whose best came early could stop one
   epoch into them.
 - Fine-tuning a checkpoint on the same classes in another order (`[cat, dog]`
   on `[dog, cat]`) gives each class its own row; before, the heads came
-  across as they were and the classes swapped. A new class with the same
+  across as they were and the classes swapped. The COCO start does the same
+  for a dataset with COCO's 80 classes in another order. A new class with the same
   class count no longer inherits another's row. Re-heading keeps the
   checkpoint's queries and denoising. `run.json` records which classes
   started from a known row (`start.class_rows`); `train(match_names=False)`
@@ -30,7 +33,8 @@
   workers than training, and none for a small val set. A last batch is
   dropped only when it would hold one picture.
 - A saved video keeps a Korean file name on Windows (written under a plain
-  name, renamed at the end); a missing mp4 encoder is said.
+  name, renamed at the end); two videos of the same name from different
+  folders no longer overwrite each other; a writer that cannot open is said.
 - `easydetect benchmark` on a folder leaves out the keypoint and mask models
   beside a detector, and a model that loads but fails to run is a row with
   its error instead of stopping the table.

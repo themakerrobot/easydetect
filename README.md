@@ -188,31 +188,31 @@ Read it plainly:
 
 COCO is a guide, not your answer. What matters is the model you get from a
 few hundred pictures of your own. `tools/bench_finetune.py` fine-tunes
-dfine-s (easydetect 0.7.0) and YOLO26s (Ultralytics 8.4) on the same public
+D-FINE (easydetect 0.7.5) and YOLO26 (Ultralytics 8.4) on the same public
 datasets, each with its own trainer's defaults (100 epochs, 640 px, batch 16,
-one RTX 5090), and scores both with one evaluator on the val split:
+one RTX 5090), and scores both with one evaluator on the val split.
+mAP50-95, YOLO26 → D-FINE at each size:
 
-| dataset | train pictures | YOLO26s mAP50-95 | dfine-s mAP50-95 | YOLO26s, one class a box | dfine-s, one class a box |
-| --- | --- | --- | --- | --- | --- |
-| african-wildlife | 1,052 | 0.830 | **0.866** | 0.828 | **0.855** |
-| construction-ppe | 1,132 | 0.289 | **0.303** | 0.288 | **0.303** |
-| brain-tumor | 893 | 0.357 | **0.466** | 0.264 | **0.379** |
-| signature | 143 | 0.984 | **0.991** | 0.984 | **0.991** |
-| medical-pills | 92 | 0.801 | **0.806** | 0.801 | **0.806** |
-| african-wildlife, 100 at random | 100 | 0.674 | **0.790** | 0.662 | **0.777** |
+| dataset | train pictures | n | s | m |
+| --- | --- | --- | --- | --- |
+| african-wildlife | 1,052 | 0.817 → **0.848** | 0.830 → **0.869** | 0.814 → **0.890** |
+| construction-ppe | 1,132 | **0.300** → 0.293 | 0.289 → **0.297** | 0.298 → **0.307** |
+| brain-tumor | 893 | 0.417 → **0.449** | 0.357 → **0.470** | 0.360 → **0.466** |
+| signature | 143 | 0.975 → **0.985** | 0.984 → **0.985** | 0.967 → **0.997** |
+| medical-pills | 92 | **0.797** → 0.794 | **0.801** → 0.800 | 0.797 → **0.812** |
+| african-wildlife, 100 at random | 100 | 0.711 → **0.802** | 0.674 → **0.837** | 0.613 → **0.858** |
+| a picture on the CPU (OpenVINO, Core Ultra 5 250K, 640 px) | | 8–9 → 10 ms | 23–25 → 28–32 ms | 66 → 55–65 ms |
 
-| | YOLO26s | dfine-s |
-| --- | --- | --- |
-| inference, a picture (OpenVINO, Core Ultra 5 250K, 640 px) | **23–25 ms** | 28–32 ms |
-| training, 1,000 pictures × 100 epochs (RTX 5090) | **5 min** | 18 min |
-
-* **Accuracy: dfine-s ahead on all six**, by little where both are near the
-  ceiling (signature, pills) and by 11–12 points where it is hard: two
-  look-alike classes (brain-tumor) and 100 pictures for four classes.
-* **YOLO is about 20% faster to run and 3–4× faster to train.**
+* **D-FINE is ahead on 15 of 18**; the three it is not are within 0.007
+  (construction-ppe and medical-pills at n, medical-pills at s).
+* **The fewer the pictures, the larger the lead:** on 100 pictures for four
+  classes, +0.09 (n), +0.16 (s), +0.25 (m); on brain-tumor's two look-alike
+  classes, +0.03 to +0.11.
+* **Speed:** YOLO26 runs 15–25% faster at n and s; at m D-FINE is the faster
+  one. YOLO also trains faster.
 * mAP50-95 counts a box for every class it scores, as each project scores
-  itself; "one class a box" is what `predict` hands out. The 100-picture set
-  is noisy: the same code trained twice gave 0.790 and 0.815.
+  itself. Each cell is one run; how much a small dataset moves from one run to
+  the next is measured below.
 
 ### Small inputs and small computers
 

@@ -290,7 +290,7 @@ def main():
     parser.add_argument("--denoising", type=int, help="D-FINE denoising queries (100)")
     parser.add_argument("--freeze", help="D-FINE parts not trained (backbone)")
     parser.add_argument("--seed", type=int, default=0, help="both trainers' seed")
-    parser.add_argument("--clean-bn", choices=["keep", "adapt"],
+    parser.add_argument("--clean-bn", choices=["auto", "keep", "adapt"],
                         help="D-FINE's last plain-picture epochs: keep the batch-norm "
                              "statistics (0.7.5) or re-estimate them (before)")
     parser.add_argument("--no-augment", action="store_true",

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.6
+
+- The plain-picture epochs keep the batch-norm statistics only when the whole
+  network trains (`clean_bn="auto"`, the default). Three seeds on three small
+  sets: training everything, keeping them was even or ahead; with the backbone
+  frozen (`freeze="backbone"`, the lab's classroom preset), letting them adapt
+  scored higher on all three (signature 0.885 → 0.907, medical-pills
+  0.554 → 0.659, 100 african-wildlife pictures 0.628 → 0.660), so frozen runs
+  now adapt them as before 0.7.5. `Trainer(clean_bn="keep" | "adapt")` forces
+  either.
+- Measured with the same runs: a small dataset wants more epochs. dfine-n at
+  320 px, backbone frozen, 100 queries: 30 → 70 → 100 epochs gave 0.628 →
+  0.730 → 0.751 on 100 african-wildlife pictures (YOLO26n 0.679), 0.885 →
+  0.938 → 0.960 on signature, 0.554 → 0.693 → 0.746 on medical-pills.
+
 ## 0.7.5
 
 - **Classes the COCO weights already know keep what they know.** Fine-tuning

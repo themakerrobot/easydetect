@@ -513,3 +513,22 @@ def test_plain_picture_epochs_keep_the_batch_norm_statistics(dataset, tmp_path):
                 **{**TRAIN_KWARGS, "epochs": 4})
     assert not torch.equal(seen[1], seen[2])   # augmented epochs: they adapt
     assert torch.equal(seen[2], seen[3])       # the plain last epoch: kept
+
+
+def test_with_the_backbone_frozen_the_plain_epochs_adapt_the_batch_norms(dataset, tmp_path):
+    """Frozen backbone: the encoder and decoder batch norms follow the plain
+    pictures in the last epochs (it scored higher that way, three seeds)."""
+    import torch
+
+    model = Detector("dfine-n", verbose=False)
+    model.net = _blank_net(1)
+    seen = []
+
+    def stats(row):
+        bn = [m for n, m in model.net.named_modules()
+              if isinstance(m, torch.nn.BatchNorm2d) and not n.startswith("backbone")]
+        seen.append(torch.cat([m.running_mean.clone() for m in bn]))
+
+    model.train(data=str(dataset), project=str(tmp_path), on_epoch_end=stats, freeze="backbone",
+                **{**TRAIN_KWARGS, "epochs": 4})
+    assert not torch.equal(seen[2], seen[3])   # the plain last epoch: they adapt

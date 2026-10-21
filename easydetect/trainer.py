@@ -284,12 +284,17 @@ class Trainer:
         on_epoch_end=None,
         on_progress=None,
         origin=None,
-        clean_bn="keep",
+        clean_bn="auto",
     ):
         seed_everything(seed)
         self.augment = augment
-        # "adapt": the plain-picture epochs re-estimate the batch-norm
-        # statistics, as before 0.7.5 (kept for comparing the two)
+        # the plain-picture epochs: "keep" the batch-norm statistics the
+        # augmented ones gathered, or "adapt" them to plain pictures. "auto"
+        # keeps them when the whole network trains and adapts them when a part
+        # is frozen — three seeds on three small sets: training everything,
+        # keeping was even or ahead (0.572 vs 0.564 on 100 pictures); with the
+        # backbone frozen, adapting won on all three (0.885 -> 0.907,
+        # 0.554 -> 0.659, 0.628 -> 0.660)
         self.clean_bn = clean_bn
         self.multiscale, self.mosaic, self.mixup = bool(multiscale), float(mosaic), float(mixup)
         self.seed, self.freeze, self.origin = seed, freeze, origin
@@ -614,7 +619,8 @@ class Trainer:
             net.train()
             for module in self.frozen:  # frozen batch norms must not keep adapting
                 module.eval()
-            if self.augment and epoch >= self.clean_from and self.clean_bn == "keep":
+            keep_bn = self.clean_bn == "keep" or (self.clean_bn == "auto" and not self.frozen)
+            if self.augment and epoch >= self.clean_from and keep_bn:
                 # the plain-picture epochs keep the batch-norm statistics the
                 # augmented ones gathered: re-estimated from plain batches they
                 # cost 0.48 -> 0.40 mAP in three epochs on a 100-picture set

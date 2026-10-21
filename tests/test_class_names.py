@@ -25,8 +25,8 @@ def test_rows_are_copied_and_the_padding_row_stays_empty():
     changed = copy_class_rows(new, old.state_dict(), 80, {1: 47})
     a, b = new.state_dict(), old.state_dict()
     assert changed == 1 + 2 * (1 + len(new.decoder.dec_score_head))  # embed + heads' w, b
-    assert torch.equal(a["decoder.enc_score_head.weight"][1], b["decoder.enc_score_head.weight"][47])
-    assert torch.equal(a["decoder.dec_score_head.0.bias"][1], b["decoder.dec_score_head.0.bias"][47])
+    for key in ("decoder.enc_score_head.weight", "decoder.dec_score_head.0.bias"):
+        assert torch.equal(a[key][1], b[key][47])
     assert torch.equal(a["decoder.denoising_class_embed.weight"][1],
                        b["decoder.denoising_class_embed.weight"][47])
     assert a["decoder.denoising_class_embed.weight"][3].abs().sum() == 0  # padding

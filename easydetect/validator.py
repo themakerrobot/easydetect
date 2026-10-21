@@ -128,6 +128,8 @@ def validate_torch(net, data_yaml, imgsz=640, batch=8, conf=0.0, device=None, wo
     scoring, not training, so the few thousandths it may move are noise."""
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     ds = DetDataset(data_yaml, "val", imgsz, augment=False)
+    if len(ds) <= batch * 4:
+        workers = 0     # starting workers takes longer than reading a few pictures
     dl = DataLoader(ds, batch_size=batch, num_workers=workers, collate_fn=DetDataset.collate,
                     pin_memory=device.type == "cuda",
                     multiprocessing_context=worker_context() if workers > 0 else None)

@@ -87,3 +87,23 @@ def test_label_rows_boxes_confidences_and_polygons():
     tri = "1 0.2 0.3 0.6 0.3 0.4 0.7".split()
     assert label_row_to_box(tri) == pytest.approx([1, 0.4, 0.5, 0.4, 0.4])
     assert label_row_to_box([]) is None and label_row_to_box("0 .5".split()) is None
+
+
+def test_a_notepad_label_file_with_a_bom_and_a_stray_line_still_reads(tmp_path, capsys):
+    _image(tmp_path / "images" / "val" / "a.jpg")
+    lp = tmp_path / "labels" / "val" / "a.txt"
+    lp.parent.mkdir(parents=True)
+    lp.write_bytes("\ufeff0 .5 .5 .2 .2\r\n0 x y w h\r\n0 .3 .3 .1 .1\r\n".encode())
+    (tmp_path / "data.yaml").write_text("path: .\ntrain: images/val\nval: images/val\n"
+                                        "names: {0: can}\n")
+    ds = DetDataset(tmp_path / "data.yaml", "val", imgsz=64, augment=False)
+    assert len(ds._load_labels(ds.files[0])) == 2
+    assert "a.txt: 1 line(s) are not numbers" in capsys.readouterr().out
+
+
+def test_an_image_list_with_a_bom_finds_its_first_image(tmp_path):
+    from easydetect.data.dataset import list_images
+
+    _image(tmp_path / "images" / "a.jpg")
+    (tmp_path / "list.txt").write_bytes("\ufeffimages/a.jpg\n".encode())
+    assert list_images(tmp_path, "list.txt") == [tmp_path / "images" / "a.jpg"]

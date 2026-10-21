@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 
 #: More names people give COCO's classes: plurals are handled separately.
+#: Left out on purpose, as they name other things as often: ship (not a
+#: boat), plant, table (a desk), 가위 (the hand sign, in a 가위바위보 set), 연.
 ALIASES = {
     "person": ["people", "human", "man", "woman", "pedestrian", "사람", "인물"],
     "bicycle": ["bike", "자전거"],
@@ -21,7 +23,7 @@ ALIASES = {
     "bus": ["버스"],
     "train": ["기차", "열차"],
     "truck": ["트럭"],
-    "boat": ["ship", "보트"],
+    "boat": ["보트"],
     "traffic light": ["신호등"],
     "fire hydrant": ["소화전"],
     "stop sign": ["정지 표지판"],
@@ -47,7 +49,7 @@ ALIASES = {
     "snowboard": ["스노보드"],
     "sports ball": ["ball", "soccer ball", "football", "basketball", "baseball",
                     "공", "축구공", "농구공", "야구공"],
-    "kite": ["연"],
+    "kite": [],
     "baseball bat": ["야구 배트", "야구방망이"],
     "baseball glove": ["야구 글러브"],
     "skateboard": ["스케이트보드"],
@@ -72,9 +74,9 @@ ALIASES = {
     "cake": ["케이크"],
     "chair": ["의자"],
     "couch": ["sofa", "소파"],
-    "potted plant": ["plant", "houseplant", "화분"],
+    "potted plant": ["houseplant", "화분"],
     "bed": ["침대"],
-    "dining table": ["table", "식탁", "테이블"],
+    "dining table": ["식탁"],
     "toilet": ["변기"],
     "tv": ["television", "tv monitor", "monitor", "텔레비전", "티비", "모니터"],
     "laptop": ["노트북"],
@@ -91,7 +93,7 @@ ALIASES = {
     "book": ["책"],
     "clock": ["시계"],
     "vase": ["꽃병"],
-    "scissors": ["가위"],
+    "scissors": [],
     "teddy bear": ["teddy", "곰인형", "테디베어"],
     "hair drier": ["hair dryer", "드라이기", "헤어드라이어"],
     "toothbrush": ["칫솔"],

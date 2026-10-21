@@ -50,7 +50,7 @@ def read_polygons(data_yaml: str | Path,
     """``[(image, [(class, polygon (P, 2) 0-1), ...]), ...]`` for the pictures
     with at least one polygon label; box-only lines are left out."""
     from .data.dataset import list_images, load_data_yaml
-    from .data.labels import label_path
+    from .data.labels import label_path, label_row_to_polygon, read_label_rows
 
     cfg = load_data_yaml(data_yaml)
     if cfg[split] is None:
@@ -60,11 +60,7 @@ def read_polygons(data_yaml: str | Path,
         lp = Path(label_path(path))
         if not lp.exists():
             continue
-        polys = []
-        for line in lp.read_text().splitlines():
-            v = line.split()
-            if len(v) >= 7 and len(v) % 2 == 1:
-                polys.append((int(float(v[0])), np.asarray(v[1:], np.float32).reshape(-1, 2)))
+        polys = read_label_rows(lp, label_row_to_polygon)
         if polys:
             out.append((Path(path), polys))
     return out
@@ -74,15 +70,14 @@ def has_polygons(data_yaml: str | Path, split: str = "train", look: int = 200) -
     """Whether a dataset's labels are polygons (a segmentation dataset), from
     the first ``look`` label files; a keypoint dataset never is."""
     from .data.dataset import list_images, load_data_yaml
-    from .data.labels import label_path
+    from .data.labels import label_path, label_row_to_polygon, read_label_rows
 
     cfg = load_data_yaml(data_yaml)
     if cfg["kpt_shape"] is not None or cfg[split] is None:
         return False
     for path in list_images(cfg["root"], cfg[split], cfg["yaml_dir"])[:look]:
         lp = Path(label_path(path))
-        if lp.exists() and any(len(v := line.split()) >= 7 and len(v) % 2 == 1
-                               for line in lp.read_text().splitlines()):
+        if lp.exists() and read_label_rows(lp, label_row_to_polygon):
             return True
     return False
 
@@ -323,6 +318,7 @@ def train_masks(data_yaml, out: str | Path, *, segmenter=None, init: str = "mobi
     from .nn.sam_decoder import SamDecoder
     from .segment import default_segmenter
     from .trainer import seed_everything
+    from .utils.checkpoint import load_checkpoint
 
     seed_everything(seed)
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -419,7 +415,7 @@ def train_masks(data_yaml, out: str | Path, *, segmenter=None, init: str = "mobi
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
-    state = torch.load(out / "best.pt", map_location="cpu", weights_only=False)
+    state = load_checkpoint(out / "best.pt")
     decoder.load_state_dict(state["model"])
     rule = state["mask_choice"]
     run = json.loads((out / "run.json").read_text())

@@ -99,7 +99,9 @@ labelling tool already exports. A YOLO-format download (Roboflow's included)
 trains as it comes; [training.md](https://github.com/themakerrobot/easydetect/blob/main/docs/training.md#datasets-from-elsewhere)
 lists the variations it accepts. Training starts from the COCO weights and saves
 an average of the weights (EMA) as the checkpoint; `freeze="backbone"` trains
-faster on a small set, and `resume=True` picks a killed run back up.
+faster on a small set, and `resume=True` picks a killed run back up with
+the settings it had. A class named like one of COCO's (`apple`, `사과`) starts
+from the row that already detects it.
 
 ## Label, train and watch it in a browser
 

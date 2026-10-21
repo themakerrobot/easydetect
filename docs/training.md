@@ -19,11 +19,21 @@ names:
 model = Detector("dfine-s")
 best = model.train(
     data="data.yaml", epochs=100, imgsz=640, batch=8,
-    device=0, workers=4, project="runs", name="train",
+    device=0, workers=None, project="runs", name="train",
     resume=False, patience=50, lr0=None, seed=0,
 )
 # runs/train/weights/best.pt  (last.pt too — resume=True picks the run back up)
 ```
+
+`resume=True` carries on the most recent `runs/train`, `train2`, … that has a
+`last.pt`, with the frozen parts, queries and denoising it trained with
+(left out of the call, they are read from its `run.json`). Asked for more
+epochs than it planned, an early-stopped run gets its full `patience` again.
+
+`workers=None` is 4 loader processes, or none on a Windows CPU: Windows starts
+each worker by running your script again, so a script that trains at the top
+level, without `if __name__ == "__main__":`, would start training once per
+worker. Put the training under that guard to use workers there.
 
 D-FINE's recipe, one process: AdamW with the backbone at its own slower rate
 (half for n/s, a tenth for m, less for l/x), no weight decay on norms and biases,
@@ -82,8 +92,12 @@ load without editing:
 
 A label sits where the last `images` folder in the image's path becomes
 `labels`, or beside the image when there is none — one rule, used by training,
-[easydetect lab](https://github.com/themakerrobot/easydetect-lab) and its exports alike. A dataset with no `val:` is refused with a
-message rather than validated on its training images.
+[easydetect lab](https://github.com/themakerrobot/easydetect-lab) and its exports alike. A data.yaml with no `val:` trains
+without validation (and says so) rather than validating on its training
+images: no mAP, no early stop, and the last epoch is the one kept.
+
+A label file saved by Windows Notepad (with a byte-order mark) reads as any
+other; a line that is not numbers is left out, and the file named.
 
 ```bash
 unzip shapes.v1i.yolov11.zip -d shapes
@@ -95,7 +109,17 @@ In [easydetect lab](https://github.com/themakerrobot/easydetect-lab), the same z
 
 ## Starting point
 
-`Detector("dfine-s")` warm-starts from the mirror's COCO weights. For a domain
+`Detector("dfine-s")` warm-starts from the mirror's COCO weights. A class
+named like one of COCO's 80 (`apple`, `사과`, `cups`, `강아지`) starts from
+the row that already detects it, not from nothing — on a small set that is
+most of what there is to learn. The same goes for fine-tuning your own
+checkpoint on a new class list, including the same classes in another order.
+The match ignores case, `_`/`-` and a plural `s`, and knows common English and
+Korean names (`easydetect.class_names.ALIASES`); words that name other things
+as often (`table`, `plant`, `ship`, `가위`) are left out. `run.json` records the
+matches under `start.class_rows`, and `train(match_names=False)` turns it off.
+
+For a domain
 COCO says nothing about (thermal, medical, satellite), or for a clean baseline,
 start from the ImageNet-pretrained HGNetv2 backbone instead:
 

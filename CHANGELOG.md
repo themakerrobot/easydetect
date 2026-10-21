@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.7.7
+
+- `resume=True` carries on with the run's own frozen parts, queries and
+  denoising when the call leaves them out (from `run.json`); before, a run
+  resumed from a plain `Detector("dfine-n")` failed to load its optimizer or
+  went on with 300 queries. It picks the run whose `last.pt` was written last
+  among `train`, `train2`, … — not `train_backup`, and `train10` after
+  `train9`. Resumed with more epochs than planned, an early-stopped run gets
+  its full patience again instead of stopping after one epoch.
+- The restart from the best epoch at the start of the plain-picture epochs
+  resets the patience count: a run whose best came early could stop one
+  epoch into them.
+- Fine-tuning a checkpoint on the same classes in another order (`[cat, dog]`
+  on `[dog, cat]`) gives each class its own row; before, the heads came
+  across as they were and the classes swapped. A new class with the same
+  class count no longer inherits another's row. Re-heading keeps the
+  checkpoint's queries and denoising. `run.json` records which classes
+  started from a known row (`start.class_rows`); `train(match_names=False)`
+  turns matching off. Names that mean other things as often are no longer
+  matched: ship, plant, table, 가위, 연.
+- A data.yaml without `val:` trains without validation and says so, instead
+  of failing. A misspelt `clean_bn` is an error. `name=3` works.
+- Label files with a byte-order mark (Windows Notepad) read correctly; a line
+  that is not numbers is left out and the file named, instead of stopping the
+  run. Image lists (`.txt`) with a byte-order mark too.
+- `workers=None` (the default) is 4, or 0 on a Windows CPU, where a worker
+  re-runs an unguarded script. Validation during training uses no more
+  workers than training, and none for a small val set. A last batch is
+  dropped only when it would hold one picture.
+- A saved video keeps a Korean file name on Windows (written under a plain
+  name, renamed at the end); a missing mp4 encoder is said.
+- `easydetect benchmark` on a folder leaves out the keypoint and mask models
+  beside a detector, and a model that loads but fails to run is a row with
+  its error instead of stopping the table.
+- The mask decoder's best epoch is read back weights-only, like every other
+  checkpoint.
+
 ## 0.7.6
 
 - The plain-picture epochs keep the batch-norm statistics only when the whole

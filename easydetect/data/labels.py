@@ -69,3 +69,45 @@ def label_row_to_keypoints(values: list[str], kpt_shape) -> tuple[list[float], n
         seen = (kpts[:, 0] > 0) | (kpts[:, 1] > 0)
         kpts = np.concatenate([kpts, np.where(seen, 2.0, 0.0)[:, None]], 1).astype(np.float32)
     return box, kpts
+
+
+_BAD_FILES: list[str] = []
+
+
+def read_label_rows(path: str | PurePath, parse, *args) -> list:
+    """Each line of a label file through ``parse`` (one of the ``label_row_*``
+    functions), skipping blank lines and the ones it returns None for.
+
+    A file saved by Windows Notepad starts with a byte-order mark, which
+    would make the first class read as ``\\ufeff0``; it is dropped. A line
+    that is not numbers (a stray note, a half-written row) is left out
+    rather than stopping the run, and the first few such files are named.
+    """
+    text = Path(path).read_bytes().decode("utf-8-sig", errors="replace")
+    rows, bad = [], 0
+    for line in text.splitlines():
+        values = line.split()
+        if not values:
+            continue
+        try:
+            row = parse(values, *args)
+        except (ValueError, IndexError):
+            bad += 1
+            continue
+        if row is not None:
+            rows.append(row)
+    if bad and str(path) not in _BAD_FILES:
+        _BAD_FILES.append(str(path))
+        if len(_BAD_FILES) <= 5:
+            print(f"[easydetect] {path}: {bad} line(s) are not numbers, left out", flush=True)
+        elif len(_BAD_FILES) == 6:
+            print("[easydetect] more label files have lines like that; not listing them all",
+                  flush=True)
+    return rows
+
+
+def label_row_to_polygon(values: list[str]) -> tuple[int, np.ndarray] | None:
+    """A segmentation line ``cls x1 y1 x2 y2 x3 y3 ...`` -> ``(cls, (N, 2))``."""
+    if len(values) >= 7 and len(values) % 2 == 1:
+        return int(float(values[0])), np.asarray(values[1:], np.float32).reshape(-1, 2)
+    return None

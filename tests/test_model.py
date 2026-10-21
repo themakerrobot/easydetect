@@ -11,6 +11,7 @@ import pytest
 
 from easydetect import Detector, ModelNotFoundError
 from easydetect.model import _torch_device, increment_path
+from easydetect.utils.imageio import cv2_path
 
 from .conftest import needs_ov, needs_torch
 
@@ -246,6 +247,23 @@ class TestAgainstARealModel:
         assert [len(r.boxes) for r in results] == [2, 2, 2]     # the unsure box is not shown
         assert results[0].boxes.id.tolist() == results[-1].boxes.id.tolist()
         assert sorted(results[0].boxes.id.tolist()) == [1, 2]
+
+    def test_a_saved_video_keeps_a_korean_name_and_leaves_no_temporary_file(
+            self, tiny_ir, tmp_path):
+        """OpenCV's writer cannot open a Korean file name on Windows: it writes
+        under a plain one and the file is renamed when the video ends."""
+        import cv2
+
+        clip = tmp_path / "사과.mp4"
+        writer = cv2.VideoWriter(cv2_path(clip), cv2.VideoWriter_fourcc(*"mp4v"), 5.0, (48, 48))
+        for _ in range(2):
+            writer.write(np.zeros((48, 48, 3), np.uint8))
+        writer.release()
+        model = Detector(str(tiny_ir), device="CPU", verbose=False)
+        model.predict(clip, save=True, project=str(tmp_path / "runs"))
+        out = tmp_path / "runs" / "detect" / "predict"
+        assert sorted(p.name for p in out.iterdir()) == ["사과.mp4"]
+        assert cv2.VideoCapture(cv2_path(out / "사과.mp4")).read()[0]
 
     def test_track_takes_iou_as_the_duplicate_filter_and_match_iou_for_the_tracker(
             self, tiny_ir, tmp_path, monkeypatch):

@@ -46,7 +46,8 @@ def _model_files(spec) -> list[Path]:
             files += fetched
             continue
         if path.is_dir():
-            files += sorted(p for p in path.rglob("*") if p.suffix in (".xml", ".onnx"))
+            files += sorted(p for p in path.rglob("*")
+                            if p.suffix in (".xml", ".onnx") and not _helper_model(p))
         elif path.exists():
             files.append(path)
         else:
@@ -54,6 +55,13 @@ def _model_files(spec) -> list[Path]:
     if not files:
         raise FileNotFoundError(f"no .xml or .onnx models in {spec}")
     return files
+
+
+def _helper_model(path: Path) -> bool:
+    """A model saved beside a detector that is not one: the keypoint model
+    and the segmenter's halves. A folder scan leaves them out."""
+    stem = path.stem.lower()
+    return stem in ("pose", "mask_decoder", "encoder", "decoder") or stem.startswith("pose-")
 
 
 def _is_name(text: str) -> bool:
@@ -120,9 +128,14 @@ def benchmark(model, source=None, runs: int = 50, warmup: int = 5,
                 rows.append({"model": _label(path, model), "backend": name,
                              "error": _cause(exc)})
                 continue
-            for _ in range(warmup):
-                predictor(img, conf=0.25)
-            speeds = [predictor(img, conf=0.25)[1] for _ in range(runs)]
+            try:
+                for _ in range(warmup):
+                    predictor(img, conf=0.25)
+                speeds = [predictor(img, conf=0.25)[1] for _ in range(runs)]
+            except Exception as exc:  # noqa: BLE001 — loads, but is not a detector
+                rows.append({"model": _label(path, model), "backend": name,
+                             "error": _cause(exc)})
+                continue
             row = {"model": _label(path, model), "backend": name, "imgsz": predictor.imgsz}
             for key in ("preprocess", "inference", "postprocess"):
                 row[key] = statistics.median(s[key] for s in speeds)

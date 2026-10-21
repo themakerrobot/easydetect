@@ -295,6 +295,8 @@ class Trainer:
         # keeping was even or ahead (0.572 vs 0.564 on 100 pictures); with the
         # backbone frozen, adapting won on all three (0.885 -> 0.907,
         # 0.554 -> 0.659, 0.628 -> 0.660)
+        if clean_bn not in ("auto", "keep", "adapt"):
+            raise ValueError(f'clean_bn must be "auto", "keep" or "adapt", not {clean_bn!r}')
         self.clean_bn = clean_bn
         self.multiscale, self.mosaic, self.mixup = bool(multiscale), float(mosaic), float(mixup)
         self.seed, self.freeze, self.origin = seed, freeze, origin
@@ -370,13 +372,18 @@ class Trainer:
 
     @staticmethod
     def _resume_dir(p: Path) -> Path:
-        """The most recent ``name``/``name2``/... directory that has a last.pt."""
+        """The ``name``/``name2``/``name3``... directory whose last.pt was written
+        last — not ``name_backup`` or ``name10`` sorted before ``name9``."""
+        import re
+
+        pattern = re.compile(re.escape(p.name) + r"\d*")
         candidates = [
-            d
-            for d in sorted(p.parent.glob(f"{p.name}*"))
-            if (d / "weights" / "last.pt").exists()
+            d for d in p.parent.glob(f"{p.name}*")
+            if pattern.fullmatch(d.name) and (d / "weights" / "last.pt").exists()
         ]
-        return candidates[-1] if candidates else p
+        if not candidates:
+            return p
+        return max(candidates, key=lambda d: (d / "weights" / "last.pt").stat().st_mtime)
 
     def _load_resume_state(self) -> None:
         last = self.save_dir / "weights" / "last.pt"
@@ -397,6 +404,11 @@ class Trainer:
         # a resumed run carries on as the uninterrupted one would: the same
         # random stream, and early stopping counting from where it was
         self.since_improved = int(ckpt.get("since_improved", 0))
+        planned = int(ckpt.get("epochs", self.epochs))
+        if self.epochs > planned:
+            # asked for more epochs than the run planned: a run that stopped
+            # early would otherwise stop again after one epoch
+            self.since_improved = 0
         if ckpt.get("rng"):
             _set_rng_state(ckpt["rng"])
         print(f"[easydetect] resuming {self.save_dir} "
@@ -416,6 +428,9 @@ class Trainer:
         self.ema.module.load_state_dict(ckpt["model"])
         self.ema.updates = int(ckpt.get("ema_updates", self.ema.updates))
         self.ema.decay -= EMA_RESTART_STEP
+        # the plain-picture epochs get their full patience: counting on from
+        # the strong phase could stop the run one epoch after the restart
+        self.since_improved = 0
         print(f"[easydetect] restarting from the best epoch so far "
               f"({int(ckpt.get('epoch', -1)) + 1}, mAP50-95 {float(ckpt.get('best', 0)):.4f})")
 
@@ -571,7 +586,8 @@ class Trainer:
             ds,
             batch_size=self.batch,
             shuffle=True,
-            drop_last=len(ds) > self.batch,
+            # a last batch of one picture breaks batch norm; any other size trains
+            drop_last=len(ds) > self.batch and len(ds) % self.batch == 1,
             num_workers=self.workers,
             collate_fn=DetDataset.collate,
             pin_memory=self.device.type == "cuda",
@@ -590,6 +606,7 @@ class Trainer:
         dl = self._loader(ds)
         net = self.net.to(self.device)
         since_improved = self.since_improved
+        plain_started = False
         if self.start_epoch >= self.epochs:
             # resuming a run that already finished its schedule: there is nothing
             # to do until someone asks for more epochs
@@ -607,15 +624,20 @@ class Trainer:
 
         logs = dict.fromkeys(LOGGED, 0.0)
         for epoch in range(self.start_epoch, self.epochs):
-            if ds.strong and epoch >= self.clean_from:
-                # persistent workers hold their own copy of the dataset: a
-                # new loader is how they hear that the strong augments are off
-                ds.strong = False
-                dl = self._loader(ds)
-                print(f"[easydetect] epoch {epoch + 1}: zoom, crop and colour jitter off "
-                      "for the last epochs")
-                if val_fn is not None:
+            if self.augment and epoch >= self.clean_from and not plain_started:
+                plain_started = True
+                if ds.strong:
+                    # persistent workers hold their own copy of the dataset: a
+                    # new loader is how they hear that the strong augments are off
+                    ds.strong = False
+                    dl = self._loader(ds)
+                    print(f"[easydetect] epoch {epoch + 1}: zoom, crop and colour jitter off "
+                          "for the last epochs")
+                # also when a resumed run starts exactly here, as the
+                # uninterrupted one would have
+                if val_fn is not None and epoch == self.clean_from:
                     self._restart_from_best(net)
+                    since_improved = self.since_improved
             net.train()
             for module in self.frozen:  # frozen batch norms must not keep adapting
                 module.eval()
@@ -762,6 +784,7 @@ class Trainer:
                 "epoch": epoch,
                 "best": self.best,
                 "since_improved": self.since_improved,
+                "epochs": self.epochs,
                 "imgsz": self.imgsz,
                 # resuming reads last.pt only; best.pt is what people load
                 **({"rng": _rng_state()} if fname == "last.pt" else {}),

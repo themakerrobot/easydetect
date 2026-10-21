@@ -17,7 +17,9 @@ halves of the workflow meet without you having to think about it.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import sys
 import time
 from collections.abc import Iterator
@@ -490,7 +492,7 @@ class Detector:
         imgsz: int = 640,
         batch: int = 8,
         device: Any = None,
-        workers: int = 4,
+        workers: int | None = None,
         project: str = "runs",
         name: str = "train",
         resume: bool = False,
@@ -514,6 +516,7 @@ class Detector:
         seg_lr: float = 1e-4,
         queries: int | None = None,
         denoising: int | None = None,
+        match_names: bool = True,
         **kwargs: Any,
     ) -> Path:
         """Train on a data.yaml dataset. Returns the path of ``best.pt``.
@@ -560,6 +563,24 @@ class Detector:
 
         cfg = load_data_yaml(data)
         self.names = cfg["names"]
+        name = str(name)
+        if workers is None:
+            # Windows starts loader workers by importing the caller's script
+            # again: without an `if __name__ == "__main__":` guard they die.
+            # On a CPU the loading is a few percent of a step anyway.
+            import torch
+
+            dev = _torch_device(device) or ("cuda" if torch.cuda.is_available() else "cpu")
+            workers = 0 if os.name == "nt" and dev.startswith("cpu") else 4
+        if val and not cfg.get("val"):
+            print("[easydetect] no val split in the data.yaml: training without "
+                  "validation, and the last epoch is kept", file=sys.stderr)
+            val = False
+        if resume:
+            freeze, queries, denoising = self._resumed_settings(
+                Path(project) / name, freeze, queries, denoising)
+        self._match_names = match_names
+        self.class_rows: dict[str, str] = {}
         # where the weights came from, for the run's record
         origin = None
         if self.net is not None:
@@ -573,10 +594,16 @@ class Detector:
             self.net = DFINENet(self.variant or "s", cfg["nc"])
             loaded = getattr(self.net.backbone, "imagenet_loaded", False)
             origin = {"kind": "imagenet" if loaded else "scratch"}
-        elif self.net.num_classes != cfg["nc"]:
+        elif self.net.num_classes != cfg["nc"] or self._names_moved(cfg["names"]):
+            # another class count, or the same count under other names (a
+            # [cat, dog] model fine-tuned on [dog, cat]): new heads, with the
+            # rows of the classes the checkpoint knows by name
             self.net = self._reheaded_net(cfg["nc"], cfg["names"])
             self.names = cfg["names"]
 
+        if self.class_rows and origin is not None:
+            # which classes started from a row the old weights had, by name
+            origin["class_rows"] = dict(self.class_rows)
         if queries is not None:
             self.net.trim(queries=int(queries))
         if denoising is not None:
@@ -607,7 +634,8 @@ class Detector:
         val_fn = None
         if val:
             def val_fn(net):  # noqa: E306 — tiny closure, reads better inline
-                return validate_torch(net, data, imgsz=imgsz, batch=batch, device=device)["map"]
+                return validate_torch(net, data, imgsz=imgsz, batch=batch, device=device,
+                                      workers=min(workers, 2))["map"]
 
         best = trainer.train(val_fn=val_fn)
         self._load_checkpoint(best)
@@ -684,6 +712,44 @@ class Detector:
         self.pose = None  # the next prediction reads the new one
         return beside
 
+    def _names_moved(self, names: dict) -> bool:
+        """The checkpoint knows classes by other names or in another order."""
+        ckpt = getattr(self, "ckpt", None) or {}
+        old = {int(k): str(v) for k, v in ckpt.get("names", {}).items()}
+        new = {int(k): str(v) for k, v in dict(names).items()}
+        return bool(old) and old != new
+
+    @staticmethod
+    def _resumed_settings(run_root: Path, freeze, queries, denoising):
+        """The settings a resumed run trained with, where the call leaves them
+        out: the optimizer's state only fits the same frozen parts, and a run
+        trimmed to fewer queries must go on with them."""
+        from .trainer import Trainer
+
+        run = Trainer._resume_dir(run_root)
+        info = run / "run.json"
+        if not info.exists():
+            return freeze, queries, denoising
+        try:
+            setup = json.loads(info.read_text(encoding="utf-8"))
+            setup = setup.get("run", setup)       # summary-shaped files nest it
+        except (OSError, ValueError):
+            return freeze, queries, denoising
+        restored = []
+        if freeze is None and setup.get("freeze"):
+            freeze = setup["freeze"]
+            restored.append(f"freeze={freeze}")
+        if queries is None and setup.get("queries") and setup["queries"] < 300:
+            queries = int(setup["queries"])
+            restored.append(f"queries={queries}")
+        if denoising is None and setup.get("denoising") is not None \
+                and setup["denoising"] != 100:
+            denoising = int(setup["denoising"])
+            restored.append(f"denoising={denoising}")
+        if restored:
+            print(f"[easydetect] resuming with the run's own {', '.join(restored)}")
+        return freeze, queries, denoising
+
     def _try_pretrained_start(self, nc: int) -> None:
         """Warm-start from the mirror's COCO weights, quietly falling back."""
         try:
@@ -707,10 +773,21 @@ class Detector:
 
         old = self.net.state_dict()
         fresh = DFINENet(self.variant or "s", nc, pretrained_backbone=False)
+        # with the same class count the old heads fit and would come across
+        # as they are, each row under another class's name: start them fresh
+        heads = {k: v.clone() for k, v in fresh.state_dict().items() if _class_tensor(k)}
         transferred = transfer_weights(fresh, old)
+        fresh.load_state_dict(heads, strict=False)
+        transferred -= sum(k in old and old[k].shape == v.shape for k, v in heads.items())
+        # a checkpoint trained with fewer queries keeps them
+        if self.net.decoder.num_queries != fresh.decoder.num_queries:
+            fresh.trim(queries=self.net.decoder.num_queries)
+        fresh.decoder.num_denoising = self.net.decoder.num_denoising
         ckpt = getattr(self, "ckpt", None) or {}
         source = {int(k): str(v) for k, v in ckpt.get("names", {}).items()}
-        known = match_classes(source, names or {}) if source else {}
+        use_names = getattr(self, "_match_names", True)
+        known = match_classes(source, names or {}) if source and use_names else {}
+        self.class_rows = {str((names or {})[j]): source[i] for j, i in known.items()}
         if known:
             copy_class_rows(fresh, old, self.net.num_classes, known)
         if self.verbose:
@@ -934,25 +1011,33 @@ class _OutputWriter:
                 out = self.save_dir / f"{stem}_{frame.index}.jpg"
             imwrite(str(out), img)
             return
-        writer = self.videos.get(frame.path)
-        if writer is None:
+        entry = self.videos.get(frame.path)
+        if entry is None:
             stem = Path(frame.path).stem or "stream"
+            final = self.save_dir / f"{stem}.mp4"
+            # OpenCV's writer takes a narrow path: a Korean file name would not
+            # open on Windows. It writes under a plain name and is renamed after.
+            tmp = self.save_dir / f".easydetect-{len(self.videos)}-{os.getpid()}.mp4"
             h, w = img.shape[:2]
             # H.264 plays in browsers; OpenCV's pip wheels often lack it, so fall back
             for codec in ("avc1", "mp4v"):
-                writer = cv2.VideoWriter(cv2_path(self.save_dir / f"{stem}.mp4"),
-                                         cv2.VideoWriter_fourcc(*codec),
+                writer = cv2.VideoWriter(cv2_path(tmp), cv2.VideoWriter_fourcc(*codec),
                                          frame.fps or 25.0,  # keep the source's timing
                                          (w, h))
                 if writer.isOpened():
                     break
                 writer.release()
-            self.videos[frame.path] = writer
-        writer.write(img)
+            else:
+                print(f"[easydetect] could not write a video in {self.save_dir}: "
+                      "this OpenCV has no mp4 encoder", file=sys.stderr)
+            entry = self.videos[frame.path] = (writer, tmp, final)
+        entry[0].write(img)
 
     def close(self) -> None:
-        for writer in self.videos.values():
+        for writer, tmp, final in self.videos.values():
             writer.release()
+            if tmp.exists():
+                os.replace(tmp, final)
         self.videos.clear()
 
 
@@ -967,18 +1052,25 @@ def transfer_weights(net, state_dict) -> int:
     return len(matched)
 
 
+def _class_tensor(key: str) -> bool:
+    """A tensor with a row per class: the score heads and the denoising class
+    embedding (which has one more, for padding)."""
+    return "score_head" in key or "denoising_class_embed" in key
+
+
 def copy_class_rows(net, state_dict, old_nc: int, rows: dict[int, int]) -> int:
     """Copy class heads' rows ``{new class: old class}`` from a checkpoint with
-    ``old_nc`` classes: every tensor whose first dimension counts the classes
-    (plus a padding row, as the denoising class embedding has) and whose other
-    dimensions match. Returns how many tensors took rows."""
+    ``old_nc`` classes: the score heads and the denoising class embedding
+    (which has a padding row too), wherever the other dimensions match — also
+    when the class count is the same and only the order moved. Returns how
+    many tensors took rows."""
     import torch
 
     target, changed = net.state_dict(), 0
     nc = net.num_classes
     for k, old in state_dict.items():
         new = target.get(k)
-        if new is None or new.shape == old.shape or new.dim() != old.dim():
+        if new is None or not _class_tensor(k) or new.dim() != old.dim():
             continue
         extra = old.shape[0] - old_nc
         if extra not in (0, 1) or new.shape[0] != nc + extra or new.shape[1:] != old.shape[1:]:

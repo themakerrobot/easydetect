@@ -82,7 +82,7 @@ def load_yolo(data_yaml: str | Path, split: str, spec: KeypointSpec) -> tuple[di
     same ``images {id: file}``, ``people {id: [annotation]}`` that ``load_coco``
     gives — boxes and keypoints in pixels, so the rest is shared."""
     from .dataset import list_images, load_data_yaml
-    from .labels import label_path, label_row_to_keypoints
+    from .labels import label_path, label_row_to_keypoints, read_label_rows
 
     cfg = load_data_yaml(data_yaml)
     if cfg["kpt_shape"] is None:
@@ -95,9 +95,8 @@ def load_yolo(data_yaml: str | Path, split: str, spec: KeypointSpec) -> tuple[di
         lp = Path(label_path(path))
         if not lp.exists():
             continue
-        rows = [label_row_to_keypoints(line.split(), cfg["kpt_shape"])
-                for line in lp.read_text().splitlines() if line.strip()]
-        rows = [r for r in rows if r is not None and (classes is None or int(r[0][0]) in classes)]
+        rows = read_label_rows(lp, label_row_to_keypoints, cfg["kpt_shape"])
+        rows = [r for r in rows if classes is None or int(r[0][0]) in classes]
         if not rows:
             continue
         w, h = _image_size(Path(path))

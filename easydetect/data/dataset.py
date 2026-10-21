@@ -22,7 +22,7 @@ from torch.utils.data import Dataset
 from easydetect.utils.imageio import imread  # any path, Hangul included
 
 from . import augment as aug
-from .labels import label_path, label_row_to_box
+from .labels import label_path, label_row_to_box, read_label_rows
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -97,7 +97,7 @@ def list_images(root: Path, spec, yaml_dir: Path | None = None):
     if p.suffix == ".txt":
         base = p.parent
         out = []
-        for line in p.read_text().splitlines():
+        for line in p.read_text(encoding="utf-8-sig").splitlines():
             line = line.strip()
             if line:
                 q = Path(line)
@@ -187,10 +187,7 @@ class DetDataset(Dataset):
         if not lp.exists():
             return np.zeros((0, 5), np.float32)
         rows = []
-        for line in lp.read_text().splitlines():
-            row = label_row_to_box(line.split(), self.kpt_shape)
-            if row is None:
-                continue
+        for row in read_label_rows(lp, label_row_to_box, self.kpt_shape):
             # a class the data.yaml does not name would index past the class
             # head: an IndexError on the CPU, a device-side assert on a GPU,
             # hours into a run. Such a box is left out, and said so once.

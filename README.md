@@ -214,6 +214,73 @@ one RTX 5090), and scores both with one evaluator on the val split:
   itself; "one class a box" is what `predict` hands out. The 100-picture set
   is noisy: the same code trained twice gave 0.790 and 0.815.
 
+### Small inputs and small computers
+
+On a Raspberry Pi the input shrinks to 320 or 416 px, and there the 640 px
+COCO weights lose most of what they know. `tools/long_run.py` fine-tunes them
+on COCO at the smaller size (with 100 decoder queries, which the Pi runs
+faster) and scores everything here on all 5,000 val2017 pictures with one
+evaluator — OpenVINO on the CPU, one class a box, up to 100 boxes a picture.
+YOLO is Ultralytics' own export at each size. mAP50-95:
+
+| input | dfine-n, 640 px weights | dfine-n, fine-tuned at that size | dfine-s, 640 px weights | dfine-s, fine-tuned at that size | YOLO11n | YOLO26n | YOLO11s | YOLO26s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 320 | 0.100 | **0.322** | 0.239 | **0.381** | 0.283 | 0.297 | 0.365 | **0.381** |
+| 416 | 0.270 | **0.361** | 0.389 | 0.415 | 0.328 | 0.341 | 0.408 | **0.421** |
+| 640 | **0.416** | 0.410 | **0.472** | 0.465 | 0.381 | 0.397 | 0.453 | 0.471 |
+
+Raspberry Pi 4B, 4 threads, `easydetect benchmark` (OpenVINO; a fine-tuned
+model runs as fast as the original of the same size and queries):
+
+| | 320 | 320, 100 queries | 416 | 416, 100 queries | 640 |
+| --- | --- | --- | --- | --- | --- |
+| dfine-n | 190 ms | **122 ms** | 252 ms | 183 ms | 479 ms |
+| dfine-s | 508 ms | 347 ms | 697 ms | 536 ms | 1,323 ms |
+
+* **Fine-tune at the size you will run.** dfine-n at 320: 0.100 → 0.322;
+  dfine-s at 320: 0.239 → 0.381. At 640 the original weights stay better.
+* **Against YOLO at the same size:** dfine-n is ahead of both YOLO n models at
+  every size; dfine-s matches YOLO26s at 320 and is within a point at 416.
+* **100 queries cost almost nothing** in accuracy (0.323 → 0.322 at 320) and
+  save a third of the time on the Pi. YOLO11s at 320 through ONNX Runtime,
+  as the Pibo robot runs it, took 218 ms on the same Pi.
+* The fine-tuned 320 and 416 columns were trained with 100 queries; 640
+  with all 300 (it did not beat the original either way).
+* These fine-tuned checkpoints are not on the mirror yet; `tools/long_run.py`
+  makes them (about a day on one RTX 5090).
+* Our evaluator puts dfine-n at 640 at 0.416 where D-FINE reports 42.8: one
+  class a box and 100 boxes a picture count fewer boxes than COCO's own tool.
+
+### Small datasets: run it more than once
+
+A dataset with a few dozen val pictures moves by several points from one
+run to the next, so `tools/long_run.py` trains every benchmark with three
+seeds. dfine-n against YOLO26n at 320 px, 30 epochs, batch 8 (easydetect
+0.7.5, mean ± spread of three runs):
+
+| dataset | train pictures | YOLO26n | dfine-n |
+| --- | --- | --- | --- |
+| african-wildlife | 1,052 | 0.786 ± 0.007 | **0.812 ± 0.004** |
+| construction-ppe | 1,132 | **0.270 ± 0.002** | 0.234 ± 0.004 |
+| brain-tumor | 893 | 0.364 ± 0.005 | 0.365 ± 0.010 |
+| signature | 143 | 0.957 ± 0.010 | 0.959 ± 0.009 |
+| medical-pills | 92 | **0.754 ± 0.005** | 0.722 ± 0.003 |
+| african-wildlife, 100 at random | 100 | **0.649 ± 0.004** | 0.572 ± 0.033 |
+
+A small dataset wants more epochs. The lab's classroom settings — backbone
+frozen, 100 queries — on the three smallest sets (YOLO26n with the same
+epochs beside it):
+
+| dataset | 30 epochs | 70 epochs | 100 epochs | YOLO26n, 100 epochs |
+| --- | --- | --- | --- | --- |
+| african-wildlife, 100 at random | 0.628 | 0.730 | **0.751** | 0.679 |
+| signature | 0.885 | 0.938 | 0.960 | **0.976** |
+| medical-pills | 0.554 | 0.693 | 0.746 | **0.780** |
+
+So the lab's classroom preset now picks the epochs from the dataset — about
+1,000 steps, 35 epochs for 300 pictures up to 100 for a few dozen — which
+keeps a laptop run near the same 10–15 minutes.
+
 ## Command line
 
 ```bash
@@ -265,6 +332,14 @@ Runtime이 함께 들어가고 PyTorch는 없습니다. `pip install "easydetect
 
 라벨링부터 학습·추론까지 브라우저로 하려면 [easydetect lab](https://github.com/themakerrobot/easydetect-lab). 가중치 캐시는
 `~/.easydetect/`, 사내 미러는 `EASYDETECT_ASSETS_URL` 환경변수로 지정합니다.
+
+라즈베리파이처럼 작은 기기에서는 입력을 320~416으로 줄이는데, 640으로 학습된
+COCO 가중치는 이 크기에서 성능이 크게 떨어집니다(dfine-n 320: 0.100). 그 크기로
+COCO를 다시 학습하면 0.322로 올라 같은 크기의 YOLO11n·YOLO26n보다 높고, 라즈베리파이
+4B에서 쿼리 100개로 122밀리초입니다. 사진이 적은 데이터는 에폭을 늘릴수록 좋아져서
+(100장: 30에폭 0.628 → 100에폭 0.751), easydetect lab의 수업용 설정은 데이터 크기에
+맞춰 에폭을 정합니다. 자세한 표는 위의 "Small inputs and small computers"와
+"Small datasets" 절에 있습니다.
 
 ## Credits
 

@@ -131,7 +131,7 @@ def subset(data: Path, n: int) -> Path:
 
 
 def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
-    for run in sorted(out.glob(f"{args.dfine}*")):   # finished before an interruption
+    for run in sorted(out.glob(f"{args.label}*")):   # finished before an interruption
         summary = run / "summary.json"
         if summary.exists() and (run / "weights" / "best.pt").exists():
             done = json.loads(summary.read_text())
@@ -152,12 +152,12 @@ def train_dfine(data: Path, out: Path, args) -> tuple[Path, float]:
     code = ("import json, sys; from easydetect import Detector; "
             "print('BEST', Detector(sys.argv[1], verbose=False).train(data=sys.argv[2], "
             "epochs=int(sys.argv[3]), imgsz=int(sys.argv[4]), batch=int(sys.argv[5]), "
-            "patience=int(sys.argv[3]), project=sys.argv[6], name=sys.argv[1], "
+            "patience=int(sys.argv[3]), project=sys.argv[6], name=sys.argv[9], "
             "workers=int(sys.argv[7]), **json.loads(sys.argv[8])))")
     best = None
     with subprocess.Popen([sys.executable, "-c", code, args.dfine, str(data), str(args.epochs),
                            str(args.imgsz), str(args.batch), str(out), str(args.workers),
-                           json.dumps(extra)],
+                           json.dumps(extra), args.label],
                           env=UNBUFFERED, stdout=subprocess.PIPE, text=True) as proc:
         for line in proc.stdout:                    # passed on as it comes
             print(line, end="", flush=True)
@@ -251,7 +251,7 @@ def _bold_if_higher(a: float, b: float) -> str:
 
 
 def table(results: dict, args) -> str:
-    yolo, dfine = Path(args.yolo).stem, args.dfine
+    yolo, dfine = Path(args.yolo).stem, args.label
     rows = [f"| dataset | train pictures | {yolo} mAP50-95 | {dfine} mAP50-95 | "
             f"{yolo} one class a box | {dfine} one class a box | "
             f"{yolo} mAP50 | {dfine} mAP50 | {yolo} ms | {dfine} ms |",
@@ -284,7 +284,10 @@ def main():
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--yolo", default="yolo26s.pt")
-    parser.add_argument("--dfine", default="dfine-s")
+    parser.add_argument("--dfine", default="dfine-s",
+                        help="a model name, or a .pt to start from (a COCO fine-tune at 320)")
+    parser.add_argument("--label", help="the D-FINE column's name (default: the model name, "
+                                        "or the run folder of a .pt)")
     parser.add_argument("--device", default="CPU", help="OpenVINO device for scoring")
     parser.add_argument("--queries", type=int, help="D-FINE decoder queries (of 300)")
     parser.add_argument("--denoising", type=int, help="D-FINE denoising queries (100)")
@@ -299,6 +302,9 @@ def main():
     parser.add_argument("--rescore", action="store_true",
                         help="score finished datasets again (their trained models are reused)")
     args = parser.parse_args()
+    if not args.label:
+        start = Path(args.dfine).expanduser()
+        args.label = start.parent.parent.name if start.suffix == ".pt" else args.dfine
     sys.stdout.reconfigure(line_buffering=True)
     faulthandler.enable()  # a crash prints where it happened
     if shutil.which("yolo") is None:

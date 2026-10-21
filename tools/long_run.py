@@ -107,6 +107,15 @@ for _seed in (0, 1, 2):
               "--no-augment", "--seed", str(_seed)),
     ]
 
+#: the classroom runs again, started from the COCO weights fine-tuned at 320
+#: with 100 queries instead of the 640 px ones: whether that start is the
+#: better default for 수업용 (against bench-n320-classroom-70ep-seed*)
+FROM320 = [bench(f"bench-n320-classroom-70ep-from320-seed{_seed}", "--dfine",
+                 "@coco/dfine-nq-320/weights/best.pt", "--label", "dfine-n-from320",
+                 *N320[2:], *CLASS, "--epochs", "70", *SMALL, "--no-augment",
+                 "--seed", str(_seed))
+           for _seed in (0, 1, 2)]
+
 #: also trained with 100 decoder queries from the start (what the Pi runs fastest)
 QUERY_RUNS = [("n", 320), ("n", 416), ("s", 320), ("s", 416)]
 
@@ -123,6 +132,7 @@ def plan() -> list[tuple[str, list[str], list[str]]]:
                       ["coco-data"]))
     steps.append(("coco-score", ["coco-score"], ["coco-data"]))
     steps += [(name, args, []) for name, args in REPEATS]
+    steps += [(name, args, ["coco-n320-q100"]) for name, args in FROM320]
     steps += [(name, args, []) for name, args in BENCHES[4:]]
     return steps
 
@@ -171,6 +181,8 @@ def step_coco_data(root: Path, args) -> None:
 
 def step_bench(root: Path, args, name: str, *flags: str) -> None:
     out = root / "bench" / name.removeprefix("bench-")
+    # "@coco/..." is a file this run made: under the root, wherever that is
+    flags = tuple(str(root / f[1:]) if f.startswith("@") else f for f in flags)
     _run([PY, "-u", str(HERE / "bench_finetune.py"), "--root", str(Path(args.bench_root)
          .expanduser()), "--out", str(out), "--workers", str(args.workers), *flags],
          cwd=root / "bench")

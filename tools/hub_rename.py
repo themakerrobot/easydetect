@@ -2,8 +2,7 @@
 # Apache-2.0
 """Rename the files on a Hugging Face repo: every path containing OLD gets NEW.
 
-    python tools/hub_rename.py leeyunjai/easydetect dfine- ed- --readme tools/hub_README.md
-    python tools/hub_rename.py leeyunjai/themaker .model/object/dfine- .model/object/ed-
+    python tools/hub_rename.py leeyunjai/easydetect old- new- --readme tools/hub_README.md
 
 Copies on the server (large files are not downloaded), then deletes the old
 paths in a second commit, so the new ones exist before the old ones go.

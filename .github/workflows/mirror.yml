@@ -1,0 +1,206 @@
+name: mirror
+
+# Builds the pretrained ed weights (.pt + OpenVINO IR + ONNX + labels) from the
+# official Apache-2.0 COCO release, and the MobileSAM segmenter (Apache-2.0) that
+# task="segment" uses, and uploads them to the Hugging Face repo the package
+# downloads from. Needs the repository secret HF_TOKEN (write).
+
+on:
+  workflow_dispatch:
+    inputs:
+      sizes:
+        description: "Sizes to build, space separated"
+        default: "n s m l x"
+      readme_only:
+        description: "Only refresh the repo's README"
+        type: boolean
+        default: false
+      segmenter_only:
+        description: "Only (re)build the MobileSAM segmenter (mobile_sam/)"
+        type: boolean
+        default: false
+      pose_run:
+        description: "Only upload pose/pose-<size>.onnx from this train-pose run id's pose-run artifact"
+        default: ""
+      pose_url:
+        description: "Or: only upload the pose-<size>.onnx at this URL (a release asset of this repository, say)"
+        default: ""
+      pose_size:
+        description: "Its size: s, m or l"
+        default: "s"
+
+permissions:
+  contents: write   # only to see a draft release's asset (pose_url)
+  actions: read     # an earlier run's artifact (pose_run)
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      HF_REPO: leeyunjai/easydetect
+      POSE: ${{ inputs.pose_run }}${{ inputs.pose_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[train]" "huggingface_hub>=0.25"
+      - name: The keypoint model (a train-pose run's pose-run artifact)
+        if: ${{ inputs.pose_run != '' && inputs.pose_url == '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pose-run
+          path: pose-run
+          run-id: ${{ inputs.pose_run }}
+          github-token: ${{ github.token }}
+      - name: The keypoint model (a URL)
+        if: ${{ inputs.pose_url != '' }}
+        env:
+          URL: ${{ inputs.pose_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          size="${{ inputs.pose_size }}"
+          mkdir -p "pose-run/$size"
+          # this repository's release assets come through the API, drafts too (a
+          # draft is listed only for a token that can write); the token goes to GitHub only
+          case "$URL" in
+            https://github.com/${{ github.repository }}/releases/*)
+              id=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+                     "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" |
+                   python3 -c "import json,os,sys; print(next(a['id'] for r in json.load(sys.stdin) for a in r['assets'] if a['browser_download_url']==os.environ['URL']))")
+              curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+                -o "pose-run/$size/pose-$size.onnx" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/assets/$id" ;;
+            *) curl -fsSL -o "pose-run/$size/pose-$size.onnx" "$URL" ;;
+          esac
+          ls -l "pose-run/$size"
+      - name: Check the keypoint model before uploading it
+        if: ${{ env.POSE != '' }}
+        run: |
+          size="${{ inputs.pose_size }}"
+          mkdir -p mirror/pose
+          cp "pose-run/$size/pose-$size.onnx" "mirror/pose/pose-$size.onnx"
+          cat "pose-run/$size/eval.txt" 2>/dev/null || true
+          cp tools/hub_README.md mirror/README.md
+          python - <<'PY'
+          import os, shutil, tempfile, urllib.request
+          import numpy as np
+          from easydetect import Detector, downloads
+          urllib.request.urlretrieve(
+              "https://raw.githubusercontent.com/opencv/opencv/4.x/samples/data/basketball1.png", "b.png")
+          os.environ["EASYDETECT_HOME"] = tempfile.mkdtemp()
+          (downloads.cache_dir() / "pose").mkdir(parents=True)
+          size = "${{ inputs.pose_size }}"
+          shutil.copy(f"mirror/pose/pose-{size}.onnx", downloads.cache_dir() / "pose" / f"pose-{size}.onnx")
+          got = {}
+          for backend in ("openvino", "onnxruntime"):
+              model = Detector("ed-s", backend=backend, task="pose", verbose=False)
+              model.pose_model = size
+              r = model("b.png")[0]
+              people = r.keypoints.conf.max(1) > 0
+              print("pose", backend, int(people.sum()), "people,", r.keypoints.conf[people].mean())
+              assert people.any() and r.keypoints.conf[people].mean() > 0.2  # a broken model reads ~0
+              got[backend] = (r.keypoints.xy, r.keypoints.conf)
+          # the keypoints a model is sure of must land on the same pixel on both
+          # runtimes; an unsure one sits on a flat peak, and OpenVINO's bf16 on a
+          # CPU that has it can move it a bin or two
+          (a, ca), (b, cb) = got["openvino"], got["onnxruntime"]
+          diff = np.abs(a - b).max(-1)
+          sure = (ca > 0.5) & (cb > 0.5)
+          print("runtime difference, px: all max", diff.max(), "sure max", diff[sure].max(),
+                "sure median", np.median(diff[sure]), "of", int(sure.sum()), "sure keypoints")
+          assert sure.sum() >= 10 and diff[sure].max() < 2.0 and np.median(diff[sure]) < 0.5, \
+              "the runtimes disagree"
+          PY
+      - name: Build the weights
+        if: ${{ !inputs.readme_only && !inputs.segmenter_only && env.POSE == '' }}
+        run: python tools/build_mirror.py --out mirror --sizes ${{ inputs.sizes }}
+      - name: Build the segmenter
+        if: ${{ !inputs.readme_only && env.POSE == '' }}
+        run: |
+          pip install timm
+          python tools/convert_sam.py --out mirror
+          cp tools/hub_README.md mirror/README.md
+      - name: README only
+        if: ${{ inputs.readme_only }}
+        run: mkdir -p mirror && cp tools/hub_README.md mirror/README.md
+      - name: Check the IRs and ONNX files predict before uploading them
+        if: ${{ !inputs.readme_only && env.POSE == '' }}
+        run: |
+          python - <<'PY'
+          import glob, os, shutil, tempfile, urllib.request
+          import numpy as np
+          from easydetect import Detector, downloads
+          urllib.request.urlretrieve(
+              "https://raw.githubusercontent.com/opencv/opencv/4.x/samples/data/basketball1.png", "b.png")
+          # the segmenter: masks for the people a detector finds, inside their boxes
+          os.environ["EASYDETECT_HOME"] = tempfile.mkdtemp()
+          shutil.copytree("mirror/mobile_sam", downloads.cache_dir() / "mobile_sam")
+          for backend in ("openvino", "onnxruntime"):
+              r = Detector("ed-s", backend=backend, task="segment", verbose=False)("b.png")[0]
+              print("segment", backend, r.masks, r.masks.area)
+              assert len(r.masks) == len(r.boxes) > 0
+              for box, mask in zip(r.boxes.xyxy.astype(int), r.masks.data):
+                  x1, y1, x2, y2 = box
+                  inside = mask[y1:y2 + 1, x1:x2 + 1].sum()
+                  assert inside >= 0.95 * mask.sum() > 0.1 * (x2 - x1) * (y2 - y1), (box, mask.sum())
+          for xml in sorted(glob.glob("mirror/*/*.xml")):
+              found = {}
+              for path, backend in ((xml, "openvino"), (xml[:-4] + ".onnx", "onnxruntime")):
+                  r = Detector(path, backend=backend, verbose=False)("b.png", conf=0.5)[0]
+                  found[backend] = sorted(r.names[int(c)] for c in r.boxes.cls)
+                  print(path, backend, found[backend])
+                  assert "person" in found[backend], f"{path} found no person on {backend}"
+              assert found["openvino"] == found["onnxruntime"], f"{xml}: the runtimes disagree"
+          PY
+      - name: Upload to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          api.create_repo(os.environ["HF_REPO"], repo_type="model", exist_ok=True)
+          info = api.upload_folder(
+              folder_path="mirror",
+              repo_id=os.environ["HF_REPO"],
+              repo_type="model",
+              commit_message=("easydetect keypoint model (${{ inputs.pose_size }}) from ${{ inputs.pose_url || format('train-pose run {0}', inputs.pose_run) }}"
+                              if "${{ env.POSE }}" else
+                              "easydetect weights (${{ inputs.sizes }}) from ${{ github.sha }}"),
+              delete_patterns=["rtdetr-*/*"],   # the retired RT-DETR folders
+          )
+          print(info)
+          PY
+      - name: Download the keypoint model back, the way users will
+        if: ${{ env.POSE != '' }}
+        run: |
+          python - <<'PY'
+          import os, tempfile
+          os.environ["EASYDETECT_HOME"] = tempfile.mkdtemp()
+          from easydetect import Detector
+          model = Detector("ed-s", task="pose", verbose=False)
+          model.pose_model = "${{ inputs.pose_size }}"
+          r = model("b.png")[0]
+          print("ed-s + keypoints from the hub:", r, r.keypoints.conf.max(1))
+          assert (r.keypoints.conf.max(1) > 0).any()
+          PY
+      - name: Download one back, the way users will
+        if: ${{ !inputs.readme_only && env.POSE == '' }}
+        run: |
+          python - <<'PY'
+          import os, tempfile
+          os.environ["EASYDETECT_HOME"] = tempfile.mkdtemp()
+          from easydetect import Detector
+          size = "${{ inputs.sizes }}".split()[0]
+          for backend in ("openvino", "onnxruntime"):
+              r = Detector(f"ed-{size}", backend=backend, verbose=False,
+                           task="segment")("b.png", conf=0.5)[0]
+              print(f"ed-{size} + segmenter from the hub on {backend}:", r, r.masks)
+              assert len(r.boxes) and len(r.masks) == len(r.boxes)
+          PY

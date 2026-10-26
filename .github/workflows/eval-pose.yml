@@ -1,0 +1,90 @@
+name: eval-pose
+
+# Scores a trained keypoint model (an earlier train-pose run's pose-run
+# artifact) on COCO val2017 through the exported ONNX model and the runtime's
+# decoding: with the labelled person boxes (the keypoint model alone), with
+# and without flip averaging and sub-pixel decoding, and behind a detector.
+# Nothing is uploaded.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "train-pose run id whose pose-run artifact to score (or leave blank and give pose_url)"
+        default: ""
+      pose_url:
+        description: "Or: the pose-<size>.onnx at this URL (a release asset of this repository, say)"
+        default: ""
+      size:
+        description: "s, m or l"
+        default: "s"
+      detector:
+        description: "Detector for the whole-pipeline rows"
+        default: "ed-s"
+
+permissions:
+  contents: write   # only to see a draft release's asset (pose_url)
+  actions: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      PYTHONUNBUFFERED: "1"
+      ONNX: run/${{ inputs.size }}/pose-${{ inputs.size }}.onnx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.pose_url == '' }}
+        with:
+          name: pose-run
+          path: run
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: The model (a URL)
+        if: ${{ inputs.pose_url != '' }}
+        env:
+          URL: ${{ inputs.pose_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$(dirname "$ONNX")"
+          # this repository's release assets come through the API, drafts too (a
+          # draft is listed only for a token that can write); the token goes to GitHub only
+          case "$URL" in
+            https://github.com/${{ github.repository }}/releases/*)
+              id=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+                     "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" |
+                   python3 -c "import json,os,sys; print(next(a['id'] for r in json.load(sys.stdin) for a in r['assets'] if a['browser_download_url']==os.environ['URL']))")
+              curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+                -o "$ONNX" "https://api.github.com/repos/${{ github.repository }}/releases/assets/$id" ;;
+            *) curl -fsSL -o "$ONNX" "$URL" ;;
+          esac
+          ls -l "$ONNX"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[train]" pycocotools
+      - name: COCO val2017 and annotations
+        run: |
+          mkdir -p coco/images && cd coco
+          for zip in zips/val2017.zip annotations/annotations_trainval2017.zip; do
+            curl -sSL --retry 5 -o part.zip "http://images.cocodataset.org/$zip"
+            case "$zip" in zips/*) unzip -q part.zip -d images ;; *) unzip -q part.zip ;; esac
+            rm part.zip
+          done
+      - name: Score
+        run: |
+          set -o pipefail
+          score() { python tools/train_pose.py --coco coco --eval "$ONNX" --device CPU --pycocotools "$@" \
+                      | tail -n 1 | tee -a scores.txt; }
+          score --detector gt --no-flip --no-subpixel
+          score --detector gt --no-flip
+          score --detector gt --no-subpixel
+          score --detector gt
+          score --detector ${{ inputs.detector }} --no-flip --no-subpixel
+          score --detector ${{ inputs.detector }}
+          { echo '```'; cat scores.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

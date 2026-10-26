@@ -1,0 +1,122 @@
+name: recipe
+
+# Does a training option help? Trains the same model on the same fixed subset
+# of Pascal VOC 2007 (a dataset outside COCO, sized like a user's own) once per
+# recipe and seed, on GitHub's CPU runners, all at once, and tabulates the
+# best mAP50-95 each reached on the same held-out pictures. Nothing is
+# uploaded but this run's artifacts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        default: "ed-n"
+      imgsz:
+        default: "320"
+      epochs:
+        default: "40"
+      train:
+        description: "VOC pictures to train on"
+        default: "800"
+      val:
+        description: "VOC pictures to score on"
+        default: "1000"
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: [base, multiscale, mosaic, mixup, all]
+        seed: [0, 1]
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[train]"
+      - name: VOC 2007
+        run: |
+          for url in https://pjreddie.com/media/files/VOCtrainval_06-Nov-2007.tar \
+                     http://host.robots.ox.ac.uk/pascal/VOC/voc2007/VOCtrainval_06-Nov-2007.tar; do
+            rm -rf VOCdevkit
+            curl -fsSL --retry 3 "$url" | tar -x && break
+          done
+          python tools/voc2yolo.py VOCdevkit/VOC2007 voc --train ${{ inputs.train }} \
+            --val ${{ inputs.val }} --seed 0
+      - name: Train
+        env:
+          RECIPE: ${{ matrix.recipe }}
+          SEED: ${{ matrix.seed }}
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from easydetect import Detector
+          recipes = {
+              "base": {},
+              "multiscale": {"multiscale": True},
+              "mosaic": {"mosaic": 0.5},
+              "mixup": {"mixup": 0.3},
+              "all": {"multiscale": True, "mosaic": 0.5, "mixup": 0.3},
+          }
+          recipe, seed = os.environ["RECIPE"], int(os.environ["SEED"])
+          started = time.time()
+          model = Detector("${{ inputs.model }}", verbose=False)
+          best = model.train(data="voc/data.yaml", epochs=${{ inputs.epochs }},
+                             imgsz=${{ inputs.imgsz }}, batch=16, device="cpu", workers=3,
+                             seed=seed, patience=1000, project="runs", name=recipe,
+                             **recipes[recipe])
+          import csv
+          rows = [r for r in csv.DictReader(open(best.parent.parent / "results.csv"))
+                  if r.get("map50_95")]
+          top = max(rows, key=lambda r: float(r["map50_95"]))
+          result = {"recipe": recipe, "seed": seed, "best_map": float(top["map50_95"]),
+                    "best_epoch": int(top["epoch"]),
+                    "hours": round((time.time() - started) / 3600, 2)}
+          print(result)
+          json.dump(result, open("result.json", "w"))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recipe-${{ matrix.recipe }}-${{ matrix.seed }}
+          path: |
+            result.json
+            runs/*/results.csv
+            runs/*/run.json
+
+  table:
+    needs: train
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: recipe-*
+      - name: Tabulate
+        run: |
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import glob, json, statistics
+          rows = [json.load(open(f)) for f in glob.glob("recipe-*/result.json")]
+          by = {}
+          for r in rows:
+              by.setdefault(r["recipe"], []).append(r)
+          print("| recipe | mAP50-95 per seed | mean | hours |")
+          print("| --- | --- | --- | --- |")
+          for recipe in ("base", "multiscale", "mosaic", "mixup", "all"):
+              runs = sorted(by.get(recipe, []), key=lambda r: r["seed"])
+              maps = [r["best_map"] for r in runs if r["best_map"] is not None]
+              mean = f"{statistics.mean(maps):.4f}" if maps else "-"
+              print(f"| {recipe} | {', '.join(f'{m:.4f}' for m in maps)} | {mean} | "
+                    f"{', '.join(str(r['hours']) for r in runs)} |")
+          PY

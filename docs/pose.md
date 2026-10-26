@@ -1,0 +1,232 @@
+# Keypoints: `task="pose"`
+
+```python
+from easydetect import Detector
+
+model = Detector("ed-s", task="pose")
+r = model("people.jpg")[0]
+r.keypoints.xy      # (N, 17, 2) pixel positions, one row per box
+r.keypoints.conf    # (N, 17) 0-1; all zero for boxes that are not people
+r.save("result.jpg")   # boxes with each person's skeleton drawn in
+```
+
+The 17 keypoints are COCO's, in COCO's order
+(`easydetect.pose.KEYPOINT_NAMES`: nose, eyes, ears, shoulders, elbows,
+wrists, hips, knees, ankles). `r.summary()` lists them by name for every
+person. `predict`, `track` and the CLI (`task=pose`) all take it.
+
+## Accuracy
+
+OKS AP on COCO val2017 (5,000 pictures), through the exported model the
+package downloads, scored with pycocotools (easydetect's own scorer,
+`KeypointAP`, agrees with it):
+
+| keypoint model | the labelled person boxes (the keypoint model alone) | behind ed-s (what you get) | YOLO26-pose of that size |
+| --- | --- | --- | --- |
+| `"s"` (default) | 0.677 | **0.663** | 0.630 |
+| `"m"` | 0.731 | **0.716** | 0.688 |
+| `"l"` | 0.752 | **0.734** | 0.704 |
+
+The released model was trained for 100 epochs with every layer learning, on
+one RTX 5090 in 1½ hours (`train_pose.py --size s --epochs 100 --batch 256
+--lr 2e-3 --freeze 0`).
+
+## How it works
+
+Top-down, in two steps. The detector finds the people; each person box is
+widened to a 3:4 shape with a quarter of margin (a raised arm often sticks
+out of the box), cut out at 256×192, and a small network places the 17
+keypoints in the crop, which are mapped back to the picture. A box gets
+keypoints when its class is named `person` — or every box does, when the
+model has no such class (a model trained on "worker" or "player").
+
+The keypoint network is easydetect's own (`easydetect/nn/posenet.py`, 3.7 M
+parameters): the detector's HGNetv2-B0 backbone, started from the COCO detector's
+weights so it already knows people, and a head that reads each keypoint's
+position as two classifications — over the crop's columns and over its rows,
+at half-pixel steps (the SimCC formulation, Li et al., ECCV 2022) — with one
+transformer layer across the 17 keypoints so an elbow is placed knowing where
+the shoulder and wrist are. A keypoint's confidence is how sharply peaked
+those two distributions are.
+
+Each person is read twice, as cropped and mirrored, and the two readings are
+averaged (left and right swapped back): on COCO val2017 that is worth about
+1 to 1½ points of OKS AP. On a 4-core CPU (OpenVINO) it costs about 13 ms for one person instead
+of 9, and 40 ms for four instead of 20, on top of the detector. For the faster
+reading:
+
+```python
+model = Detector("ed-s", task="pose")
+model.pose_flip = False   # before the first prediction
+```
+
+Keypoints are placed between the network's half-pixel steps (a parabola
+through each peak); measured, that is worth less than 0.001 AP, but costs
+nothing.
+
+### A larger keypoint model, or your own
+
+```python
+model = Detector("ed-s", task="pose")
+model.pose_model = "m"                          # HGNetv2-B2 instead of B0
+model.pose_model = "l"                          # HGNetv2-B4
+model.pose_model = "runs/pose/m/pose-m.onnx"    # or one you trained
+```
+
+| | backbone (from) | parameters | time a person, relative | OKS AP, labelled boxes | behind ed-s |
+| --- | --- | --- | --- | --- | --- |
+| `"s"` | HGNetv2-B0 (ed-s) | 3.7 M | 1× | 0.677 | 0.663 |
+| `"m"` | HGNetv2-B2 (ed-m) | 8.1 M | about 2× | 0.731 | 0.716 |
+| `"l"` | HGNetv2-B4 (ed-l) | 15.8 M | about 4× | 0.752 | 0.734 |
+
+COCO val2017, with flip averaging, scored with pycocotools. Each trained for
+100 epochs with every layer learning on one RTX 5090 — s in 1½ hours, m in 2¼, l in 2½ —
+`train_pose.py --size <s|m|l> --epochs 100 --batch 256 --lr 2e-3 --freeze 0`.
+
+Each is downloaded as `pose/pose-<size>.onnx` once that is on the mirror
+(until then it says so). On the command line and in `easydetect serve`:
+`pose_model=m`, `pose_flip=false`.
+
+It is trained on COCO 2017's person keypoints (labels CC BY 4.0) and nothing
+else, so the weights carry no research-only licence.
+
+## Keypoints of your own
+
+Any keypoint set — a hand's 21, an animal's, the four corners of a card —
+trains from a dataset in Ultralytics' pose format: the usual `images/` and
+`labels/`, each label line `class cx cy w h` followed by the keypoints
+(`x y visibility`, or `x y`), all 0–1, and a data.yaml that says so:
+
+```yaml
+path: datasets/cards
+train: images/train
+val: images/val
+names: {0: card}
+kpt_shape: [4, 3]                 # 4 keypoints of x, y, visibility
+flip_idx: [1, 0, 3, 2]            # which swap when the picture is flipped
+kpt_names: [top_left, top_right, bottom_right, bottom_left]   # optional
+skeleton: [[0, 1], [1, 2], [2, 3], [3, 0]]                      # optional, for drawing
+```
+
+```python
+from easydetect import Detector
+
+model = Detector("ed-s")
+model.train(data="cards.yaml", epochs=100)        # boxes, then keypoints
+r = Detector("runs/train/weights/best.pt", task="pose")("card.jpg")[0]
+r.keypoints.xy        # (N, 4, 2)
+r.keypoints.names     # ('top_left', 'top_right', 'bottom_right', 'bottom_left')
+```
+
+Training does two things in turn: the detector learns the boxes as on any
+dataset, then a keypoint network (the one above, with your K keypoints)
+learns them on crops of the labelled boxes, started from the backbone of the
+detector it just trained. It writes its run to `runs/train/pose/` and the
+model, as `pose.onnx`, beside `best.pt` — where `task="pose"` finds it, for
+`best.pt` and for anything exported next to it. The `.onnx` carries its
+keypoint set (names, flip pairs, skeleton, the classes it is for), so
+`summary()` and `plot()` follow it.
+
+`pose_epochs` (default: `epochs`), `pose_batch` (32), `pose_lr` (from the
+batch) and `pose_size` (`s`/`m`/`l`; default: the detector's) set the keypoint
+stage; `pose=False` trains the boxes only. It is scored with OKS AP on the
+val split's labelled boxes; without COCO's measured falloffs every keypoint
+gets the same, `1/K`, as Ultralytics does.
+
+This is a two-model design, not YOLO-pose's single network: a box the
+detector misses gets no keypoints, and each found box costs one keypoint pass.
+In return the keypoint network sees every object at the same size, which
+suits small objects and fine keypoints.
+
+## Training the keypoint model on COCO
+
+`tools/train_pose.py` trains the released models: 100 epochs over COCO's
+150,000 labelled people (`--epochs 100`; the default, 210, is RTMPose's). On
+one RTX 5090 that takes 1½ (s) to 2½ (l) hours: reading, cropping and
+jittering a person costs about 4 ms of one CPU core, so the loading, not the
+GPU, sets the pace. Give it as many `--workers` as you
+have cores to spare.
+
+```bash
+git clone https://github.com/themakerrobot/easydetect && cd easydetect
+pip install "easydetect[train]"
+
+# COCO 2017: pictures and annotations (skip what you already have)
+mkdir -p ~/datasets/coco/images && cd ~/datasets/coco
+wget http://images.cocodataset.org/zips/train2017.zip
+wget http://images.cocodataset.org/zips/val2017.zip
+wget http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+unzip -q train2017.zip -d images && unzip -q val2017.zip -d images
+unzip -q annotations_trainval2017.zip            # annotations/person_keypoints_*.json
+cd -
+
+python tools/train_pose.py --coco ~/datasets/coco --workers 16
+```
+
+`tools/coco2yolo.py` reads the same folder, so a COCO copy made for it works
+as it is. The run writes to `runs/pose/s/`: `results.csv` (loss each epoch,
+OKS AP every `--val-every` epochs), `run.json` (the settings), `last.pt`
+(everything needed to go on: `--resume runs/pose/s`) and `best.pt` (the
+weights with the best AP). At the end `best.pt` is exported to
+`pose-s.onnx` and checked against PyTorch on ONNX Runtime.
+
+Each scoring rates both the EMA of the weights and the network itself
+(`ap_ema`, `ap_net` in `results.csv`) and keeps the better. They usually agree
+within a point, but the first CPU run had a short loss spike at epoch 14, and
+for a few epochs after it the EMA, still averaging weights from both sides of
+the spike, scored 0.518 where the network scored 0.534. Gradients are capped
+at norm 3 (`--clip`): ordinary steps measured 1.4–3.4 on COCO at batch 64, so
+the cap only trims spikes.
+
+The AP printed during training is scored with COCO's own person boxes, which
+measures the keypoint network alone. What a user gets depends on the detector
+too; score the whole pipeline — the detector's boxes, missed people and false
+boxes included — with
+
+```bash
+python tools/train_pose.py --coco ~/datasets/coco --eval runs/pose/s/pose-s.onnx --detector ed-m
+```
+
+### Without a GPU
+
+`.github/workflows/train-pose.yml` trains on GitHub's 4-core CPU runners
+(free for a public repository). A job may run six hours and an epoch there
+should take about an hour, so the run is a chain of up to 14 jobs, one after the
+other: each downloads COCO, continues the previous job's `last.pt` (the
+`pose-run` artifact), trains until the next epoch would not fit in 4.8 hours
+(`--hours`), and hands the run on. The finishing job exports the ONNX file
+and scores the pipeline behind ed-s and ed-m (`eval.txt`). Its default
+is a shorter recipe for the CPU: 40 epochs at batch 64, and the stem and first
+two backbone stages kept as the detector trained them (`--freeze 2`: their
+backward pass is skipped, which makes a CPU step about 1.5× as fast; with
+`channels_last`, 2× in all). Start it from the Actions tab (or `gh workflow
+run train-pose.yml`); a run cut short continues from its artifact with
+`resume_run=<run id>`. Nothing is uploaded to the mirror by it.
+
+`--size m` and `--size l` train the larger ones on HGNetv2-B2 and B4, from
+ed-m's and ed-l's backbones, written as `runs/pose/<size>/pose-<size>.onnx`.
+On a CPU a training step of m costs about 2×, and of l about 4×, one of s.
+`--limit 2000 --epochs 3` is a quick check that everything runs.
+
+## Publishing it
+
+`Detector(..., task="pose")` downloads `pose/pose-s.onnx` from the mirror.
+A model trained by `train-pose.yml` goes there with `mirror.yml` and
+`pose_run=<that run id>` (and `pose_size=m` or `l` for the larger ones): it checks the
+model puts keypoints on the people in a test picture on both runtimes, uploads
+`pose/pose-<size>.onnx` alone, and downloads it back the way users will. From
+a machine that trained one:
+
+```bash
+pip install -U huggingface_hub
+hf auth login                       # a write token for the mirror's account
+hf upload leeyunjai/easydetect runs/pose/s/pose-s.onnx pose/pose-s.onnx
+hf upload leeyunjai/easydetect runs/pose/m/pose-m.onnx pose/pose-m.onnx
+hf upload leeyunjai/easydetect runs/pose/l/pose-l.onnx pose/pose-l.onnx
+```
+
+A model already downloaded stays in the cache (`~/.easydetect/pose/`): delete
+the file there to fetch a newer upload.
+
+Until it is there, `task="pose"` says so and where to put the file instead
+(`~/.easydetect/pose/pose-s.onnx`).

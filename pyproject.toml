@@ -1,0 +1,89 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "easydetect"
+version = "0.7.9"
+description = "Easy real-time object detection you can ship: real-time DETR detectors (ed-n … ed-x) with PyTorch training, OpenVINO inference on CPU/GPU/NPU, and a browser app to label and train. Apache-2.0 throughout."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "leeyunjai", email = "leeyunjai1982@gmail.com" }]
+keywords = [
+    "object-detection", "easydetect", "detr", "rt-detr", "transformer",
+    "openvino", "npu", "pytorch", "computer-vision", "real-time", "edge-ai",
+    "yolo-alternative", "education", "annotation", "labeling", "apache-2.0",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Multimedia :: Video",
+    "Operating System :: OS Independent",
+]
+# inference on either runtime: OpenVINO (Intel CPU, GPU, NPU) and ONNX Runtime
+# (any CPU); [train] adds PyTorch for training and export
+dependencies = [
+    "numpy>=1.23",
+    "opencv-python>=4.6",
+    "openvino>=2024.0",
+    "onnxruntime>=1.16",
+    "pyyaml>=5.4",
+]
+
+[project.optional-dependencies]
+train = [
+    "torch>=2.1",
+    "torchvision>=0.16",
+    "scipy>=1.9",
+    "onnx>=1.14",
+    "nncf>=2.10",   # INT8 export
+]
+dev = [
+    "pytest>=7.0",
+    "httpx>=0.24",
+    "ruff>=0.5",
+    "pillow>=9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/themakerrobot/easydetect"
+Source = "https://github.com/themakerrobot/easydetect"
+Documentation = "https://github.com/themakerrobot/easydetect/blob/main/docs/usage.md"
+Issues = "https://github.com/themakerrobot/easydetect/issues"
+Changelog = "https://github.com/themakerrobot/easydetect/blob/main/CHANGELOG.md"
+
+[project.scripts]
+easydetect = "easydetect.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["easydetect"]
+
+[tool.hatch.build.targets.sdist]
+include = ["easydetect", "tools", "tests", "README.md", "LICENSE", "NOTICE", "pyproject.toml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["B008", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# adapted from ed and kept close to it, so fixes there port over cleanly:
+# style rules only — correctness checks still apply
+"easydetect/nn/{decoder,denoising,encoder,hgnetv2,ops}.py" = ["E501", "B905", "UP", "B006", "B007"]
+"easydetect/utils/loss.py" = ["E501", "B905", "UP", "B006", "B007"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,40 @@
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish — must match pyproject.toml (e.g. 0.1.0)"
+        required: true
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # PyPI trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check the requested version matches the packaged one
+        env:
+          REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os, tomllib
+          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          asked = os.environ["REQUESTED"].lstrip("v")
+          assert asked == version, f"asked for {asked!r} but pyproject says {version!r}"
+          print("publishing", version)
+          PY
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A tag run after a manual publish of the same version is a no-op
+          # rather than a red X; the version gate above is what catches mistakes.
+          skip-existing: true

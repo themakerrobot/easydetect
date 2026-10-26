@@ -1,0 +1,44 @@
+easydetect
+Copyright 2026 easydetect contributors
+
+This product includes software adapted from the following projects, each
+licensed under the Apache License, Version 2.0:
+
+* D-FINE (https://github.com/Peterande/D-FINE), Copyright (c) 2024 The D-FINE
+  Authors. The detector under easydetect/nn/ (HGNetv2 backbone, hybrid encoder,
+  D-FINE decoder with fine-grained distribution refinement, denoising queries)
+  and the training loss in easydetect/utils/loss.py are adapted from it, with
+  module names and numerics kept so the D-FINE COCO checkpoints load unchanged.
+  The pretrained weights easydetect downloads are those COCO checkpoints,
+  converted without retraining.
+
+* RT-DETR (https://github.com/lyuwenyu/RT-DETR), Copyright (c) 2023 lyuwenyu,
+  from which D-FINE itself is modified.
+
+* PaddleDetection (https://github.com/PaddlePaddle/PaddleDetection), Copyright
+  (c) PaddlePaddle Authors — the PP-HGNetV2 backbone design.
+
+* DETR (https://github.com/facebookresearch/detr), Copyright (c) Facebook, Inc.
+  and its affiliates — box utilities.
+
+The packaging, API, trainer, validator, exporter, predictor and CLI are this
+project's own. The browser app is a separate repository, easydetect lab
+(https://github.com/themakerrobot/easydetect-lab), with its own notices.
+
+task="segment" runs a model this package does not include but downloads on
+first use, built by tools/convert_sam.py:
+
+* MobileSAM (https://github.com/ChaoningZhang/MobileSAM), Copyright (c) the
+  MobileSAM authors, Apache License 2.0 — its weights, exported unchanged to
+  ONNX (mobile_sam/ on the weights mirror, with its LICENSE beside them).
+  MobileSAM builds on Segment Anything (https://github.com/facebookresearch/
+  segment-anything), Copyright (c) Meta Platforms, Inc., Apache License 2.0.
+
+task="pose" downloads easydetect's own keypoint network (easydetect/nn/
+posenet.py, written from the SimCC paper: Li et al., ECCV 2022), trained by
+tools/train_pose.py on the COCO 2017 person keypoint annotations, (c) the COCO
+Consortium, Creative Commons Attribution 4.0 (https://cocodataset.org), and
+started from the D-FINE COCO backbone above.
+
+No code or weights from AGPL-licensed projects are included. Only D-FINE's
+COCO-trained checkpoints are used; checkpoints pretrained on Objects365 are not.

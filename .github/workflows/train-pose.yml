@@ -1,0 +1,182 @@
+name: train-pose
+
+# Trains task="pose"'s keypoint network (tools/train_pose.py) on COCO 2017
+# person keypoints with GitHub's CPU runners — for when no GPU is at hand. A
+# job may run six hours, far short of a training run, so the run is a chain of
+# jobs, one at a time: each downloads COCO, picks up the previous job's
+# last.pt (the "pose-run" artifact), trains for about five hours, stops after
+# the last epoch that fits, and passes the run on. The job that finishes
+# exports pose-<size>.onnx and scores the whole pipeline behind two
+# detectors. Nothing is uploaded anywhere but this run's artifacts: putting
+# the model on the mirror is a separate, deliberate step (docs/pose.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      size:
+        description: "s (HGNetv2-B0), m (B2) or l (B4)"
+        default: "s"
+      epochs:
+        description: "Epochs"
+        default: "40"
+      batch:
+        description: "Batch size"
+        default: "64"
+      lr:
+        description: "Peak learning rate"
+        default: "1e-3"
+      freeze:
+        description: "Backbone stages kept as the detector trained them (CPU speed)"
+        default: "2"
+      init_run:
+        description: "Start a new run from the best.pt of this earlier run id (blank: from the detector)"
+        default: ""
+      warmup:
+        description: "Warm-up steps"
+        default: "1000"
+      resume_run:
+        description: "Continue the pose-run artifact of this earlier run id (blank: start or continue this run)"
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  train:
+    strategy:
+      max-parallel: 1   # one leg after another: each continues the last
+      fail-fast: false
+      matrix:
+        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      PYTHONUNBUFFERED: "1"
+      RUN: run/${{ inputs.size }}
+    steps:
+      - name: The run so far (this run)
+        if: ${{ inputs.resume_run == '' || matrix.leg > 1 }}
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: pose-run
+          path: run
+      - name: The run so far (an earlier run)
+        if: ${{ inputs.resume_run != '' && matrix.leg == 1 }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pose-run
+          path: run
+          run-id: ${{ inputs.resume_run }}
+          github-token: ${{ github.token }}
+      - name: The model to start from (an earlier run's best.pt)
+        if: ${{ inputs.init_run != '' && inputs.resume_run == '' && matrix.leg == 1 }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pose-run
+          path: init
+          run-id: ${{ inputs.init_run }}
+          github-token: ${{ github.token }}
+      - name: Finished already?
+        id: state
+        run: |
+          if [ ! -d "$RUN" ] && [ ${{ matrix.leg }} -gt 1 ]; then
+            # an earlier leg failed before handing the run on: stop here
+            # rather than start the training over from scratch
+            echo "::error::no run to continue (leg ${{ matrix.leg }})"; exit 1
+          fi
+          # done: trained and scored. A finished run without a (non-empty)
+          # eval.txt is only scored: resume_run=<its run id> does that.
+          if [ -f "$RUN/finished" ] && [ -s "$RUN/eval.txt" ]; then
+            echo "done=true" >> "$GITHUB_OUTPUT"
+            echo "finished: best OKS AP $(cat "$RUN/finished")"; cat "$RUN/eval.txt"
+          elif [ -f "$RUN/finished" ]; then
+            echo "done=false" >> "$GITHUB_OUTPUT"
+            echo "train=false" >> "$GITHUB_OUTPUT"
+            echo "trained (best OKS AP $(cat "$RUN/finished")), not yet scored"
+          else
+            echo "done=false" >> "$GITHUB_OUTPUT"
+            echo "train=true" >> "$GITHUB_OUTPUT"
+            tail -n 3 "$RUN/results.csv" 2>/dev/null || echo "starting a new run"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.state.outputs.done == 'false'
+        with:
+          path: src
+      - uses: actions/setup-python@v5
+        if: steps.state.outputs.done == 'false'
+        with:
+          python-version: "3.11"
+      - name: Machine
+        if: steps.state.outputs.done == 'false'
+        # runners differ: one leg measured 3100 s an epoch, the next 1500 s
+        run: |
+          lscpu | grep -E "Model name|^CPU\(s\)"
+          echo "vector units: $(grep -oE 'avx512[a-z0-9_]*|amx[a-z0-9_]*' /proc/cpuinfo | sort -u | tr '\n' ' ')"
+          free -g | head -2
+      - name: Make room for COCO
+        if: steps.state.outputs.done == 'false'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h .
+      - name: Install
+        if: steps.state.outputs.done == 'false'
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e "./src[train]"
+      - name: COCO 2017
+        if: steps.state.outputs.done == 'false'
+        run: |
+          mkdir -p coco/images && cd coco
+          zips="zips/val2017.zip annotations/annotations_trainval2017.zip"
+          # scoring alone needs no training pictures (18 GB)
+          if [ "${{ steps.state.outputs.train }}" = "true" ]; then
+            zips="zips/train2017.zip $zips"
+          fi
+          for zip in $zips; do
+            curl -sSL --retry 5 -o part.zip "http://images.cocodataset.org/$zip"
+            case "$zip" in zips/*) unzip -q part.zip -d images ;; *) unzip -q part.zip ;; esac
+            rm part.zip
+          done
+          ls images; ls annotations; df -h .
+      - name: Train for about five hours
+        if: steps.state.outputs.train == 'true'
+        run: |
+          init=()
+          if [ -f "init/${{ inputs.size }}/best.pt" ]; then
+            init=(--init "init/${{ inputs.size }}/best.pt")
+          fi
+          python src/tools/train_pose.py --coco coco --size ${{ inputs.size }} \
+            --epochs ${{ inputs.epochs }} --batch ${{ inputs.batch }} --lr ${{ inputs.lr }} \
+            --freeze ${{ inputs.freeze }} --warmup ${{ inputs.warmup }} --workers 2 \
+            --val-every 5 "${init[@]}" --resume "$RUN" --hours 4.8
+      # kept before scoring too: on a slow runner the scoring can run into the
+      # job's time limit, and the epochs just trained must not go with it
+      # (the next leg, or a resume_run, scores a finished but unscored run)
+      - uses: actions/upload-artifact@v4
+        if: steps.state.outputs.train == 'true'
+        with:
+          name: pose-run
+          path: run
+          overwrite: true
+          retention-days: 30
+      - name: Score the whole pipeline
+        if: steps.state.outputs.done == 'false'
+        run: |
+          set -o pipefail  # a failed scoring must fail the job, not vanish into tail
+          if [ -f "$RUN/finished" ] && [ ! -s "$RUN/eval.txt" ]; then
+            rm -f "$RUN/eval.txt"
+            for det in ed-s ed-m; do
+              python src/tools/train_pose.py --coco coco --eval "$RUN/pose-${{ inputs.size }}.onnx" \
+                --detector $det --device CPU | tail -n 1 | tee -a "$RUN/eval.txt"
+            done
+          fi
+      - uses: actions/upload-artifact@v4
+        if: steps.state.outputs.done == 'false'
+        with:
+          name: pose-run
+          path: run
+          overwrite: true
+          retention-days: 30

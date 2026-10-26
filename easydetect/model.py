@@ -1,0 +1,1160 @@
+# Apache-2.0
+"""The one object users touch: ``Detector``.
+
+    from easydetect import Detector
+
+    model = Detector("ed-s")            # mirrored weights, downloaded on demand
+    model = Detector("best.pt")               # or your own checkpoint
+    results = model("bus.jpg", conf=0.5)    # list[Results]
+    model.train(data="data.yaml", epochs=100)
+    model.val(data="data.yaml").box.map50
+    model.export(format="openvino", half=True)
+
+Inference runs on OpenVINO, training on PyTorch. A ``.pt`` checkpoint is
+exported to an IR (cached) the first time you predict with it, so the two
+halves of the workflow meet without you having to think about it.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import sys
+import time
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from easydetect.utils.imageio import cv2_path, imwrite  # any path, Hangul included
+
+from . import downloads
+from .errors import ModelNotFoundError
+from .metrics import DetMetrics
+from .results import Results
+from .utils.checkpoint import load_checkpoint
+
+#: What a Detector can add to its boxes: nothing, a mask each, or a person's keypoints.
+TASKS = ("detect", "segment", "pose")
+
+_TORCH_HINT = (
+    "this needs the training extra: pip install 'easydetect[train]' "
+    "(torch, torchvision, scipy, onnx)"
+)
+
+
+def increment_path(path: str | Path) -> Path:
+    """``runs/detect/predict`` -> ``runs/detect/predict2`` when it already exists."""
+    path = Path(path)
+    if not path.exists():
+        return path
+    i = 2
+    while (candidate := path.with_name(f"{path.name}{i}")).exists():
+        i += 1
+    return candidate
+
+
+def _torch_device(device: Any) -> str | None:
+    """``0`` -> ``"cuda:0"``; ``"cpu"``/``"cuda"``/``None`` pass through."""
+    if device is None or device == "":
+        return None
+    if isinstance(device, int) or (isinstance(device, str) and device.isdigit()):
+        return f"cuda:{int(device)}"
+    return str(device)
+
+
+class Detector:
+    """Train, validate, export, track and predict with one object."""
+
+    def __init__(
+        self,
+        model: str | Path = "ed-s",
+        device: str = "AUTO",
+        verbose: bool = True,
+        precision: str | None = None,
+        pretrained: bool = True,
+        backend: str | None = None,
+        task: str = "detect",
+    ) -> None:
+        """``pretrained=False`` starts training from an ImageNet backbone
+        instead of the mirror's COCO weights — for domains COCO says nothing
+        about, or for a clean baseline.
+
+        ``backend`` picks the runtime: ``"openvino"`` (CPU, Intel GPU, NPU;
+        reads ``.xml`` and ``.onnx``) or ``"onnxruntime"`` (CPU; ``.onnx``
+        only, the lighter install). Left out, OpenVINO is used when it is
+        installed and ONNX Runtime otherwise.
+
+        ``task="segment"`` also outlines what is inside every box
+        (``r.masks``), with MobileSAM prompted by the box — any class, no mask
+        labels needed; it downloads once and adds about 150 ms a picture plus
+        25 ms a box on a 4-core CPU.
+
+        ``task="pose"`` places 17 body keypoints on every person
+        (``r.keypoints``) with easydetect's own keypoint model, trained on COCO
+        — on boxes named "person", or on every box when the model has no such
+        class."""
+        self.model_name = str(model)
+        self.device = device
+        self.precision = precision
+        self.backend = backend
+        self.pretrained = pretrained
+        self.verbose = verbose
+        if task not in TASKS:
+            raise ValueError(f"task must be one of {', '.join(TASKS)}")
+        self.task = task
+        self.segmenter = None  # BoxSegmenter for task="segment" (lazy)
+        self.pose = None  # KeypointEstimator for task="pose" (lazy)
+        #: task="pose" reads each person mirrored too and averages: +2.5 OKS AP,
+        #: about 65% more keypoint time. False before the first prediction: faster.
+        self.pose_flip = True
+        #: the keypoint model for task="pose": "s" (HGNetv2-B0), "m" (B2), "l"
+        #: (B4) — larger and slower in turn — or the path of a pose .onnx. None
+        #: (the default): the pose.onnx training left beside this detector's
+        #: weights, if there is one, else "s". Set it before the first prediction.
+        self.pose_model = None
+        #: task="segment"'s mask decoder: None (the default) uses the
+        #: mask_decoder.onnx training left beside this detector's weights, if
+        #: there is one, else MobileSAM's; or the path of a decoder .onnx.
+        self.seg_model = None
+        self.names: dict[int, str] = {}
+        self.net = None  # torch EDNet (lazy)
+        self.ckpt: dict | None = None
+        self.variant: str | None = None
+        self.ckpt_path: Path | None = None
+        self.predictor = None  # OVPredictor or ORTPredictor (lazy)
+        self.ir_path: Path | None = None
+        self.tracker = None
+
+        path = Path(self.model_name)
+        suffix = path.suffix.lower()
+        if suffix == ".pt":
+            if not path.exists():
+                raise FileNotFoundError(f"checkpoint not found: {path}")
+            self._load_checkpoint(path)
+        elif suffix in (".xml", ".onnx"):
+            if not path.exists():
+                raise FileNotFoundError(f"model not found: {path}")
+            self.ir_path = path
+            self.variant = downloads.normalize_name(path.stem).rsplit("-", 1)[-1]
+        elif downloads.is_model_name(self.model_name):
+            self.model_name = downloads.normalize_name(self.model_name)
+            self.variant = self.model_name.rsplit("-", 1)[-1]
+        else:
+            raise ModelNotFoundError(downloads._unknown_name_message(self.model_name))
+
+    # ------------------------------------------------------------------ predict
+
+    def __call__(self, source: Any = None, **kwargs: Any) -> Any:
+        return self.predict(source, **kwargs)
+
+    def predict(
+        self,
+        source: Any = None,
+        conf: float = 0.5,
+        imgsz: int | None = None,
+        device: str | None = None,
+        max_det: int = 300,
+        classes: list[int] | None = None,
+        iou: float | None = 0.7,
+        contain: float | None = None,
+        stream: bool = False,
+        save: bool = False,
+        show: bool = False,
+        project: str = "runs",
+        name: str = "predict",
+        vid_stride: int = 1,
+        verbose: bool | None = None,
+        line_width: int | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run detection on any supported source.
+
+        Returns a ``list[Results]``, or a generator when ``stream=True`` (the
+        only sane option for a long video or a live camera). ``conf=0.5``
+        is where ed's boxes are mostly right (70% on COCO, against 32% at
+        YOLO's usual 0.25). ``iou`` drops a box covering a higher-scoring one
+        by more than that IoU — the same object found twice, sometimes under
+        two classes; ``None`` keeps all. ``contain=0.8`` also merges a box
+        with 80% of its area inside another of its class — the visible pieces
+        of a half hidden object beside the whole of it — into one box; off by
+        default, as on COCO it removes more real objects than it fixes.
+        """
+        if source is None:
+            raise ValueError("predict() needs a source (image, folder, video, url, camera index)")
+        if kwargs.pop("track", False):
+            raise TypeError("use model.track(...) instead of predict(track=True)")
+        for unexpected in kwargs:
+            raise TypeError(f"unexpected predict() argument: {unexpected!r}")
+
+        gen = self._run(
+            source,
+            conf=conf,
+            imgsz=imgsz,
+            device=device,
+            max_det=max_det,
+            classes=classes,
+            iou=iou,
+            contain=contain,
+            save=save,
+            show=show,
+            project=project,
+            name=name,
+            vid_stride=vid_stride,
+            verbose=self.verbose if verbose is None else verbose,
+            line_width=line_width,
+            tracker=None,
+        )
+        return _Stream(gen, "predict") if stream else list(gen)
+
+    def track(
+        self,
+        source: Any = None,
+        conf: float = 0.5,
+        iou: float | None = 0.7,
+        contain: float | None = None,
+        match_iou: float = 0.2,
+        max_age: int = 30,
+        persist: bool = False,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Predict, and keep an id on each box across frames (``boxes.id``).
+
+        ``iou`` and ``contain`` filter duplicates, as in :meth:`predict`. ``match_iou``
+        is how much a box must overlap where its track is expected (moving as it
+        was) to carry its id on; ``max_age`` is how many frames a track waits for
+        its object. Boxes below ``conf`` (down to 0.1) still keep a track alive
+        through a partial occlusion, but only boxes scoring ``conf`` are shown.
+        """
+        from .tracker import IoUTracker
+
+        if self.tracker is None or not persist:
+            self.tracker = IoUTracker(iou=match_iou, max_age=max_age)
+        # the tracker needs unsure boxes too (they carry a track through a
+        # partial occlusion); it shows only the boxes scoring conf
+        self.tracker.conf = conf
+        kwargs.setdefault("name", "track")
+        gen = self._run(source, conf=min(conf, 0.1), iou=iou, contain=contain,
+                        tracker=self.tracker, **self._track_kwargs(kwargs))
+        return _Stream(gen, "track") if stream else list(gen)
+
+    def _ensure_segmenter(self, device: str | None = None):
+        if self.segmenter is None:
+            from .segment import default_segmenter
+
+            # the same runtime and device the detector runs on
+            backend = self.predictor.backend if self.predictor is not None else self.backend
+            decoder = self.seg_model
+            if decoder is None:
+                beside = Path(self.model_name).parent / "mask_decoder.onnx"
+                if Path(self.model_name).is_file() and beside.is_file():
+                    decoder = beside
+            self.segmenter = default_segmenter(device=device or self.device, backend=backend,
+                                               decoder=decoder)
+        return self.segmenter
+
+    def _ensure_pose(self, device: str | None = None):
+        if self.pose is None:
+            from .pose import default_estimator
+
+            backend = self.predictor.backend if self.predictor is not None else self.backend
+            from .pose import SIZES
+
+            model = self.pose_model
+            if model is None:
+                beside = Path(self.model_name).parent / "pose.onnx"
+                model = str(beside) if Path(self.model_name).is_file() and beside.is_file() \
+                    else "s"
+            model = str(model)
+            if model in SIZES:
+                self.pose = default_estimator(device=device or self.device, backend=backend,
+                                              flip=self.pose_flip, size=model)
+            elif model.endswith(".onnx") and Path(model).is_file():
+                from .pose import KeypointEstimator
+
+                self.pose = KeypointEstimator(model, device=device or self.device,
+                                              backend=backend, flip=self.pose_flip)
+            else:
+                raise ValueError(f"pose_model must be one of {', '.join(SIZES)} or a pose "
+                                 f".onnx file, not {self.pose_model!r}")
+        return self.pose
+
+    def _keypoints(self, img, det, names, device):
+        """``(N, K, 3)`` x, y, confidence for each box; zeros for boxes the
+        keypoint model is not for (``KeypointSpec.classes``, or "person")."""
+        from .pose import keypoint_rows
+
+        estimator = self._ensure_pose(device)
+        out = np.zeros((len(det), len(estimator.spec), 3), np.float32)
+        rows = keypoint_rows(estimator.spec, names, det[:, -1]) if len(det) \
+            else np.zeros(0, bool)
+        if rows.any():
+            xy, conf = estimator(img, det[rows, :4])
+            out[rows] = np.concatenate([xy, conf[..., None]], -1)
+        return out
+
+    def _track_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "imgsz", "device", "max_det", "classes", "save", "show",
+            "project", "name", "vid_stride", "verbose", "line_width",
+        }
+        unexpected = set(kwargs) - allowed
+        if unexpected:
+            raise TypeError(f"unexpected track() argument(s): {sorted(unexpected)}")
+        kwargs.setdefault("verbose", self.verbose)
+        return kwargs
+
+    def _run(
+        self,
+        source: Any,
+        conf: float = 0.5,
+        imgsz: int | None = None,
+        device: str | None = None,
+        max_det: int = 300,
+        classes: list[int] | None = None,
+        iou: float | None = 0.7,
+        contain: float | None = None,
+        save: bool = False,
+        show: bool = False,
+        project: str = "runs",
+        name: str = "predict",
+        vid_stride: int = 1,
+        verbose: bool = True,
+        line_width: int | None = None,
+        tracker: Any = None,
+    ) -> Iterator[Results]:
+        from .sources import SourceLoader
+
+        predictor = self._ensure_predictor(device=device, imgsz=imgsz)
+        loader = SourceLoader(source, vid_stride=vid_stride)
+        save_dir = increment_path(Path(project) / "detect" / name) if save else None
+        writer = _OutputWriter(save_dir) if save_dir else None
+        if save_dir and verbose:
+            print(f"results will be saved to {save_dir}")
+
+        try:
+            for frame in loader:
+                det, speed = predictor(frame.img, conf=conf, max_det=max_det, classes=classes,
+                                       iou=iou, contain=contain)
+                if tracker is not None:
+                    det = tracker.update(det)
+                masks = None
+                if self.task == "segment":
+                    import time
+
+                    started = time.perf_counter()
+                    masks, _ = self._ensure_segmenter(device)(frame.img, det[:, :4])
+                    speed["segment"] = (time.perf_counter() - started) * 1e3
+                names = self.names or predictor.names
+                keypoints = None
+                if self.task == "pose":
+                    import time
+
+                    started = time.perf_counter()
+                    keypoints = self._keypoints(frame.img, det, names, device)
+                    speed["pose"] = (time.perf_counter() - started) * 1e3
+                result = Results(
+                    frame.img,
+                    path=frame.path,
+                    names=names,
+                    boxes=det,
+                    speed=speed,
+                    masks=masks,
+                    keypoints=keypoints,
+                    keypoint_spec=self.pose.spec if keypoints is not None else None,
+                )
+                if verbose:
+                    total = sum(speed.values())
+                    print(
+                        f"{frame.prefix()}{predictor.imgsz}x{predictor.imgsz} "
+                        f"{result.verbose()}{total:.1f}ms"
+                    )
+                if writer is not None:
+                    writer.write(result, frame, line_width=line_width)
+                if show and not _display(result, frame, line_width):
+                    break  # the viewer asked to stop (q / Esc / window closed)
+                yield result
+        finally:
+            if writer is not None:
+                writer.close()
+            if show:
+                _close_windows()
+
+    def _ensure_predictor(self, device: str | None = None, imgsz: int | None = None):
+        """Load the model on its runtime (downloading or exporting first, if needed)."""
+        from .predictor import ORTPredictor, OVPredictor, installed, pick_backend
+
+        device = device or self.device
+        if (self.ir_path is not None and self.ir_path.suffix.lower() == ".xml"
+                and self.backend != "openvino" and not installed("openvino")
+                and self.ir_path.with_suffix(".onnx").exists()):
+            # every export writes the .onnx beside the .xml: without OpenVINO, run that
+            self.ir_path = self.ir_path.with_suffix(".onnx")
+        backend = pick_backend(self.backend, self.ir_path, device)
+        if (
+            self.predictor is not None
+            and self.predictor.backend == backend
+            and self.predictor.device == device
+            and self.predictor.precision == self.precision
+            and (imgsz is None or self.predictor.imgsz == imgsz)
+        ):
+            return self.predictor
+
+        wanted = ".xml" if backend == "openvino" else ".onnx"
+        if self.ir_path is not None and self.ir_path.suffix.lower() not in (wanted, ".onnx"):
+            self.ir_path = None             # an .xml met a runtime that cannot read it
+        if self.ir_path is None:
+            if self.net is not None:
+                self.ir_path = self._exported(backend, imgsz)
+            elif backend == "openvino":
+                self.ir_path = downloads.download_ir(self.model_name)
+            else:
+                self.ir_path = downloads.download_onnx(self.model_name)
+        make = OVPredictor if backend == "openvino" else ORTPredictor
+        self.predictor = make(self.ir_path, device=device, names=self.names or None,
+                              precision=self.precision)
+        fixed = self.predictor.fixed_size()
+        if imgsz and fixed and fixed != imgsz:
+            # an exported file runs at the size it was exported at: a picture
+            # resized to another one fails inside the runtime. With the
+            # weights at hand, export them at the size asked for.
+            if self.net is None:
+                raise ValueError(
+                    f"{self.ir_path.name} runs at {fixed} px only. Export it at {imgsz} "
+                    f"(Detector('best.pt').export(imgsz={imgsz})) or predict from the .pt")
+            self.ir_path = self._exported(backend, imgsz)
+            self.predictor = make(self.ir_path, device=device, names=self.names or None,
+                                  precision=self.precision)
+        if imgsz:
+            self.predictor.imgsz = imgsz
+        if not self.names:
+            self.names = self.predictor.names
+        return self.predictor
+
+    def _exported(self, backend: str, imgsz: int | None) -> Path:
+        """These weights as an IR (OpenVINO) or .onnx at ``imgsz``, exported
+        once and kept in the cache: an export from an earlier run is reused
+        rather than spending ~12 s on it at every load."""
+        fmt, ext = ("openvino", ".xml") if backend == "openvino" else ("onnx", ".onnx")
+        own = int((self.ckpt or {}).get("imgsz", 640))   # the size export() picks
+        size = imgsz or own
+        folder = self._cache_export_dir()
+        if size != own:
+            folder = folder / f"at{imgsz}"
+            folder.mkdir(parents=True, exist_ok=True)
+        ready = folder / f"{self._export_stem()}{ext}"
+        if self.ckpt_path and ready.exists():
+            return ready
+        return Path(self.export(format=fmt, imgsz=size, out_dir=folder, verbose=self.verbose))
+
+    def _export_stem(self) -> str:
+        return self.ckpt_path.stem if self.ckpt_path else f"easydetect-{self.variant}"
+
+    def _cache_export_dir(self) -> Path:
+        """Where a checkpoint's automatic export goes: one folder per file and
+        version of it. By stem alone, every run's ``best.pt`` shared one
+        folder, and two exported at once could compile each other's weights."""
+        import hashlib
+
+        if self.ckpt_path:
+            st = Path(self.ckpt_path).stat()
+            tag = f"{Path(self.ckpt_path).resolve()}|{st.st_size}|{st.st_mtime_ns}"
+            key = f"{self._export_stem()}-{hashlib.sha1(tag.encode()).hexdigest()[:12]}"
+        else:  # weights only in memory: a fresh folder of their own every time
+            key = f"{self.variant or 's'}-{id(self.net):x}-{time.time_ns():x}"
+        out = downloads.cache_dir() / "exported" / key
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+
+    # --------------------------------------------------------------- checkpoint
+
+    def _load_checkpoint(self, path: Path) -> None:
+        _import_torch()
+        from .nn import EDNet
+
+        ckpt = load_checkpoint(path)
+        self.ckpt = ckpt
+        self.ckpt_path = Path(path)
+        self.variant = ckpt["variant"]
+        self.names = {int(k): str(v) for k, v in ckpt.get("names", {}).items()}
+        self.net = EDNet(ckpt["variant"], ckpt["num_classes"], pretrained_backbone=False)
+        self.net.load_state_dict(ckpt["model"])
+        # trained with fewer queries: runs (and fine-tunes again) with as many
+        if ckpt.get("queries") and ckpt["queries"] != self.net.decoder.num_queries:
+            self.net.trim(queries=int(ckpt["queries"]))
+        if ckpt.get("denoising") is not None:
+            self.net.decoder.num_denoising = int(ckpt["denoising"])
+        self.net.eval()
+        self.ir_path = None
+        self.predictor = None
+
+    def _ensure_net(self):
+        """Torch weights for train/val/export — from the checkpoint or the mirror."""
+        if self.net is not None:
+            return self.net
+        _import_torch()
+        if downloads.is_model_name(self.model_name):
+            self._load_checkpoint(downloads.download_checkpoint(self.model_name))
+            return self.net
+        raise RuntimeError(
+            f"'{self.model_name}' has no torch weights — load a .pt checkpoint "
+            f"(Detector('best.pt')) or a pretrained name to do this."
+        )
+
+    # ----------------------------------------------------------------- training
+
+    def train(
+        self,
+        data: str,
+        epochs: int = 100,
+        imgsz: int = 640,
+        batch: int = 8,
+        device: Any = None,
+        workers: int | None = None,
+        project: str = "runs",
+        name: str = "train",
+        resume: bool = False,
+        patience: int = 50,
+        lr0: float | None = None,
+        seed: int = 0,
+        val: bool = True,
+        amp: bool = True,
+        freeze: Any = None,
+        augment: bool = True,
+        on_epoch_end: Any = None,
+        on_progress: Any = None,
+        pose: bool = True,
+        pose_epochs: int | None = None,
+        pose_batch: int = 32,
+        pose_lr: float | None = None,
+        pose_size: str | None = None,
+        seg: bool = True,
+        seg_epochs: int = 20,
+        seg_batch: int = 16,
+        seg_lr: float = 1e-4,
+        queries: int | None = None,
+        denoising: int | None = None,
+        match_names: bool = True,
+        **kwargs: Any,
+    ) -> Path:
+        """Train on a data.yaml dataset. Returns the path of ``best.pt``.
+
+        ``freeze="backbone"`` trains about twice as fast on CPU and helps when
+        the dataset is small. ``lr0=None`` sets the learning rate from the
+        batch size, ``1e-4 × √(batch / 4)``, so a bigger batch is not a run
+        that learned less; a number sets it outright. ``augment=True`` trains on zoomed-out, cropped
+        and colour-jittered pictures (the original recipe) and on plain ones for
+        the last tenth of the epochs; ``False`` keeps only the flip.
+        ``on_epoch_end`` is called with a dict of the epoch's numbers — the
+        same row that lands in ``results.csv``.
+
+        ``queries`` (of 300) and ``denoising`` (training-only queries, 100)
+        make every step cheaper; on a CPU most of a step is spent on them, not
+        on the picture. ``queries=100, denoising=30`` trains ed-n about
+        twice as fast on a laptop and suits scenes with a handful of objects;
+        the model keeps ``queries`` (it runs faster too).
+
+        A keypoint dataset (``kpt_shape`` in its data.yaml, Ultralytics' pose
+        format) also trains a keypoint network after the detector: on crops of
+        the labelled boxes, from the detector's backbone, for ``pose_epochs``
+        (default ``epochs``) at ``pose_batch``; it lands as ``pose.onnx``
+        beside ``best.pt``, which ``task="pose"`` then uses. ``pose=False``
+        trains the boxes only.
+
+        A segmentation dataset (a polygon on each label line) trains the
+        detector on the polygons' boxes, then fine-tunes MobileSAM's mask
+        decoder on the polygons for ``seg_epochs`` (20); it lands as
+        ``mask_decoder.onnx`` beside ``best.pt``, which ``task="segment"``
+        then uses. ``seg=False`` trains the boxes only.
+        ``on_progress`` hears about once a second inside an epoch —
+        ``{"phase": "train", "epoch", "epochs", "step", "steps", "seconds"}`` —
+        and once more with ``"phase": "val"`` before validation starts, so a
+        long epoch is not a silent one. The keypoint and mask stages report
+        the same way with ``"phase": "keypoints"`` / ``"masks"`` (and, at a
+        scored epoch's end, ``"ap"`` / ``"miou"``).
+        """
+        _import_torch()
+        from .data.dataset import load_data_yaml
+        from .nn import EDNet
+        from .trainer import Trainer
+        from .validator import validate_torch
+
+        cfg = load_data_yaml(data)
+        self.names = cfg["names"]
+        name = str(name)
+        if workers is None:
+            # Windows starts loader workers by importing the caller's script
+            # again: without an `if __name__ == "__main__":` guard they die.
+            # On a CPU the loading is a few percent of a step anyway.
+            import torch
+
+            dev = _torch_device(device) or ("cuda" if torch.cuda.is_available() else "cpu")
+            workers = 0 if os.name == "nt" and dev.startswith("cpu") else 4
+        if val and not cfg.get("val"):
+            print("[easydetect] no val split in the data.yaml: training without "
+                  "validation, and the last epoch is kept", file=sys.stderr)
+            val = False
+        if resume:
+            freeze, queries, denoising = self._resumed_settings(
+                Path(project) / name, freeze, queries, denoising)
+        self._match_names = match_names
+        self.class_rows: dict[str, str] = {}
+        # where the weights came from, for the run's record
+        origin = None
+        if self.net is not None:
+            origin = ({"kind": "checkpoint", "path": str(self.ckpt_path)} if self.ckpt_path
+                      else {"kind": "custom"})
+        if self.net is None and self.pretrained and downloads.is_model_name(self.model_name):
+            start = self._try_pretrained_start(cfg["nc"], imgsz, queries)
+            if self.net is not None:
+                origin = {"kind": "coco", "weights": start}
+        if self.net is None:
+            self.net = EDNet(self.variant or "s", cfg["nc"])
+            loaded = getattr(self.net.backbone, "imagenet_loaded", False)
+            origin = {"kind": "imagenet" if loaded else "scratch"}
+        elif self.net.num_classes != cfg["nc"] or self._names_moved(cfg["names"]):
+            # another class count, or the same count under other names (a
+            # [cat, dog] model fine-tuned on [dog, cat]): new heads, with the
+            # rows of the classes the checkpoint knows by name
+            self.net = self._reheaded_net(cfg["nc"], cfg["names"])
+            self.names = cfg["names"]
+
+        if self.class_rows and origin is not None:
+            # which classes started from a row the old weights had, by name
+            origin["class_rows"] = dict(self.class_rows)
+        if queries is not None:
+            self.net.trim(queries=int(queries))
+        if denoising is not None:
+            self.net.decoder.num_denoising = int(denoising)
+        device = _torch_device(device)
+        trainer = Trainer(
+            self.net,
+            data,
+            epochs=epochs,
+            imgsz=imgsz,
+            batch=batch,
+            lr=lr0,
+            device=device,
+            workers=workers,
+            project=project,
+            name=name,
+            resume=resume,
+            patience=patience,
+            seed=seed,
+            amp=amp,
+            freeze=freeze,
+            augment=augment,
+            on_epoch_end=on_epoch_end,
+            on_progress=on_progress,
+            origin=origin,
+            **kwargs,
+        )
+        val_fn = None
+        if val:
+            def val_fn(net):  # noqa: E306 — tiny closure, reads better inline
+                return validate_torch(net, data, imgsz=imgsz, batch=batch, device=device,
+                                      workers=min(workers, 2))["map"]
+
+        best = trainer.train(val_fn=val_fn)
+        self._load_checkpoint(best)
+        if cfg["kpt_shape"] is not None and pose:
+            self._train_keypoints(data, cfg, best, device=device, workers=workers, seed=seed,
+                                  amp=amp, epochs=pose_epochs or epochs, batch=pose_batch,
+                                  lr=pose_lr, size=pose_size, on_progress=on_progress)
+        if seg:
+            from .seg_trainer import has_polygons
+
+            if has_polygons(data):
+                self._train_masks(data, best, device=device, seed=seed, epochs=seg_epochs,
+                                  batch=seg_batch, lr=seg_lr, on_progress=on_progress)
+        return best
+
+    def _train_masks(self, data, best: Path, *, device, seed, epochs, batch, lr,
+                     on_progress=None) -> Path:
+        """The mask stage of training on a segmentation dataset: MobileSAM's
+        decoder fine-tuned on the polygons, written to ``segment/`` in the run
+        and, as ``mask_decoder.onnx``, beside ``best.pt`` — where
+        task="segment" finds it."""
+        import shutil
+
+        from .seg_trainer import train_masks
+        from .segment import default_segmenter
+
+        log = (lambda m: print(m, flush=True)) if self.verbose else (lambda m: None)
+        backend = self.predictor.backend if self.predictor is not None else self.backend
+        onnx = train_masks(data, best.parent.parent / "segment",
+                           segmenter=default_segmenter(backend=backend), epochs=epochs,
+                           batch=batch, lr=lr, device=device, seed=seed, log=log,
+                           on_progress=on_progress)
+        beside = best.parent / "mask_decoder.onnx"
+        shutil.copy(onnx, beside)
+        self.segmenter = None  # the next prediction reads the new one
+        return beside
+
+    def _train_keypoints(self, data, cfg, best: Path, *, device, workers, seed, amp, epochs,
+                         batch, lr, size, on_progress=None) -> Path | None:
+        """The keypoint stage of training on a keypoint dataset: a top-down
+        network on crops of the labelled boxes, started from the backbone of
+        the detector just trained, written to ``pose/`` in the run and, as
+        ``pose.onnx``, beside ``best.pt`` — where task="pose" finds it."""
+        import shutil
+
+        from .data.keypoints import KeypointDataset
+        from .pose import KeypointSpec
+        from .pose_trainer import train_keypoints
+
+        variant = self.variant or "s"
+        size = size or {"n": "s", "s": "s", "m": "m", "l": "l"}.get(variant, "l")
+        # the detector's own backbone when it is the keypoint network's (n and
+        # s share B0); otherwise the COCO detector's of that size
+        own = {"n": "s", "s": "s", "m": "m", "l": "l"}.get(variant) == size
+        init = str(best) if own else f"ed-{size}"
+        spec = KeypointSpec.from_data(cfg)
+        train_ds = KeypointDataset.from_yolo(data, "train", augment=True, spec=spec)
+        val_ds = KeypointDataset.from_yolo(data, "val", augment=False, spec=spec)
+        if not len(train_ds):
+            raise ValueError(f"{data}: no labelled keypoints in the train split")
+        lr = lr if lr is not None else 1e-3 * math.sqrt(batch / 64)
+        log = (lambda m: print(m, flush=True)) if self.verbose else (lambda m: None)
+        log(f"keypoints: {len(spec)} on {', '.join(cfg['names'][c] for c in spec.classes)}, "
+            f"a {size} network from {Path(init).name}")
+        onnx = train_keypoints(
+            train_ds, val_ds, best.parent.parent / "pose", size=size, init=init, epochs=epochs,
+            batch=batch, lr=lr, warmup=200, workers=workers,
+            val_every=max(1, epochs // 10), device=device, amp=amp, seed=seed, log=log,
+            on_progress=on_progress)
+        if onnx is None:
+            return None
+        beside = best.parent / "pose.onnx"
+        shutil.copy(onnx, beside)
+        self.pose = None  # the next prediction reads the new one
+        return beside
+
+    def _names_moved(self, names: dict) -> bool:
+        """The checkpoint knows classes by other names or in another order."""
+        ckpt = getattr(self, "ckpt", None) or {}
+        old = {int(k): str(v) for k, v in ckpt.get("names", {}).items()}
+        new = {int(k): str(v) for k, v in dict(names).items()}
+        return bool(old) and old != new
+
+    @staticmethod
+    def _resumed_settings(run_root: Path, freeze, queries, denoising):
+        """The settings a resumed run trained with, where the call leaves them
+        out: the optimizer's state only fits the same frozen parts, and a run
+        trimmed to fewer queries must go on with them."""
+        from .trainer import Trainer
+
+        run = Trainer._resume_dir(run_root)
+        info = run / "run.json"
+        if not info.exists():
+            return freeze, queries, denoising
+        try:
+            setup = json.loads(info.read_text(encoding="utf-8"))
+            setup = setup.get("run", setup)       # summary-shaped files nest it
+        except (OSError, ValueError):
+            return freeze, queries, denoising
+        restored = []
+        if freeze is None and setup.get("freeze"):
+            freeze = setup["freeze"]
+            restored.append(f"freeze={freeze}")
+        if queries is None and setup.get("queries") and setup["queries"] < 300:
+            queries = int(setup["queries"])
+            restored.append(f"queries={queries}")
+        if denoising is None and setup.get("denoising") is not None \
+                and setup["denoising"] != 100:
+            denoising = int(setup["denoising"])
+            restored.append(f"denoising={denoising}")
+        if restored:
+            print(f"[easydetect] resuming with the run's own {', '.join(restored)}")
+        return freeze, queries, denoising
+
+    def _try_pretrained_start(self, nc: int, imgsz: int, queries: int | None) -> str | None:
+        """Warm-start from the mirror's COCO weights, quietly falling back;
+        returns which: ``ed-n``, or ``ed-n-320`` (fine-tuned at that size)."""
+        checkpoint = downloads.download_sized_checkpoint(self.model_name, imgsz, queries)
+        start = f"{self.model_name}-{imgsz}"
+        if checkpoint is None:
+            start = self.model_name
+            try:
+                checkpoint = downloads.download_checkpoint(self.model_name)
+            except ModelNotFoundError as exc:
+                if self.verbose:
+                    print(f"{exc}", file=sys.stderr)
+                return None
+        if self.verbose and start != self.model_name:
+            print(f"[easydetect] starting from {start} (COCO weights fine-tuned at {imgsz} px)")
+        wanted = dict(self.names)
+        self._load_checkpoint(checkpoint)
+        if self.net.num_classes != nc or self._names_moved(wanted):
+            self.net = self._reheaded_net(nc, wanted)
+        self.names = wanted
+        # the network now has these classes: train() must not re-head it again
+        # from COCO's names (their rows are no longer where those say)
+        self.ckpt = dict(self.ckpt or {}, names=dict(wanted), num_classes=nc)
+        return start
+
+    def _reheaded_net(self, nc: int, names: dict[int, str] | None = None):
+        """Keep backbone/encoder/decoder weights and new class heads for ``nc``;
+        a class the checkpoint already has by name (``apple``, ``사과``) keeps
+        its rows of them."""
+        from .class_names import match_classes
+        from .nn import EDNet
+
+        old = self.net.state_dict()
+        fresh = EDNet(self.variant or "s", nc, pretrained_backbone=False)
+        # with the same class count the old heads fit and would come across
+        # as they are, each row under another class's name: start them fresh
+        heads = {k: v.clone() for k, v in fresh.state_dict().items() if _class_tensor(k)}
+        transferred = transfer_weights(fresh, old)
+        fresh.load_state_dict(heads, strict=False)
+        transferred -= sum(k in old and old[k].shape == v.shape for k, v in heads.items())
+        # a checkpoint trained with fewer queries keeps them
+        if self.net.decoder.num_queries != fresh.decoder.num_queries:
+            fresh.trim(queries=self.net.decoder.num_queries)
+        fresh.decoder.num_denoising = self.net.decoder.num_denoising
+        ckpt = getattr(self, "ckpt", None) or {}
+        source = {int(k): str(v) for k, v in ckpt.get("names", {}).items()}
+        use_names = getattr(self, "_match_names", True)
+        known = match_classes(source, names or {}) if source and use_names else {}
+        self.class_rows = {str((names or {})[j]): source[i] for j, i in known.items()}
+        if known:
+            copy_class_rows(fresh, old, self.net.num_classes, known)
+        if os.environ.get("EASYDETECT_NEW_ROWS") == "mean":     # experiment, see ROADMAP
+            new = [j for j in range(nc) if j not in known]
+            _mean_class_rows(fresh, old, self.net.num_classes, new)
+        if self.verbose:
+            print(
+                f"transferred {transferred} tensors from the "
+                f"{self.net.num_classes}-class checkpoint; class heads re-initialised for {nc}"
+            )
+            if known:
+                print("classes the checkpoint knows, kept: " + ", ".join(
+                    f"{names[j]} ← {source[i]}" for j, i in sorted(known.items())))
+        return fresh
+
+    def val(
+        self,
+        data: str,
+        imgsz: int = 640,
+        batch: int = 8,
+        conf: float = 0.01,
+        device: Any = None,
+        workers: int = 2,
+    ) -> DetMetrics:
+        """COCO-style mAP on the ``val`` split of a data.yaml."""
+        self._ensure_net()
+        from .data.dataset import load_data_yaml
+        from .validator import validate_torch
+
+        cfg = load_data_yaml(data)
+        raw = validate_torch(
+            self.net,
+            data,
+            imgsz=imgsz,
+            batch=batch,
+            conf=conf,
+            device=_torch_device(device),
+            workers=workers,
+        )
+        metrics = DetMetrics(
+            raw["map50"], raw["map"], per_class=raw.get("per_class"), names=cfg["names"]
+        )
+        if self.verbose:
+            print(f"mAP50 {metrics.box.map50:.4f}   mAP50-95 {metrics.box.map:.4f}")
+        return metrics
+
+    def export(
+        self,
+        format: str = "openvino",
+        imgsz: int | None = None,
+        half: bool = False,
+        out_dir: str | Path | None = None,
+        verbose: bool | None = None,
+        layers: int | None = None,
+        queries: int | None = None,
+        int8: bool = False,
+        data: Any = None,
+        calib: int = 300,
+    ) -> Path:
+        """Export to OpenVINO IR (default) or ONNX. Returns the file written.
+
+        ``int8=True`` (OpenVINO only) quantizes the IR to 8 bits, calibrated
+        on ``calib`` pictures from ``data`` — a data.yaml (its train split), a
+        folder or a list of files — and writes ``<name>_int8.xml``.
+
+        ``layers`` (decoder layers to run, of 3-6 by size) and ``queries`` (of
+        300) export a faster, slightly less accurate model; ed-n at 320 on
+        a 4-core CPU: 19.9 ms, 13.2 ms with ``queries=100``.
+        """
+        format = format.lower()
+        if format not in ("openvino", "onnx"):
+            raise ValueError("supported formats: 'openvino', 'onnx'")
+        self._ensure_net()
+        from .exporter import export_onnx, export_openvino
+
+        if out_dir is None:
+            out_dir = self.ckpt_path.parent if self.ckpt_path else Path(".")
+        imgsz = imgsz or (self.ckpt or {}).get("imgsz", 640)
+        stem = self.ckpt_path.stem if self.ckpt_path else f"easydetect-{self.variant}"
+        verbose = self.verbose if verbose is None else verbose
+        if int8:
+            if format != "openvino":
+                raise ValueError("int8 is an OpenVINO export: format='openvino'")
+            written = export_openvino(
+                self.net, self.names, imgsz=imgsz, out_dir=out_dir, fname=f"{stem}_int8",
+                verbose=verbose, layers=layers, queries=queries,
+                int8=_calibration_images(data, calib),
+            )
+            self._copy_siblings(Path(written).parent)
+            return written
+        exporter = export_openvino if format == "openvino" else export_onnx
+        written = exporter(
+            self.net, self.names, imgsz=imgsz, out_dir=out_dir, fname=stem,
+            half=half, verbose=verbose, layers=layers, queries=queries,
+        )
+        self._copy_siblings(Path(written).parent)
+        return written
+
+    def _copy_siblings(self, out_dir: Path) -> None:
+        """Training's pose.onnx / mask_decoder.onnx go along with an export,
+        so the exported detector finds them beside itself as best.pt does."""
+        import shutil
+
+        if not self.ckpt_path:
+            return
+        for name in ("pose.onnx", "mask_decoder.onnx"):
+            src = Path(self.ckpt_path).parent / name
+            dst = Path(out_dir) / name
+            if src.exists() and src.resolve() != dst.resolve():
+                shutil.copy(src, dst)
+
+    # -------------------------------------------------------------------- misc
+
+    def info(self) -> str:
+        """One line about what is loaded."""
+        where = self.ckpt_path or self.ir_path or self.model_name
+        nc = self.net.num_classes if self.net is not None else len(self.names) or "?"
+        return f"ed-{self.variant or '?'} — {nc} classes — {where}"
+
+    def __repr__(self) -> str:
+        return f"Detector({self.model_name!r}, device={self.device!r})"
+
+
+def _calibration_images(data: Any, count: int) -> list[Path]:
+    """Up to ``count`` pictures spread over a data.yaml's train split, a folder or a list."""
+    from .data.dataset import list_images, load_data_yaml
+
+    if data is None:
+        raise ValueError("int8=True needs pictures to calibrate on: data='data.yaml' or a folder")
+    if isinstance(data, (list, tuple)):
+        files = [Path(f) for f in data]
+    else:
+        path = Path(data).expanduser()
+        if path.suffix in (".yaml", ".yml"):
+            cfg = load_data_yaml(path)
+            files = list_images(cfg["root"], cfg["train"], cfg["yaml_dir"])
+        elif path.is_dir():
+            files = list_images(path, ".")
+        else:
+            raise ValueError(f"{data}: give a data.yaml, a folder of pictures or a list")
+    if not files:
+        raise ValueError(f"no pictures found in {data}")
+    step = max(len(files) // max(int(count), 1), 1)
+    return files[::step][:count]
+
+
+class _Stream:
+    """The generator ``stream=True`` hands back, plus a nudge when it is dropped.
+
+    ``model.predict(0, stream=True, show=True)`` on its own looks like it should
+    open a camera, but a generator nobody iterates never runs a single frame —
+    the call just returns and the program exits in silence. Saying so is much
+    kinder than letting people debug an empty window that never appeared.
+    """
+
+    def __init__(self, generator, verb: str) -> None:
+        self._generator = generator
+        self._verb = verb
+        self._started = False
+
+    def __iter__(self):
+        self._started = True
+        return self._generator
+
+    def __next__(self):
+        self._started = True
+        return next(self._generator)
+
+    def close(self) -> None:
+        self._started = True
+        self._generator.close()
+
+    def __del__(self) -> None:
+        if self._started:
+            return
+        try:
+            print(
+                f"easydetect: {self._verb}(stream=True) returned a generator that was never "
+                f"iterated, so nothing ran. Use it in a loop:\n"
+                f"    for r in model.{self._verb}(source, stream=True, ...):\n"
+                f"        ...\n"
+                f"or drop stream=True to get a list back.",
+                file=sys.stderr,
+            )
+        except Exception:  # interpreter shutdown - nothing useful to say
+            pass
+
+
+def _display(result: Results, frame, line_width: int | None = None) -> bool:
+    """Show one frame without blocking the stream. False means "stop"."""
+    import cv2
+
+    window = Path(frame.path).name or "easydetect"
+    cv2.imshow(window, result.plot(line_width=line_width))
+    key = cv2.waitKey(1 if frame.kind != "image" else 0) & 0xFF
+    if key in (ord("q"), 27):  # q or Esc
+        return False
+    return cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) >= 1
+
+
+def _close_windows() -> None:
+    import cv2
+
+    cv2.destroyAllWindows()
+    cv2.waitKey(1)  # let the window manager actually take the close down
+
+
+class _OutputWriter:
+    """Writes annotated images as .jpg and annotated video frames as .mp4."""
+
+    def __init__(self, save_dir: Path) -> None:
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.videos: dict[str, Any] = {}
+
+    def write(self, result: Results, frame, line_width: int | None = None) -> None:
+        import cv2
+
+        img = result.plot(line_width=line_width)
+        if frame.kind == "image":
+            stem = Path(frame.path).stem or "image"
+            out = self.save_dir / f"{stem}.jpg"
+            if out.exists():
+                out = self.save_dir / f"{stem}_{frame.index}.jpg"
+            imwrite(str(out), img)
+            return
+        entry = self.videos.get(frame.path)
+        if entry is None:
+            stem = Path(frame.path).stem or "stream"
+            final = self.save_dir / f"{stem}.mp4"
+            taken = {f for _, _, f in self.videos.values()}
+            n = 2
+            while final in taken or final.exists():   # a/clip.mp4 and b/clip.mp4
+                final = self.save_dir / f"{stem}_{n}.mp4"
+                n += 1
+            # OpenCV's writer takes a narrow path: a Korean file name would not
+            # open on Windows. It writes under a plain name and is renamed after.
+            tmp = self.save_dir / f".easydetect-{len(self.videos)}-{os.getpid()}.mp4"
+            h, w = img.shape[:2]
+            # H.264 plays in browsers; OpenCV's pip wheels often lack it, so fall back
+            for codec in ("avc1", "mp4v"):
+                writer = cv2.VideoWriter(cv2_path(tmp), cv2.VideoWriter_fourcc(*codec),
+                                         frame.fps or 25.0,  # keep the source's timing
+                                         (w, h))
+                if writer.isOpened():
+                    break
+                writer.release()
+            else:
+                print(f"[easydetect] could not open a video writer for {final} "
+                      "(no mp4 encoder in this OpenCV, or the folder is not writable)",
+                      file=sys.stderr)
+            entry = self.videos[frame.path] = (writer, tmp, final)
+        entry[0].write(img)
+
+    def close(self) -> None:
+        # each on its own: one that cannot be renamed (the old file open in a
+        # player on Windows) must not keep the others from being finished
+        for writer, tmp, final in self.videos.values():
+            try:
+                writer.release()
+                if tmp.exists():
+                    os.replace(tmp, final)
+            except OSError as exc:
+                print(f"[easydetect] the video stays at {tmp}: {exc}", file=sys.stderr)
+        self.videos.clear()
+
+
+def transfer_weights(net, state_dict) -> int:
+    """Copy every tensor whose name *and* shape match. Returns how many landed."""
+    target = net.state_dict()
+    matched = {
+        k: v for k, v in state_dict.items() if k in target and target[k].shape == v.shape
+    }
+    target.update(matched)
+    net.load_state_dict(target)
+    return len(matched)
+
+
+def _class_tensor(key: str) -> bool:
+    """A tensor with a row per class: the score heads and the denoising class
+    embedding (which has one more, for padding)."""
+    return "score_head" in key or "denoising_class_embed" in key
+
+
+def _mean_class_rows(net, state_dict, old_nc: int, rows: list[int]) -> None:
+    """Start classes the checkpoint does not know from the mean of its class
+    rows ("some object") instead of from nothing."""
+    import torch
+
+    target = net.state_dict()
+    for k, old in state_dict.items():
+        new = target.get(k)
+        if new is None or not _class_tensor(k) or new.dim() != old.dim():
+            continue
+        if new.shape[1:] != old.shape[1:]:
+            continue
+        with torch.no_grad():
+            mean = old[:old_nc].mean(0)
+            for j in rows:
+                new[j] = mean
+    net.load_state_dict(target)
+
+
+def copy_class_rows(net, state_dict, old_nc: int, rows: dict[int, int]) -> int:
+    """Copy class heads' rows ``{new class: old class}`` from a checkpoint with
+    ``old_nc`` classes: the score heads and the denoising class embedding
+    (which has a padding row too), wherever the other dimensions match — also
+    when the class count is the same and only the order moved. Returns how
+    many tensors took rows."""
+    import torch
+
+    target, changed = net.state_dict(), 0
+    nc = net.num_classes
+    for k, old in state_dict.items():
+        new = target.get(k)
+        if new is None or not _class_tensor(k) or new.dim() != old.dim():
+            continue
+        extra = old.shape[0] - old_nc
+        if extra not in (0, 1) or new.shape[0] != nc + extra or new.shape[1:] != old.shape[1:]:
+            continue
+        with torch.no_grad():
+            for j, i in rows.items():
+                new[j] = old[i]
+        changed += 1
+    net.load_state_dict(target)
+    return changed
+
+
+def _import_torch():
+    try:
+        import torch
+
+        return torch
+    except ImportError as exc:  # pragma: no cover - depends on the install extra
+        raise ImportError(_TORCH_HINT) from exc
+
+
+__all__ = ["Detector", "copy_class_rows", "increment_path", "transfer_weights"]

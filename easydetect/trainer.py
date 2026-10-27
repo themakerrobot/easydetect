@@ -154,17 +154,24 @@ def freeze_modules(net, freeze):
         return []
     if freeze is True:
         freeze = "backbone"
-    prefixes = FREEZE_GROUPS.get(freeze, (freeze,) if isinstance(freeze, str) else tuple(freeze))
-    unknown = [p for p in prefixes if not hasattr(net, p.split(".")[0])]
+    if isinstance(freeze, str):
+        prefixes = FREEZE_GROUPS.get(freeze, (freeze,))
+    else:   # a list of module prefixes: ["backbone.stem", "backbone.stages.0"]
+        prefixes = tuple(freeze)
+    modules, unknown = [], []
+    for p in prefixes:
+        try:
+            modules.append(net.get_submodule(p))
+        except AttributeError:
+            unknown.append(p)
     if unknown:
         raise ValueError(f"nothing called {unknown} to freeze; try {sorted(FREEZE_GROUPS)}")
 
     frozen_params = 0
     for name, param in net.named_parameters():
-        if name.startswith(prefixes):
+        if name.startswith(tuple(p + "." for p in prefixes)):
             param.requires_grad = False
             frozen_params += param.numel()
-    modules = [getattr(net, p.split(".")[0]) for p in prefixes]
     print(f"[easydetect] frozen: {', '.join(prefixes)} ({frozen_params / 1e6:.1f}M parameters)")
     return modules
 

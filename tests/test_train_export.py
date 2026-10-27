@@ -183,6 +183,23 @@ def test_freezing_the_backbone_leaves_it_out_of_the_optimiser():
 
 
 @needs_torch
+def test_freezing_a_list_of_parts_freezes_those_and_keeps_only_them_in_eval_mode():
+    """freeze=["backbone.stem", "backbone.stages.0"]: the later stages learn,
+    and their batch norms are not held in eval mode with the frozen ones."""
+    from easydetect.nn import EDNet
+    from easydetect.trainer import freeze_modules
+
+    net = EDNet("n", num_classes=2, pretrained_backbone=False)
+    frozen = freeze_modules(net, ["backbone.stem", "backbone.stages.0"])
+    assert frozen == [net.backbone.stem, net.backbone.stages[0]]
+    assert not any(p.requires_grad for p in net.backbone.stem.parameters())
+    assert not any(p.requires_grad for p in net.backbone.stages[0].parameters())
+    assert all(p.requires_grad for p in net.backbone.stages[2].parameters())
+    with pytest.raises(ValueError, match="nothing called"):
+        freeze_modules(net, ["backbone.stages.9"])
+
+
+@needs_torch
 def test_freezing_something_that_does_not_exist_is_an_error():
     from easydetect.nn import EDNet
     from easydetect.trainer import freeze_modules

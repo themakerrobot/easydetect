@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.11
+
+- `train(freeze="auto")`: the backbone stays frozen when the start weights
+  know one of the dataset's classes by name, and trains when they know none.
+  The lab's 수업용 preset uses it, with 800 steps instead of 1,000 when the
+  backbone trains (a step costs 1.27× as much). Classroom settings, CPU,
+  three seeds: signature 0.976 → 0.979, medical-pills 0.757 → 0.776,
+  african-wildlife (elephant, zebra known: frozen) 0.733 — all above YOLO26n
+  (0.971, 0.770, 0.668).
+- `freeze=` takes a list of module prefixes (`["backbone.stem",
+  "backbone.stages.0"]`); it raised a TypeError, and held the whole backbone
+  in eval mode instead of only the frozen parts.
+
 ## 0.7.10
 
 - Classes the start weights do not know begin from the mean of their class

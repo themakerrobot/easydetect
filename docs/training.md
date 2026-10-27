@@ -120,6 +120,15 @@ Korean names (`easydetect.class_names.ALIASES`); words that name other things
 as often (`table`, `plant`, `ship`, `가위`) are left out. `run.json` records the
 matches under `start.class_rows`, and `train(match_names=False)` turns it off.
 
+When none of the classes is one COCO knows (pills, signatures), each starts
+from the mean of COCO's class rows instead of from nothing. On the classroom
+settings (320 px, frozen backbone, 70 epochs, three seeds) that kept
+medical-pills at 0.756–0.758 where fresh rows let one seed fall to 0.657. Beside
+classes COCO knows it does the opposite (african-wildlife, with elephant and
+zebra: 0.615 against 0.735), so there the new classes start fresh. `run.json`
+records which (`start.new_rows`); `EASYDETECT_NEW_ROWS=mean` or `=fresh` picks
+one for every run.
+
 For a domain
 COCO says nothing about (thermal, medical, satellite), or for a clean baseline,
 start from the ImageNet-pretrained HGNetv2 backbone instead:

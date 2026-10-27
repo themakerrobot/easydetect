@@ -129,6 +129,12 @@ zebra: 0.615 against 0.735), so there the new classes start fresh. `run.json`
 records which (`start.new_rows`); `EASYDETECT_NEW_ROWS=mean` or `=fresh` picks
 one for every run.
 
+`freeze="auto"` decides the backbone the same way: frozen when the start
+knows one of the classes (its features already fit the pictures), trained when
+it knows none. On the classroom settings that took medical-pills from 0.757 to
+0.776 and signature from 0.976 to 0.979, while african-wildlife fell from 0.735
+to 0.667 when its backbone trained, so there it stays frozen.
+
 For a domain
 COCO says nothing about (thermal, medical, satellite), or for a clean baseline,
 start from the ImageNet-pretrained HGNetv2 backbone instead:

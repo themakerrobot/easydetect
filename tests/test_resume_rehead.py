@@ -409,6 +409,18 @@ def test_the_run_records_how_new_classes_started(dataset, tmp_path, monkeypatch)
     assert setup["start"]["kind"] == "coco" and setup["start"]["new_rows"] == "mean"
 
 
+@pytest.mark.parametrize("names, frozen", [({0: "pill", 1: "capsule"}, None),
+                                           ({0: "cat", 1: "pill"}, "backbone")])
+def test_freeze_auto_keeps_the_backbone_only_when_a_class_is_known(
+        dataset, tmp_path, monkeypatch, names, frozen):
+    _fake_coco(tmp_path, monkeypatch, {15: "cat"})
+    best = Detector("ed-n", verbose=False).train(
+        data=str(_data_named(dataset, tmp_path, names)), project=str(tmp_path),
+        epochs=1, val=False, freeze="auto", **FAST)
+    setup = json.loads((best.parent.parent / "run.json").read_text(encoding="utf-8"))
+    assert setup["freeze"] == frozen
+
+
 def test_a_small_run_with_few_queries_starts_from_the_sized_coco_fine_tune(
         dataset, tmp_path, monkeypatch):
     """train(imgsz=320, queries=100) starts from ed-n-320.pt when the mirror

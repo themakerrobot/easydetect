@@ -602,6 +602,7 @@ class Detector:
                 Path(project) / name, freeze, queries, denoising)
         self._match_names = match_names
         self.class_rows: dict[str, str] = {}
+        self.new_rows: str | None = None
         # where the weights came from, for the run's record
         origin = None
         if self.net is not None:
@@ -625,6 +626,8 @@ class Detector:
         if self.class_rows and origin is not None:
             # which classes started from a row the old weights had, by name
             origin["class_rows"] = dict(self.class_rows)
+        if self.new_rows and origin is not None:
+            origin["new_rows"] = self.new_rows
         if queries is not None:
             self.net.trim(queries=int(queries))
         if denoising is not None:
@@ -822,8 +825,17 @@ class Detector:
         self.class_rows = {str((names or {})[j]): source[i] for j, i in known.items()}
         if known:
             copy_class_rows(fresh, old, self.net.num_classes, known)
-        if os.environ.get("EASYDETECT_NEW_ROWS") == "mean":     # experiment, see ROADMAP
-            new = [j for j in range(nc) if j not in known]
+        # the classes it does not know: fresh rows, or the mean of its class
+        # rows when none of the dataset's classes is known. In the classroom
+        # runs the mean steadied a set of new classes (medical-pills 0.756-0.758,
+        # fresh rows one seed at 0.657) and spoiled new classes beside known
+        # ones (african-wildlife 0.615, fresh 0.735). EASYDETECT_NEW_ROWS=mean
+        # or =fresh decides it instead.
+        new = [j for j in range(nc) if j not in known]
+        mode = os.environ.get("EASYDETECT_NEW_ROWS", "auto")
+        mean = bool(new and source) and (mode == "mean" or (mode == "auto" and not known))
+        self.new_rows = "mean" if mean else "fresh"
+        if mean:
             _mean_class_rows(fresh, old, self.net.num_classes, new)
         if self.verbose:
             print(
@@ -833,6 +845,8 @@ class Detector:
             if known:
                 print("classes the checkpoint knows, kept: " + ", ".join(
                     f"{names[j]} ← {source[i]}" for j, i in sorted(known.items())))
+            if mean:
+                print("classes it does not know start from the mean of its class rows")
         return fresh
 
     def val(

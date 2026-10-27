@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.10
+
+- Classes the start weights do not know begin from the mean of their class
+  rows when none of the dataset's classes is known (pills, signatures), and
+  fresh as before beside known ones. Classroom settings, CPU, three seeds:
+  medical-pills 0.755 / 0.657 / 0.750 → 0.756 / 0.758 / 0.756, signature
+  0.980 → 0.976, african-wildlife unchanged (0.735; the mean there: 0.615).
+  `run.json` records it as `start.new_rows`; `EASYDETECT_NEW_ROWS=mean|fresh`
+  overrides it.
+
 ## 0.7.9
 
 - The models are named `ed-n`, `ed-s`, `ed-m`, `ed-l`, `ed-x` (the network

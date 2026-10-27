@@ -367,6 +367,48 @@ def test_with_new_rows_mean_a_class_coco_does_not_know_starts_from_the_mean_row(
     assert torch.allclose(fresh.state_dict()[pad][1], old[pad][:2].mean(0))
 
 
+def test_by_default_all_new_classes_start_from_the_mean_row(monkeypatch):
+    """None of the dataset's classes known: each starts from the mean row."""
+    import torch
+
+    monkeypatch.delenv("EASYDETECT_NEW_ROWS", raising=False)
+    model = _model_with({0: "cat", 1: "dog"})
+    old = model.net.state_dict()
+    fresh = model._reheaded_net(2, {0: "pill", 1: "capsule"})
+    k = "decoder.enc_score_head.weight"
+    for j in (0, 1):
+        assert torch.allclose(fresh.state_dict()[k][j], old[k][:2].mean(0))
+    assert model.new_rows == "mean"
+
+
+@pytest.mark.parametrize("env, names", [(None, {0: "cat", 1: "pill"}),
+                                        ("fresh", {0: "pill", 1: "capsule"})])
+def test_new_classes_beside_known_ones_or_asked_fresh_start_fresh(monkeypatch, env, names):
+    """A known class among them (african-wildlife: elephant, zebra), or
+    EASYDETECT_NEW_ROWS=fresh: the new rows are not the mean."""
+    import torch
+
+    if env:
+        monkeypatch.setenv("EASYDETECT_NEW_ROWS", env)
+    else:
+        monkeypatch.delenv("EASYDETECT_NEW_ROWS", raising=False)
+    model = _model_with({0: "cat", 1: "dog"})
+    old = model.net.state_dict()
+    fresh = model._reheaded_net(2, names)
+    k = "decoder.enc_score_head.weight"
+    assert not torch.allclose(fresh.state_dict()[k][1], old[k][:2].mean(0))
+    assert model.new_rows == "fresh"
+
+
+def test_the_run_records_how_new_classes_started(dataset, tmp_path, monkeypatch):
+    coco = _fake_coco(tmp_path, monkeypatch, {})
+    del coco
+    best = Detector("ed-n", verbose=False).train(
+        data=str(dataset), project=str(tmp_path), epochs=1, val=False, **FAST)
+    setup = json.loads((best.parent.parent / "run.json").read_text(encoding="utf-8"))
+    assert setup["start"]["kind"] == "coco" and setup["start"]["new_rows"] == "mean"
+
+
 def test_a_small_run_with_few_queries_starts_from_the_sized_coco_fine_tune(
         dataset, tmp_path, monkeypatch):
     """train(imgsz=320, queries=100) starts from ed-n-320.pt when the mirror

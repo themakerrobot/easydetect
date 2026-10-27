@@ -297,8 +297,9 @@ def main():
     parser.add_argument("--freeze", help="ed parts not trained (backbone)")
     parser.add_argument("--seed", type=int, default=0, help="both trainers' seed")
     parser.add_argument("--lr0", type=float, help="ed learning rate (default: from the batch)")
-    parser.add_argument("--new-rows", choices=["mean"],
-                        help="start classes COCO does not know from the mean of its rows")
+    parser.add_argument("--new-rows", choices=["auto", "mean", "fresh"],
+                        help="classes COCO does not know: from the mean of its rows, fresh, "
+                             "or the mean only when it knows none (auto, the default)")
     parser.add_argument("--clean-bn", choices=["auto", "keep", "adapt"],
                         help="the original last plain-picture epochs: keep the batch-norm "
                              "statistics (0.7.5) or re-estimate them (before)")

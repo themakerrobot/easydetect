@@ -486,7 +486,9 @@ class Detector:
         self.ckpt_path = Path(path)
         self.variant = ckpt["variant"]
         self.names = {int(k): str(v) for k, v in ckpt.get("names", {}).items()}
-        self.net = EDNet(ckpt["variant"], ckpt["num_classes"], pretrained_backbone=False)
+        # a checkpoint from before 0.7.13 has no decoder_act: the original ReLU
+        self.net = EDNet(ckpt["variant"], ckpt["num_classes"], pretrained_backbone=False,
+                         decoder_act=ckpt.get("decoder_act") or "relu")
         self.net.load_state_dict(ckpt["model"])
         # trained with fewer queries: runs (and fine-tunes again) with as many
         if ckpt.get("queries") and ckpt["queries"] != self.net.decoder.num_queries:
@@ -824,7 +826,8 @@ class Detector:
         from .nn import EDNet
 
         old = self.net.state_dict()
-        fresh = EDNet(self.variant or "s", nc, pretrained_backbone=False)
+        fresh = EDNet(self.variant or "s", nc, pretrained_backbone=False,
+                      decoder_act=getattr(self.net, "decoder_act", "relu"))
         # with the same class count the old heads fit and would come across
         # as they are, each row under another class's name: start them fresh
         heads = {k: v.clone() for k, v in fresh.state_dict().items() if _class_tensor(k)}

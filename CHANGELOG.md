@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.13
+
+- The decoder's activation is a setting of the network (`EDNet(...,
+  decoder_act="relu" | "silu")`) and travels with the checkpoint
+  (`decoder_act`; a checkpoint without it is the original ReLU). DEIM's COCO
+  weights — the same network trained a better way, Apache-2.0 — use SiLU:
+  `tools/convert_upstream.py --source deim` converts them (500 COCO val
+  pictures at 640: ed-n 0.454 → 0.465, ed-s 0.512 → 0.517). Loaded with the
+  wrong activation they score 0.033: a checkpoint saved with `decoder_act`
+  needs this version.
+- `tools/long_run.py`: ed-s fine-tuned from DEIM at 320, 288 and 256 px and
+  ed-n at 320, each scored on COCO val as Pibo runs it.
+
 ## 0.7.12
 
 - Training on an Intel GPU (`device="xpu"`; Arc, and the Arc graphics of Core

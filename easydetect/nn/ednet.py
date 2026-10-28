@@ -50,6 +50,7 @@ SIZE_CFG = {
     },
 }
 SIZES = tuple(SIZE_CFG)
+DECODER_ACTS = ("relu", "silu")
 
 # what every size shares (the original shared config)
 _BACKBONE = {"return_idx": [1, 2, 3], "freeze_stem_only": True, "freeze_at": 0,
@@ -68,18 +69,25 @@ _DECODER = {"feat_channels": [256, 256, 256], "feat_strides": [8, 16, 32], "hidd
 class EDNet(nn.Module):
     """``variant`` is the size letter: n, s, m, l or x."""
 
-    def __init__(self, variant: str = "s", num_classes: int = 80, pretrained_backbone: bool = True):
+    def __init__(self, variant: str = "s", num_classes: int = 80, pretrained_backbone: bool = True,
+                 decoder_act: str = "relu"):
         super().__init__()
         if variant not in SIZE_CFG:
             raise ValueError(f"size must be one of {SIZES}")
+        if decoder_act not in DECODER_ACTS:
+            raise ValueError(f"decoder_act must be one of {DECODER_ACTS}")
         cfg = SIZE_CFG[variant]
         self.variant = variant
         self.num_classes = num_classes
+        # the decoder's feed-forward and box heads: ReLU in the original
+        # weights, SiLU in DEIM's (the same network trained a better way)
+        self.decoder_act = decoder_act
         self.backbone = HGNetv2(**{**_BACKBONE, **cfg["backbone"]}, pretrained=pretrained_backbone)
         # no fixed eval size: anchors and position embeddings follow the input,
         # so one network serves 320, 480 or 640 alike
         self.encoder = HybridEncoder(**copy.deepcopy({**_ENCODER, **cfg["encoder"]}))
-        self.decoder = EDTransformer(num_classes=num_classes,
+        self.decoder = EDTransformer(num_classes=num_classes, activation=decoder_act,
+                                        mlp_act=decoder_act,
                                         **copy.deepcopy({**_DECODER, **cfg["decoder"]}))
 
     def forward(self, x, targets=None):

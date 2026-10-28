@@ -297,11 +297,11 @@ class Integral(nn.Module):
 
 
 class LQE(nn.Module):
-    def __init__(self, k, hidden_dim, num_layers, reg_max):
+    def __init__(self, k, hidden_dim, num_layers, reg_max, act="relu"):
         super(LQE, self).__init__()
         self.k = k
         self.reg_max = reg_max
-        self.reg_conf = MLP(4 * (k + 1), hidden_dim, 1, num_layers)
+        self.reg_conf = MLP(4 * (k + 1), hidden_dim, 1, num_layers, act=act)
         init.constant_(self.reg_conf.layers[-1].bias, 0)
         init.constant_(self.reg_conf.layers[-1].weight, 0)
 
@@ -335,6 +335,7 @@ class TransformerDecoder(nn.Module):
         up,
         eval_idx=-1,
         layer_scale=2,
+        act="relu",
     ):
         super(TransformerDecoder, self).__init__()
         self.hidden_dim = hidden_dim
@@ -348,7 +349,7 @@ class TransformerDecoder(nn.Module):
             + [copy.deepcopy(decoder_layer_wide) for _ in range(num_layers - self.eval_idx - 1)]
         )
         self.lqe_layers = nn.ModuleList(
-            [copy.deepcopy(LQE(4, 64, 2, reg_max)) for _ in range(num_layers)]
+            [copy.deepcopy(LQE(4, 64, 2, reg_max, act=act)) for _ in range(num_layers)]
         )
 
     def value_op(self, memory, value_proj, value_scale, memory_mask, memory_spatial_shapes):
@@ -485,6 +486,7 @@ class EDTransformer(nn.Module):
         reg_max=32,
         reg_scale=4.0,
         layer_scale=1,
+        mlp_act="relu",
     ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -549,6 +551,7 @@ class EDTransformer(nn.Module):
             self.up,
             eval_idx,
             layer_scale,
+            act=activation,
         )
         # denoising
         self.num_denoising = num_denoising
@@ -564,7 +567,7 @@ class EDTransformer(nn.Module):
         self.learn_query_content = learn_query_content
         if learn_query_content:
             self.tgt_embed = nn.Embedding(num_queries, hidden_dim)
-        self.query_pos_head = MLP(4, 2 * hidden_dim, hidden_dim, 2)
+        self.query_pos_head = MLP(4, 2 * hidden_dim, hidden_dim, 2, act=mlp_act)
 
         # if num_select_queries != self.num_queries:
         #     layer = TransformerEncoderLayer(hidden_dim, nhead, dim_feedforward, activation='gelu')
@@ -589,7 +592,7 @@ class EDTransformer(nn.Module):
         else:
             self.enc_score_head = nn.Linear(hidden_dim, num_classes)
 
-        self.enc_bbox_head = MLP(hidden_dim, hidden_dim, 4, 3)
+        self.enc_bbox_head = MLP(hidden_dim, hidden_dim, 4, 3, act=mlp_act)
 
         # decoder head
         self.eval_idx = eval_idx if eval_idx >= 0 else num_layers + eval_idx
@@ -597,14 +600,14 @@ class EDTransformer(nn.Module):
             [nn.Linear(hidden_dim, num_classes) for _ in range(self.eval_idx + 1)]
             + [nn.Linear(scaled_dim, num_classes) for _ in range(num_layers - self.eval_idx - 1)]
         )
-        self.pre_bbox_head = MLP(hidden_dim, hidden_dim, 4, 3)
+        self.pre_bbox_head = MLP(hidden_dim, hidden_dim, 4, 3, act=mlp_act)
         self.dec_bbox_head = nn.ModuleList(
             [
-                MLP(hidden_dim, hidden_dim, 4 * (self.reg_max + 1), 3)
+                MLP(hidden_dim, hidden_dim, 4 * (self.reg_max + 1), 3, act=mlp_act)
                 for _ in range(self.eval_idx + 1)
             ]
             + [
-                MLP(scaled_dim, scaled_dim, 4 * (self.reg_max + 1), 3)
+                MLP(scaled_dim, scaled_dim, 4 * (self.reg_max + 1), 3, act=mlp_act)
                 for _ in range(num_layers - self.eval_idx - 1)
             ]
         )

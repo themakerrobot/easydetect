@@ -815,6 +815,7 @@ class Trainer:
                 "scaler": self.scaler.state_dict() if self.amp else None,
                 "variant": net.variant,
                 "num_classes": net.num_classes,
+                "decoder_act": getattr(net, "decoder_act", "relu"),
                 "queries": net.decoder.num_queries,
                 "denoising": net.decoder.num_denoising,
                 "names": self.cfg["names"],

@@ -147,6 +147,21 @@ MEANROWS = [bench(f"bench-n320-classroom-70ep-meanrows{lr}-seed{_seed}", *N320, 
                   *(("--lr0", "0.00028") if lr else ()), "--seed", str(_seed))
             for lr in ("", "-lr2x") for _seed in (0, 1, 2)]
 
+#: DEIM's COCO weights (the same network trained a better way, +0.2 to +0.7 mAP
+#: at 640) fine-tuned at Pibo's sizes: ed-s at 320 (the robot's model, 0.381
+#: from the original weights), at 288 and 256 (fast enough for Pibo: does one
+#: stay above yolo11s' 0.365?), and ed-n at 320 (the lab's 수업용 start);
+#: each scored on COCO val with ONNX Runtime, whole and with 2 layers and 50
+#: queries, as soon as it is trained (pi-kit-deim/, for timing on the Pi)
+DEIM = [("deim-weights", ["deim-weights"], [])]
+for _v, _size in (("s", 320), ("s", 288), ("s", 256), ("n", 320)):
+    _run = f"ed-{_v}q-{_size}-deim"
+    DEIM += [(f"coco-{_v}{_size}-deim", ["coco-train", _v, str(_size), "100",
+                                         f"deim/ed-{_v}-deim.pt", "-deim"],
+              ["coco-data", "deim-weights"]),
+             (f"score-{_v}{_size}-deim", ["score-forms", _run, str(_size)],
+              [f"coco-{_v}{_size}-deim"])]
+
 #: the 수업용 training (0.7.11: freeze and new class rows decided by what COCO
 #: knows, 800 or 1,000 steps) on 26 Roboflow 100 datasets across seven
 #: domains, against YOLO26n: whether the defaults set on three small sets hold
@@ -184,6 +199,7 @@ def plan() -> list[tuple[str, list[str], list[str]]]:
     steps += [(name, args, ["coco-n320-q100"]) for name, args in FROM320_LR2X]
     steps += [(name, args, ["coco-n320-q100"]) for name, args in FROM320_MEANROWS]
     steps += RF100
+    steps += DEIM
     steps += [(name, args, []) for name, args in BENCHES[4:]]
     return steps
 
@@ -246,18 +262,20 @@ def step_rf100(root: Path, args, seed: str) -> None:
           "--workers", str(args.workers)], cwd=root / "bench")
 
 
-def step_coco_train(root: Path, args, v: str, size: str, queries: str | None = None) -> None:
+def step_coco_train(root: Path, args, v: str, size: str, queries: str | None = None,
+                    start: str | None = None, tag: str = "") -> None:
     from easydetect import Detector
 
     coco_yaml = Path(args.coco).expanduser() / "data.yaml"
     # "ed-nq-320", not "ed-n-320-q100": resuming looks for "<name>*" folders
     project = root / "coco"
-    name = f"ed-{v}q-{size}" if queries else f"ed-{v}-{size}"
+    name = (f"ed-{v}q-{size}" if queries else f"ed-{v}-{size}") + tag
     run = project / name
     resume = (run / "weights" / "last.pt").exists()
     if run.exists() and not resume:
         shutil.rmtree(run)                  # died before its first epoch: start clean
-    best = Detector(f"ed-{v}").train(
+    # start: a checkpoint under the root (deim/ed-s-deim.pt) instead of the mirror's
+    best = Detector(str(root / start) if start else f"ed-{v}").train(
         data=str(coco_yaml), epochs=args.coco_epochs, imgsz=int(size), batch=VARIANTS[v],
         workers=args.workers, project=str(project), name=name, resume=resume,
         patience=COCO_PATIENCE, queries=int(queries) if queries else None)
@@ -347,6 +365,23 @@ def step_speed(root: Path, args) -> None:
     """The ed-n candidates: the fine-tune, the taught one, the one trained longer."""
     _score_forms(root, args, ("ed-nq-320", "ed-nq-320-kd", "ed-nq-320-more"),
                  N_FORMS, "pi-kit-speed")
+
+
+def step_deim_weights(root: Path, args) -> None:
+    """DEIM's COCO checkpoints for n and s, converted (needs pip install gdown)."""
+    for v in ("n", "s"):
+        out = root / "deim" / f"ed-{v}-deim.pt"
+        if not out.exists():
+            _run([PY, "-u", str(HERE / "convert_upstream.py"), "--size", v, "--source", "deim",
+                  "--out", str(out)], cwd=root)
+
+
+def step_score_forms(root: Path, args, run: str, size: str) -> None:
+    """One COCO fine-tune at its own size, whole and with 2 layers and 50 queries."""
+    size = int(size)
+    _score_forms(root, args, (run,), [("", size, {}, False),
+                                      ("-l2q50", size, {"layers": 2, "queries": 50}, False)],
+                 "pi-kit-deim")
 
 
 def step_speed_s(root: Path, args) -> None:
@@ -563,6 +598,10 @@ def main():
             step_speed_s(root, args)
         elif kind == "rf100":
             step_rf100(root, args, *rest)
+        elif kind == "deim-weights":
+            step_deim_weights(root, args)
+        elif kind == "score-forms":
+            step_score_forms(root, args, *rest)
         return
 
     if args.status:

@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 # Apache-2.0
-"""Turn an official D-FINE COCO checkpoint into an easydetect one.
+"""Turn an official D-FINE (or DEIM) COCO checkpoint into an easydetect one.
 
     python tools/convert_upstream.py --size s --out weights/ed-s.pt
+    python tools/convert_upstream.py --size s --source deim --out weights/ed-s-deim.pt
+
+DEIM (https://github.com/Intellindust-AI-Lab/DEIM, Apache-2.0) trained the
+same network a better way (COCO: +0.2 to +0.7 mAP), with SiLU in the
+decoder's feed-forward and box heads where the original has ReLU; the
+checkpoint records it (``decoder_act``). Its COCO-only checkpoints sit on
+Google Drive: downloading them needs ``pip install gdown``.
 
 With no --weights it downloads the matching Apache-2.0 COCO checkpoint from
 the D-FINE release (https://github.com/Peterande/D-FINE) and caches it under
@@ -30,6 +37,15 @@ OFFICIAL = {size: f"dfine_{size}_coco.pth" for size in "nsmlx"}
 RELEASE_URL = "https://github.com/Peterande/storage/releases/download/dfinev1.0"
 
 #: Cached by the reference for a fixed 640 input; recomputed here instead.
+#: DEIM's COCO-only checkpoints (its model zoo; the Objects365 one is not used)
+DEIM_DRIVE = {"n": "1ZPEhiU9nhW4M5jLnYOFwTSLQC1Ugf62e", "s": "1tB8gVJNrfb6dhFvoHJECKOF5VpkthhfC",
+              "m": "18Lj2a6UN6k_n_UzqnJyiaiLGpDzQQit8", "l": "1PIRf02XkrA2xAD3wEiKE2FaamZgSGTAr",
+              "x": "1dPtbgtGgq1Oa7k_LgH1GXPelg1IVeu0j"}
+
+#: per source: (decoder activation, credit line)
+SOURCES = {"dfine": ("relu", "Peterande/D-FINE {name} (Apache-2.0)"),
+           "deim": ("silu", "Intellindust-AI-Lab/DEIM {name} (Apache-2.0)")}
+
 DROPPED = ("decoder.anchors", "decoder.valid_mask")
 
 COCO_NAMES = [
@@ -59,7 +75,10 @@ def official_state_dict(path: Path) -> dict:
             break
     if not isinstance(blob, dict):
         raise SystemExit(f"{path} does not contain a state_dict")
-    return {k: v for k, v in blob.items() if hasattr(v, "shape") and k not in DROPPED}
+    # DEIM trains every batch norm (the original freezes l's and x's backbone
+    # ones): the same numbers, with a step counter the frozen ones lack
+    return {k: v for k, v in blob.items() if hasattr(v, "shape") and k not in DROPPED
+            and not k.endswith("num_batches_tracked")}
 
 
 def resolve_weights(args) -> Path:
@@ -70,6 +89,18 @@ def resolve_weights(args) -> Path:
             name = str(args.weights).rsplit("/", 1)[-1]
             return download(str(args.weights), cache_dir() / "official" / name)
         return Path(args.weights)
+    if args.source == "deim":
+        dest = cache_dir() / "official" / f"deim_dfine_{args.size}_coco.pth"
+        if not (dest.exists() and dest.stat().st_size):
+            try:
+                import gdown
+            except ImportError:
+                raise SystemExit("the DEIM checkpoints are on Google Drive: pip install gdown") \
+                    from None
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not gdown.download(id=DEIM_DRIVE[args.size], output=str(dest), quiet=False):
+                raise SystemExit(f"could not fetch DEIM's {args.size} checkpoint from Google Drive")
+        return dest
     name = OFFICIAL[args.size]
     return download(f"{RELEASE_URL}/{name}", cache_dir() / "official" / name)
 
@@ -83,7 +114,8 @@ def convert(args: argparse.Namespace) -> int:
     state = official_state_dict(weights)
     names = _read_names(args.names)
 
-    net = EDNet(args.size, num_classes=len(names), pretrained_backbone=False)
+    act, credit = SOURCES[args.source]
+    net = EDNet(args.size, num_classes=len(names), pretrained_backbone=False, decoder_act=act)
     missing, unexpected = net.load_state_dict(state, strict=not args.allow_partial)
     if missing or unexpected:
         print(f"warning: {len(missing)} missing, {len(unexpected)} unexpected tensors")
@@ -99,10 +131,11 @@ def convert(args: argparse.Namespace) -> int:
             "model": net.state_dict(),
             "variant": args.size,
             "num_classes": len(names),
+            "decoder_act": act,
             "names": dict(enumerate(names)),
             "epoch": -1,
             "imgsz": args.imgsz,
-            "source": f"Peterande/D-FINE {weights.name} (Apache-2.0)",
+            "source": credit.format(name=weights.name),
         },
         out,
     )
@@ -125,6 +158,8 @@ def _read_names(spec: str | None) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--size", default="s", choices=tuple(OFFICIAL))
+    parser.add_argument("--source", default="dfine", choices=tuple(SOURCES),
+                        help="whose COCO weights (deim: the same network, trained better)")
     parser.add_argument("--weights", help="official .pth path or URL (default: download it)")
     parser.add_argument("--out", default="ed-converted.pt")
     parser.add_argument("--names", help="labels.txt or names.json (default: COCO 80)")

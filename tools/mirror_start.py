@@ -16,7 +16,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-KEEP = ("model", "variant", "num_classes", "queries", "denoising", "names", "imgsz")
+KEEP = ("model", "variant", "num_classes", "decoder_act", "queries", "denoising", "names",
+        "imgsz")
 
 
 def build(weights: Path, out: Path, name: str) -> Path:

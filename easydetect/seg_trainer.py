@@ -321,7 +321,9 @@ def train_masks(data_yaml, out: str | Path, *, segmenter=None, init: str = "mobi
     from .utils.checkpoint import load_checkpoint
 
     seed_everything(seed)
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    from .devices import default_device
+
+    device = torch.device(device or default_device())
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     segmenter = segmenter or default_segmenter()

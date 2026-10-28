@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.12
+
+- Training on an Intel GPU (`device="xpu"`; Arc, and the Arc graphics of Core
+  Ultra laptops) through PyTorch's XPU build: chosen by default after an
+  NVIDIA card and before the CPU, in bfloat16 where the GPU has it. `device=0`
+  names the first GPU of whichever kind the PC has. Validation, keypoint and
+  outline training and distillation follow the same device. Asking for `xpu`
+  where this PyTorch cannot reach one says what to install.
+- `easydetect.devices`: which device training uses, its name and memory.
+
 ## 0.7.11
 
 - `train(freeze="auto")`: the backbone stays frozen when the start weights

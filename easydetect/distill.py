@@ -27,6 +27,7 @@ import torch
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 
+from .devices import bf16_supported
 from .nn.ops import box_cxcywh_to_xyxy
 
 EPS = 1e-7
@@ -89,8 +90,9 @@ class Distiller:
         device = imgs.device
         if next(self.teacher.parameters()).device != device:
             self.teacher.to(device)
-        with torch.amp.autocast(device.type, dtype=torch.bfloat16 if device.type == "cuda"
-                                else torch.float32, enabled=device.type == "cuda"):
+        reduced = device.type in ("cuda", "xpu") and bf16_supported(device)
+        with torch.amp.autocast(device.type, dtype=torch.bfloat16 if reduced
+                                else torch.float32, enabled=reduced):
             out = self.teacher(imgs)
         return out["pred_logits"].float(), out["pred_boxes"].float(), \
             self._seen["teacher"].float()

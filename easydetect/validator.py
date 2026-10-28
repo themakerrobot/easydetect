@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .data.dataset import DetDataset, worker_context
+from .devices import bf16_supported, default_device
 from .utils.ops import cxcywh2xyxy
 
 
@@ -126,7 +127,7 @@ def validate_torch(net, data_yaml, imgsz=640, batch=8, conf=0.0, device=None, wo
 
     On a GPU the network runs in bfloat16 (float16 where there is none) —
     scoring, not training, so the few thousandths it may move are noise."""
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device = torch.device(device or default_device())
     ds = DetDataset(data_yaml, "val", imgsz, augment=False)
     if len(ds) <= batch * 4:
         workers = 0     # starting workers takes longer than reading a few pictures
@@ -135,11 +136,12 @@ def validate_torch(net, data_yaml, imgsz=640, batch=8, conf=0.0, device=None, wo
                     multiprocessing_context=worker_context() if workers > 0 else None)
     net = net.to(device).eval()
     ev = Evaluator(net.num_classes)
-    half = (torch.bfloat16 if device.type == "cuda" and torch.cuda.is_bf16_supported()
-            else torch.float16)
+    half = torch.bfloat16 if bf16_supported(device) else torch.float16
+    # an Intel GPU scores in bfloat16 or not at all reduced
+    reduced = device.type == "cuda" or (device.type == "xpu" and half == torch.bfloat16)
     for imgs, targets in dl:
         imgs = DetDataset.as_float(imgs.to(device, non_blocking=True))
-        with torch.autocast(device.type, dtype=half, enabled=device.type == "cuda"):
+        with torch.autocast(device.type, dtype=half, enabled=reduced):
             out = net(imgs)
         logits, boxes = out["pred_logits"].float(), cxcywh2xyxy(out["pred_boxes"].float())
         for b in range(imgs.shape[0]):

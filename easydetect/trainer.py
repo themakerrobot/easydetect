@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader
 
 from .data import augment as aug
 from .data.dataset import DetDataset, load_data_yaml, worker_context
+from .devices import bf16_supported, default_device, device_name, is_gpu, seed_all, xpu_available
 from .utils.checkpoint import load_checkpoint
 from .utils.loss import DetectionLoss
 
@@ -31,7 +32,7 @@ def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    seed_all(seed)
 
 
 #: The learning rate a batch of 4 fine-tunes well at: ed from its COCO
@@ -71,6 +72,8 @@ def _rng_state() -> dict:
              "torch": torch.get_rng_state()}
     if torch.cuda.is_available():
         state["cuda"] = torch.cuda.get_rng_state_all()
+    if xpu_available():
+        state["xpu"] = torch.xpu.get_rng_state_all()
     return state
 
 
@@ -83,6 +86,8 @@ def _set_rng_state(state: dict) -> None:
         torch.set_rng_state(state["torch"])
         if "cuda" in state and torch.cuda.is_available():
             torch.cuda.set_rng_state_all(state["cuda"])
+        if "xpu" in state and xpu_available():
+            torch.xpu.set_rng_state_all(state["xpu"])
     except (KeyError, ValueError, RuntimeError, TypeError):
         pass  # another machine or version: the run continues, just not bit-identical
 
@@ -322,9 +327,17 @@ class Trainer:
         self.data_yaml = data
         self.cfg = load_data_yaml(data)
         self.epochs, self.imgsz, self.batch = epochs, imgsz, batch
-        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.device = torch.device(device or default_device())
+        if self.device.type == "xpu" and not xpu_available():
+            raise RuntimeError(
+                "device='xpu' (an Intel GPU), but this PyTorch cannot reach one. It needs "
+                "PyTorch's XPU build and the GPU driver: pip install torch torchvision "
+                "--index-url https://download.pytorch.org/whl/xpu")
         self.workers = workers
-        self.amp = amp and self.device.type == "cuda"
+        # mixed precision on a GPU; on an Intel GPU (XPU) in bfloat16 only,
+        # float32 where it has none, as no loss scaling is wanted there
+        self.amp = amp and is_gpu(self.device) and (
+            self.device.type == "cuda" or bf16_supported(self.device))
         if self.device.type == "cuda":
             # the input size is fixed (or one of a few, multi-scale): let cuDNN
             # time its convolution algorithms once and keep the fastest; and
@@ -334,7 +347,7 @@ class Trainer:
             torch.backends.cudnn.allow_tf32 = True
         # bfloat16 where the GPU has it (RTX 30 and later): float32's range, so
         # no loss scaling and no overflow; float16 with a GradScaler otherwise
-        self.amp_dtype = (torch.bfloat16 if self.amp and torch.cuda.is_bf16_supported()
+        self.amp_dtype = (torch.bfloat16 if self.amp and bf16_supported(self.device)
                           else torch.float16)
         self.patience = patience
         self.start_epoch = 0
@@ -503,12 +516,13 @@ class Trainer:
             "augment": self._augment_lines(),
             "data": {"train": _split_counts(ds, self.net.num_classes)},
             "device": str(self.device),
-            "gpu": torch.cuda.get_device_name(self.device) if self.device.type == "cuda" else None,
+            "gpu": device_name(self.device),
             "cpu": platform.processor() or platform.machine(),
             "versions": {
                 "easydetect": __version__,
                 "torch": torch.__version__,
                 "cuda": torch.version.cuda if self.device.type == "cuda" else None,
+                "xpu": getattr(torch.version, "xpu", None) if self.device.type == "xpu" else None,
                 "python": sys.version.split()[0],
             },
             "started": old.get("started") or time.strftime("%Y-%m-%dT%H:%M:%S"),

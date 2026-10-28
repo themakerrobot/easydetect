@@ -13,7 +13,7 @@ Steps (each in a process of its own, its output in ``<root>/logs/<step>.log``):
 * ``coco-<v><s>``   the COCO checkpoints fine-tuned at 320, 416 and 640 px
                     (ed-n and ed-s), so a small input does not lose most
                     of what the 640 px weights know
-* ``rf100-seed<n>`` the 수업용 training on 26 Roboflow 100 datasets against
+* ``rf100-seed<n>`` (on demand: --only) the 수업용 training on 26 RF100 sets against
                     YOLO26n (tools/rf100.py)
 * ``coco-score``    every COCO model, the original and the fine-tuned, as
                     OpenVINO IR at its size (and with 100 queries) scored on all
@@ -124,14 +124,6 @@ FROM320_LR2X = [(name.replace("-from320-", "-from320-lr2x-"),
                  [a.replace("-from320-", "-from320-lr2x-") for a in args]
                  + ["--lr0", "0.00028"]) for name, args in FROM320]
 
-#: the 320 start with the classes COCO does not know started from the mean of
-#: its class rows: twice the rate made one medical-pills seed slow (0.708,
-#: the other two 0.767); the mean rows kept all three seeds within 0.008 from
-#: the 640 start
-FROM320_MEANROWS = [(name.replace("-from320-", "-from320-meanrows-"),
-                     [a.replace("-from320-", "-from320-meanrows-") for a in args]
-                     + ["--new-rows", "mean"]) for name, args in FROM320]
-
 #: the classroom runs with twice the learning rate: with the backbone frozen,
 #: the batch rule's 1.4e-4 left some seeds slow to start on medical-pills
 #: (0.665 against 0.755; twice the rate: 0.755 on that seed, CPU, 70 epochs)
@@ -197,11 +189,16 @@ def plan() -> list[tuple[str, list[str], list[str]]]:
     steps += [(name, args, []) for name, args in LR2X]
     steps += [(name, args, []) for name, args in MEANROWS]
     steps += [(name, args, ["coco-n320-q100"]) for name, args in FROM320_LR2X]
-    steps += [(name, args, ["coco-n320-q100"]) for name, args in FROM320_MEANROWS]
-    steps += RF100
-    steps += DEIM
     steps += [(name, args, []) for name, args in BENCHES[4:]]
     return steps
+
+
+#: run only when named (--only): set aside for later, not part of a plain run
+ON_DEMAND = RF100 + DEIM
+
+
+def known_steps() -> list[tuple[str, list[str], list[str]]]:
+    return plan() + ON_DEMAND
 
 
 # ---------------------------------------------------------------- the steps
@@ -515,9 +512,11 @@ def run_step(root: Path, name: str, what: list[str], args) -> bool:
 def report(root: Path) -> None:
     lines = [f"# long_run report ({time.strftime('%Y-%m-%d %H:%M')})", ""]
     state = root / "state"
-    for name, _, _ in plan():
+    on_demand = {n for n, _, _ in ON_DEMAND}
+    for name, _, _ in known_steps():
         mark = ("done" if (state / f"{name}.done").exists() else
-                "FAILED" if (state / f"{name}.failed").exists() else "waiting")
+                "FAILED" if (state / f"{name}.failed").exists() else
+                "on demand (--only)" if name in on_demand else "waiting")
         lines.append(f"- {name}: {mark}")
     lines += _repeats(root)
     for md in sorted((root / "bench").glob("*/results.md")):
@@ -622,7 +621,10 @@ def main():
 
     state = root / "state"
     state.mkdir(exist_ok=True)
-    steps = [s for s in plan() if not args.only or s[0] in args.only]
+    steps = ([s for s in known_steps() if s[0] in args.only] if args.only else plan())
+    unknown = sorted(set(args.only or ()) - {s[0] for s in known_steps()})
+    if unknown:
+        raise SystemExit(f"no such step: {', '.join(unknown)}")
     for rnd in range(2):                            # a second pass for what failed
         for name, what, needs in steps:
             done, failed = state / f"{name}.done", state / f"{name}.failed"

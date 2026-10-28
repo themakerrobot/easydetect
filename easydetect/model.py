@@ -57,11 +57,17 @@ def increment_path(path: str | Path) -> Path:
 
 
 def _torch_device(device: Any) -> str | None:
-    """``0`` -> ``"cuda:0"``; ``"cpu"``/``"cuda"``/``None`` pass through."""
+    """``0`` -> ``"cuda:0"`` (``"xpu:0"`` on a PC whose GPU is an Intel one);
+    ``"cpu"``/``"cuda"``/``"xpu"``/``None`` pass through."""
     if device is None or device == "":
         return None
     if isinstance(device, int) or (isinstance(device, str) and device.isdigit()):
-        return f"cuda:{int(device)}"
+        import torch
+
+        from .devices import xpu_available
+
+        kind = "xpu" if not torch.cuda.is_available() and xpu_available() else "cuda"
+        return f"{kind}:{int(device)}"
     return str(device)
 
 
@@ -591,9 +597,9 @@ class Detector:
             # Windows starts loader workers by importing the caller's script
             # again: without an `if __name__ == "__main__":` guard they die.
             # On a CPU the loading is a few percent of a step anyway.
-            import torch
+            from .devices import default_device
 
-            dev = _torch_device(device) or ("cuda" if torch.cuda.is_available() else "cpu")
+            dev = _torch_device(device) or default_device()
             workers = 0 if os.name == "nt" and dev.startswith("cpu") else 4
         if val and not cfg.get("val"):
             print("[easydetect] no val split in the data.yaml: training without "

@@ -193,7 +193,9 @@ def train_keypoints(train_ds, val_ds, out: str | Path, *, size: str = "s", init:
     from .trainer import ModelEMA, _one_thread_per_worker, seed_everything
 
     seed_everything(seed)
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    from .devices import bf16_supported, default_device
+
+    device = torch.device(device or default_device())
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     spec = train_ds.spec
@@ -236,7 +238,7 @@ def train_keypoints(train_ds, val_ds, out: str | Path, *, size: str = "s", init:
             "augment": DESCRIPTION, "keypoints": spec.to_dict(), "device": str(device)},
             indent=2))
     ema.module.to(device)
-    amp = device.type == "cuda" and amp
+    amp = amp and device.type in ("cuda", "xpu") and bf16_supported(device)
     log(f"{len(train_ds)} to train on, {len(val_ds)} to score, {len(spec)} keypoints; "
         f"{steps_per_epoch} steps an epoch on {device}{' (bf16)' if amp else ''}")
 

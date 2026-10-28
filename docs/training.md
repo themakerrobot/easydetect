@@ -68,8 +68,12 @@ Other optimizer settings pass through `train()` as they are:
 the original per-size ratio), `weight_decay=1e-4`, `warmup_epochs=1`, plus
 `seed` and `amp`.
 
-`device=0` uses the first CUDA GPU, `device="cpu"` forces CPU, and leaving it
-out picks a GPU when there is one. CPU training is slow but real — at 320 px,
+`device=0` uses the first GPU, `device="cpu"` forces CPU, and leaving it out
+picks a GPU when there is one: an NVIDIA card (CUDA) first, then an Intel GPU
+(`device="xpu"`: Arc, or the Arc graphics of a Core Ultra laptop). An Intel
+GPU needs PyTorch's XPU build and its current driver —
+`pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu`
+— and trains in bfloat16 where it has that, float32 otherwise. CPU training is slow but real — at 320 px,
 ed-s manages an epoch of 240 images in a few minutes on 4 cores — and
 fine-tuning from the COCO weights is what makes a short run enough.
 

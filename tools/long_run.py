@@ -13,6 +13,8 @@ Steps (each in a process of its own, its output in ``<root>/logs/<step>.log``):
 * ``coco-<v><s>``   the COCO checkpoints fine-tuned at 320, 416 and 640 px
                     (ed-n and ed-s), so a small input does not lose most
                     of what the 640 px weights know
+* ``rf100-seed<n>`` the 수업용 training on 26 Roboflow 100 datasets against
+                    YOLO26n (tools/rf100.py)
 * ``coco-score``    every COCO model, the original and the fine-tuned, as
                     OpenVINO IR at its size (and with 100 queries) scored on all
                     5000 val pictures; YOLO11/YOLO26 ONNX beside them; the IR
@@ -145,6 +147,11 @@ MEANROWS = [bench(f"bench-n320-classroom-70ep-meanrows{lr}-seed{_seed}", *N320, 
                   *(("--lr0", "0.00028") if lr else ()), "--seed", str(_seed))
             for lr in ("", "-lr2x") for _seed in (0, 1, 2)]
 
+#: the 수업용 training (0.7.11: freeze and new class rows decided by what COCO
+#: knows, 800 or 1,000 steps) on 26 Roboflow 100 datasets across seven
+#: domains, against YOLO26n: whether the defaults set on three small sets hold
+RF100 = [(f"rf100-seed{_seed}", ["rf100", str(_seed)], []) for _seed in (0, 1, 2)]
+
 #: ed-n at 320 taught by ed-s at 320 (both COCO fine-tunes, 100 queries),
 #: and the same epochs without the teacher: what the teaching adds, apart from
 #: training longer. Then every candidate for the Pi, scored the way it runs there.
@@ -176,6 +183,7 @@ def plan() -> list[tuple[str, list[str], list[str]]]:
     steps += [(name, args, []) for name, args in MEANROWS]
     steps += [(name, args, ["coco-n320-q100"]) for name, args in FROM320_LR2X]
     steps += [(name, args, ["coco-n320-q100"]) for name, args in FROM320_MEANROWS]
+    steps += RF100
     steps += [(name, args, []) for name, args in BENCHES[4:]]
     return steps
 
@@ -229,6 +237,13 @@ def step_bench(root: Path, args, name: str, *flags: str) -> None:
     _run([PY, "-u", str(HERE / "bench_finetune.py"), "--root", str(Path(args.bench_root)
          .expanduser()), "--out", str(out), "--workers", str(args.workers), *flags],
          cwd=root / "bench")
+
+
+def step_rf100(root: Path, args, seed: str) -> None:
+    data = Path(args.bench_root).expanduser().parent / "rf100"
+    _run([PY, "-u", str(HERE / "rf100.py"), "--root", str(data), "--out",
+          str(root / "bench" / f"rf100-seed{seed}"), "--seed", seed,
+          "--workers", str(args.workers)], cwd=root / "bench")
 
 
 def step_coco_train(root: Path, args, v: str, size: str, queries: str | None = None) -> None:
@@ -546,6 +561,8 @@ def main():
             step_speed(root, args)
         elif kind == "speed-s":
             step_speed_s(root, args)
+        elif kind == "rf100":
+            step_rf100(root, args, *rest)
         return
 
     if args.status:

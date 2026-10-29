@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.14
+
+- Training on an outline dataset with no MobileSAM to be had (offline, not in
+  the cache) keeps the detector it trained instead of failing the run: the
+  mask stage is skipped, `segment/skipped` in the run says why, and the
+  message is printed.
+
 ## 0.7.13
 
 - The decoder's activation is a setting of the network (`EDNet(...,

@@ -127,6 +127,25 @@ def test_training_on_a_polygon_dataset_gives_task_segment_its_decoder(tmp_path, 
     assert used == [beside] and r.masks is not None and len(r.masks) == len(r.boxes)
 
 
+@needs_torch
+def test_without_mobile_sam_the_detector_is_kept_and_the_mask_stage_says_why(tmp_path,
+                                                                             monkeypatch):
+    """Offline with no MobileSAM in the cache: the boxes trained are not thrown away."""
+    from easydetect import Detector, downloads
+    from easydetect.errors import ModelNotFoundError
+
+    def missing():
+        raise ModelNotFoundError("the segmenter (mobile_sam/) is not on the mirror yet")
+
+    monkeypatch.setattr(downloads, "download_segmenter", missing)
+    data = _toy(tmp_path / "data", n_train=4, n_val=2)
+    best = Detector("ed-n", pretrained=False, verbose=False).train(
+        data=str(data), epochs=1, imgsz=64, batch=4, workers=0, device="cpu",
+        project=str(tmp_path / "runs"), amp=False, seg_epochs=1, seg_batch=4)
+    assert best.exists() and not (best.parent / "mask_decoder.onnx").exists()
+    assert "mobile_sam" in (best.parent.parent / "segment" / "skipped").read_text()
+
+
 # -- the runtime: low-res logits, scaled up around each box ----------------------------
 
 

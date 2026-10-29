@@ -690,8 +690,17 @@ class Detector:
             from .seg_trainer import has_polygons
 
             if has_polygons(data):
-                self._train_masks(data, best, device=device, seed=seed, epochs=seg_epochs,
-                                  batch=seg_batch, lr=seg_lr, on_progress=on_progress)
+                try:
+                    self._train_masks(data, best, device=device, seed=seed, epochs=seg_epochs,
+                                      batch=seg_batch, lr=seg_lr, on_progress=on_progress)
+                except ModelNotFoundError as exc:
+                    # MobileSAM is missing (offline, no copy in the cache): the
+                    # detector just trained is still good, so it is kept, and
+                    # segment/skipped says why the outlines were not
+                    skipped = best.parent.parent / "segment" / "skipped"
+                    skipped.parent.mkdir(parents=True, exist_ok=True)
+                    skipped.write_text(str(exc), encoding="utf-8")
+                    print(f"[easydetect] mask stage skipped: {exc}", flush=True)
         return best
 
     def _train_masks(self, data, best: Path, *, device, seed, epochs, batch, lr,

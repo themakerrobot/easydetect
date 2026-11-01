@@ -639,11 +639,7 @@ class Detector:
         if self.new_rows and origin is not None:
             origin["new_rows"] = self.new_rows
         if freeze == "auto":
-            # the start's backbone already sees what COCO sees: kept when it
-            # knows one of the classes, trained when it knows none (pills,
-            # signatures). Classroom runs, three seeds: medical-pills 0.757 →
-            # 0.778 and signature 0.976 → 0.983 trained, african-wildlife
-            # (elephant, zebra) 0.735 kept against 0.667 trained.
+            # backbone kept when the start knows one of the classes, trained otherwise
             freeze = "backbone" if self.class_rows else None
             if self.verbose:
                 print(f"[easydetect] freeze=auto: {'backbone' if freeze else 'nothing'} frozen")
@@ -694,9 +690,7 @@ class Detector:
                     self._train_masks(data, best, device=device, seed=seed, epochs=seg_epochs,
                                       batch=seg_batch, lr=seg_lr, on_progress=on_progress)
                 except ModelNotFoundError as exc:
-                    # MobileSAM is missing (offline, no copy in the cache): the
-                    # detector just trained is still good, so it is kept, and
-                    # segment/skipped says why the outlines were not
+                    # no MobileSAM: keep the detector, skip the masks
                     skipped = best.parent.parent / "segment" / "skipped"
                     skipped.parent.mkdir(parents=True, exist_ok=True)
                     skipped.write_text(str(exc), encoding="utf-8")
@@ -854,12 +848,9 @@ class Detector:
         self.class_rows = {str((names or {})[j]): source[i] for j, i in known.items()}
         if known:
             copy_class_rows(fresh, old, self.net.num_classes, known)
-        # the classes it does not know: fresh rows, or the mean of its class
-        # rows when none of the dataset's classes is known. In the classroom
-        # runs the mean steadied a set of new classes (medical-pills 0.756-0.758,
-        # fresh rows one seed at 0.657) and spoiled new classes beside known
-        # ones (african-wildlife 0.615, fresh 0.735). EASYDETECT_NEW_ROWS=mean
-        # or =fresh decides it instead.
+        # the classes it does not know: the mean of its class rows when none of
+        # the dataset's classes is known, fresh rows otherwise
+        # (EASYDETECT_NEW_ROWS=mean|fresh overrides)
         new = [j for j in range(nc) if j not in known]
         mode = os.environ.get("EASYDETECT_NEW_ROWS", "auto")
         mean = bool(new and source) and (mode == "mean" or (mode == "auto" and not known))

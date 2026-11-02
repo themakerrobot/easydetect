@@ -26,7 +26,8 @@ train and test in a browser. Apache-2.0 from the code to the model you export.
   scores 48.5 COCO mAP with 10M parameters.
 * **Runs on the machine you have.** OpenVINO runs it on a CPU, an Intel GPU or
   an Intel NPU; ONNX Runtime on any CPU, a Raspberry Pi included. No CUDA
-  needed to deploy. A GPU makes training quick.
+  needed to deploy. A GPU makes training quick: an NVIDIA card, or an Intel
+  GPU with PyTorch's XPU build.
 * **No NMS to tune.** ed is trained to give each object one box. The odd
   second box on the same object — one vehicle as both truck and car — is
   dropped by a fixed overlap filter (IoU 0.7, any class), so there is no
@@ -243,12 +244,14 @@ model runs as fast as the original of the same size and queries):
 * **Against YOLO at the same size:** ed-n is ahead of both YOLO n models at
   every size; ed-s matches YOLO26s at 320 and is within a point at 416.
 * **100 queries cost almost nothing** in accuracy (0.323 → 0.322 at 320) and
-  save a third of the time on the Pi. YOLO11s at 320 through ONNX Runtime,
-  as the Pibo robot runs it, took 218 ms on the same Pi.
+  save a third of the time on the Pi. Through ONNX Runtime, as the Pibo
+  robot runs it, YOLO11s at 320 takes 300 ms on the same Pi and ed-s at 320
+  with 100 queries 407 ms; Pibo runs ed-s for its accuracy.
 * The fine-tuned 320 and 416 columns were trained with 100 queries; 640
   with all 300 (it did not beat the original either way).
-* These fine-tuned checkpoints are not on the mirror yet; `tools/long_run.py`
-  makes them (about a day on one RTX 5090).
+* `ed-n-320.pt` and `ed-s-320.pt` are on the mirror: a run at 320 px with at
+  most 100 queries (`train(imgsz=320, queries=100)`) starts from them. The 416
+  ones are not; `tools/long_run.py` makes them (about a day on one RTX 5090).
 * Our evaluator puts ed-n at 640 at 0.416 where its authors report 42.8: one
   class a box and 100 boxes a picture count fewer boxes than COCO's own tool.
 
@@ -278,9 +281,18 @@ epochs beside it):
 | signature | 0.885 | 0.938 | 0.960 | **0.976** |
 | medical-pills | 0.554 | 0.693 | 0.746 | **0.780** |
 
-So the lab's classroom preset now picks the epochs from the dataset — about
+So the lab's classroom preset picks the epochs from the dataset — about
 1,000 steps, 35 epochs for 300 pictures up to 100 for a few dozen — which
-keeps a laptop run near the same 10–15 minutes.
+keeps a laptop run near the same 10–15 minutes. It starts from `ed-n-320.pt`
+with `freeze="auto"`: the backbone stays frozen when COCO knows one of the
+classes and trains (800 steps) when it knows none. Three seeds each, YOLO26n
+with the same epochs:
+
+| dataset | YOLO26n | ed-n, classroom |
+| --- | --- | --- |
+| african-wildlife, 100 at random | 0.668 | **0.733** |
+| signature | 0.971 | **0.979** |
+| medical-pills | 0.770 | **0.776** |
 
 ## Command line
 
@@ -339,7 +351,8 @@ COCO 가중치는 이 크기에서 성능이 크게 떨어집니다(ed-n 320: 0.
 COCO를 다시 학습하면 0.322로 올라 같은 크기의 YOLO11n·YOLO26n보다 높고, 라즈베리파이
 4B에서 쿼리 100개로 122밀리초입니다. 사진이 적은 데이터는 에폭을 늘릴수록 좋아져서
 (100장: 30에폭 0.628 → 100에폭 0.751), easydetect lab의 수업용 설정은 데이터 크기에
-맞춰 에폭을 정합니다. 자세한 표는 위의 "Small inputs and small computers"와
+맞춰 에폭을 정하고, COCO에 있는 물체면 백본을 고정합니다(`freeze="auto"`). 이 설정으로
+작은 데이터셋 3개 모두 YOLO26n보다 높습니다. 학습은 NVIDIA GPU나 인텔 GPU(XPU)에서도 됩니다. 자세한 표는 위의 "Small inputs and small computers"와
 "Small datasets" 절에 있습니다.
 
 ## Credits

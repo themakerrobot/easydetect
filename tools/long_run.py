@@ -516,6 +516,7 @@ def report(root: Path) -> None:
     for name, _, _ in known_steps():
         mark = ("done" if (state / f"{name}.done").exists() else
                 "FAILED" if (state / f"{name}.failed").exists() else
+                "started" if (root / "logs" / f"{name}.log").exists() else
                 "on demand (--only)" if name in on_demand else "waiting")
         lines.append(f"- {name}: {mark}")
     lines += _repeats(root)

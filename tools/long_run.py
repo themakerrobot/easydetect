@@ -153,6 +153,11 @@ for _v, _size in (("s", 320), ("s", 288), ("s", 256), ("n", 320)):
               ["coco-data", "deim-weights"]),
              (f"score-{_v}{_size}-deim", ["score-forms", _run, str(_size)],
               [f"coco-{_v}{_size}-deim"])]
+#: ed-s at 320 with all 300 queries
+DEIM += [("coco-s320q300-deim", ["coco-train", "s", "320", "", "deim/ed-s-deim.pt", "-deim"],
+          ["coco-data", "deim-weights"]),
+         ("score-s320q300-deim", ["score-forms", "ed-s-320-deim", "320"],
+          ["coco-s320q300-deim"])]
 
 #: the 수업용 training (0.7.11: freeze and new class rows decided by what COCO
 #: knows, 800 or 1,000 steps) on 26 Roboflow 100 datasets across seven

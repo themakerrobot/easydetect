@@ -18,11 +18,11 @@ checkpoints may carry that dataset's terms and are not used. This package's
 network matches the reference module for module, so they load with
 `strict=True` — no remapping and no re-training.
 
-Beside them the mirror holds what easydetect trained itself, also Apache-2.0:
-`ed-n/ed-n-320.pt` and `ed-s/ed-s-320.pt`, the COCO checkpoints fine-tuned at
-320 px with 100 queries (a run at that size with at most 100 queries starts
-from them), `pose/pose-s.onnx` for `task="pose"`, and MobileSAM's
-`mobile_sam/encoder.onnx` and `decoder.onnx` for `task="segment"`.
+Beside them, all Apache-2.0: `ed-n/ed-n-320.pt` and `ed-s/ed-s-320.pt`, the
+COCO checkpoints fine-tuned here at 320 px with 100 queries (a run at that
+size with at most 100 queries starts from them); `pose/pose-s.onnx`, trained
+here, for `task="pose"`; and MobileSAM's `mobile_sam/encoder.onnx` and
+`decoder.onnx` for `task="segment"`.
 
 ## Building and uploading the mirror
 

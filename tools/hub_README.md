@@ -111,8 +111,8 @@ and labels images, trains, shows the numbers, and writes the upload folder for
 ## Layout
 
 ```
-ed-n/   ed-n.xml  ed-n.bin  ed-n.pt  labels.txt
-ed-s/   …
+ed-n/   ed-n.xml  ed-n.bin  ed-n.pt  ed-n-320.pt  labels.txt
+ed-s/   …         ed-s-320.pt
 ed-m/   …
 ed-l/   …
 ed-x/   …
@@ -121,6 +121,11 @@ pose/        pose-s.onnx  pose-m.onnx  pose-l.onnx the keypoint models (task="po
 models/
   <name>/   best.xml  best.bin  labels.txt  README.md
 ```
+
+`ed-n-320.pt` and `ed-s-320.pt` are the COCO checkpoints fine-tuned at 320 px
+with 100 queries (Apache-2.0): a training run at 320 px with at most 100
+queries starts from them. COCO val2017 mAP50-95 at 320: ed-n 0.322, ed-s 0.381
+(the 640 px weights at 320: 0.100, 0.239).
 
 `mobile_sam/` is MobileSAM (Apache-2.0,
 [ChaoningZhang/MobileSAM](https://github.com/ChaoningZhang/MobileSAM)) exported

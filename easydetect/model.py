@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch  # noqa: F401
 
 from easydetect.utils.imageio import cv2_path, imwrite  # any path, Hangul included
 

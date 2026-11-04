@@ -1,10 +1,11 @@
 """Which device training picks: NVIDIA (CUDA), Intel (XPU) or the CPU."""
 
 import pytest
-import torch
 
-from easydetect import devices
-from easydetect.model import _torch_device
+torch = pytest.importorskip("torch")
+
+from easydetect import devices  # noqa: E402
+from easydetect.model import _torch_device  # noqa: E402
 
 
 def _machine(monkeypatch, cuda: bool, xpu: bool):

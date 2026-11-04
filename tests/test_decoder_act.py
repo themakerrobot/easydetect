@@ -2,12 +2,13 @@
 COCO weights), SiLU (DEIM's, the same network trained a better way)."""
 
 import pytest
-import torch
-from torch import nn
 
-from easydetect import Detector
-from easydetect.nn import EDNet
-from easydetect.nn.decoder import MLP, TransformerDecoderLayer
+torch = pytest.importorskip("torch")
+from torch import nn  # noqa: E402
+
+from easydetect import Detector  # noqa: E402
+from easydetect.nn import EDNet  # noqa: E402
+from easydetect.nn.decoder import MLP, TransformerDecoderLayer  # noqa: E402
 
 
 def _acts(net):

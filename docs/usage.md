@@ -4,6 +4,31 @@ Everything `Detector(...)` can be pointed at, and everything a prediction gives
 back. See also [training](training.md), [weights](weights.md),
 [performance](performance.md).
 
+## Install: inference needs no PyTorch
+
+```bash
+pip install easydetect              # inference: numpy, OpenCV, OpenVINO, ONNX Runtime
+pip install "easydetect[train]"     # + training, validation, export (PyTorch)
+```
+
+Without PyTorch, on OpenVINO (`.xml` or `.onnx`) and on ONNX Runtime (`.onnx`):
+
+| What | Where it runs |
+| --- | --- |
+| `import easydetect` | everywhere |
+| `Detector("model.onnx" or "model.xml", backend=...)` and calling it, `task="detect"` | a PC, a Raspberry Pi |
+| `task="pose"` with `pose_model`, `easydetect.pose.KeypointEstimator` | keypoints |
+| `task="segment"`, `easydetect.segment.BoxSegmenter`, `default_segmenter` (MobileSAM `.onnx`) | masks |
+| `easydetect.predictor.onnx_metadata`, `installed` | the names and score threshold inside an `.onnx` |
+| `easydetect.plotting` (`draw_boxes`, `draw_masks`, `draw_keypoints`) | drawing |
+| `Results`, `Boxes`, keypoints, masks | the results |
+
+These need PyTorch and say so (`TorchRequiredError`, with the command to run):
+`train`, `val`, `export`, loading a `.pt`, distillation and the training-only
+modules (`easydetect.trainer`, `validator`, `exporter`, `distill`, `nn`,
+`data.dataset`). The CI job "inference without torch" installs easydetect with
+no PyTorch and runs the table above on both runtimes.
+
 ## Predicting
 
 Anything you can point it at:

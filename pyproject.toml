@@ -52,6 +52,7 @@ dev = [
     "httpx>=0.24",
     "ruff>=0.5",
     "pillow>=9.0",
+    "onnx>=1.14",   # builds the stand-in models of tests/test_without_torch.py
 ]
 
 [project.urls]

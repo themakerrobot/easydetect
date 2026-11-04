@@ -58,6 +58,7 @@ def test_a_keypoint_line_is_not_read_as_a_polygon():
     assert two[:, 2].tolist() == [2, 0, 2]  # (0, 0) is the unlabelled one
 
 
+@needs_torch
 def test_a_spec_reads_from_a_data_yaml_and_round_trips(tmp_path):
     from easydetect.data.dataset import load_data_yaml
 
@@ -70,6 +71,7 @@ def test_a_spec_reads_from_a_data_yaml_and_round_trips(tmp_path):
         KeypointSpec(NAMES, flip=[0, 0, 1, 2])
 
 
+@needs_torch
 def test_the_dataset_crops_carry_the_corners(tmp_path):
     from easydetect.data.keypoints import KeypointDataset
     from easydetect.pose import apply, invert

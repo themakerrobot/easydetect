@@ -65,6 +65,7 @@ def stub_sam(tmp_path_factory):
     return folder
 
 
+@needs_torch
 def test_a_polygon_dataset_is_told_from_boxes_and_keypoints(tmp_path, dataset):
     from easydetect.seg_trainer import has_polygons, read_polygons
 
@@ -238,6 +239,7 @@ def test_the_encoder_input_is_shrunk_without_aliasing():
 # -- fine-tuning: both ways of picking a mask, jittered boxes, mapped embeddings ------
 
 
+@needs_torch
 def test_jittered_boxes_are_gaussian_and_a_share_stay_exact(tmp_path, monkeypatch):
     from easydetect import seg_trainer
     from easydetect.seg_trainer import BOX_JITTER, jitter_box
@@ -277,6 +279,7 @@ def test_all_four_masks_learn():
     assert masks.grad[:, 0].abs().sum() > 0 and ious.grad[:, 0].abs().sum() > 0
 
 
+@needs_torch
 def test_the_mask_choice_goes_by_jittered_boxes():
     from easydetect.seg_trainer import choose
 

@@ -14,3 +14,8 @@ class ModelNotFoundError(EasyDetectError, FileNotFoundError):
 
 class DownloadError(EasyDetectError, OSError):
     """A weight download failed."""
+
+
+class TorchRequiredError(EasyDetectError, ImportError):
+    """Training, validating, exporting or loading a .pt without PyTorch installed:
+    inference needs only ``pip install easydetect``, these ``easydetect[train]``."""

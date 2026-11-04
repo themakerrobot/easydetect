@@ -11,8 +11,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from easydetect import Detector
-from easydetect.trainer import Trainer
+pytest.importorskip("torch")
+
+from easydetect import Detector  # noqa: E402
+from easydetect.trainer import Trainer  # noqa: E402
 
 from .conftest import needs_torch
 

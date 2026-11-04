@@ -26,7 +26,7 @@ from __future__ import annotations
 
 __version__ = "0.7.14"
 
-from .errors import DownloadError, EasyDetectError, ModelNotFoundError
+from .errors import DownloadError, EasyDetectError, ModelNotFoundError, TorchRequiredError
 from .metrics import BoxMetrics, DetMetrics
 from .model import Detector
 from .results import Boxes, Results
@@ -40,5 +40,6 @@ __all__ = [
     "EasyDetectError",
     "ModelNotFoundError",
     "DownloadError",
+    "TorchRequiredError",
     "__version__",
 ]

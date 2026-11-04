@@ -1,10 +1,8 @@
 """Classes the COCO weights already know keep their head rows when re-headed."""
 
-import torch
-
 from easydetect.class_names import match_classes
-from easydetect.model import copy_class_rows
-from easydetect.nn import EDNet
+
+from .conftest import needs_torch
 
 COCO = {0: "person", 2: "car", 39: "bottle", 41: "cup", 47: "apple", 67: "cell phone"}
 
@@ -19,7 +17,13 @@ def test_each_known_class_lends_its_rows_once():
     assert match_classes(COCO, {0: "apple", 1: "사과"}) == {0: 47}
 
 
+@needs_torch
 def test_rows_are_copied_and_the_padding_row_stays_empty():
+    import torch
+
+    from easydetect.model import copy_class_rows
+    from easydetect.nn import EDNet
+
     old = EDNet("n", 80, pretrained_backbone=False)
     new = EDNet("n", 3, pretrained_backbone=False)
     changed = copy_class_rows(new, old.state_dict(), 80, {1: 47})

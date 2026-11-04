@@ -28,6 +28,48 @@ jobs:
       - name: Test
         run: pytest -q
 
+  # what edge-lab (OpenVINO) and the robot (ONNX Runtime, pinned numpy and
+  # onnxruntime) run: no torch installed, and nothing on the way may import it
+  no-torch:
+    name: inference without torch (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: latest
+            python-version: "3.12"
+            pins: ""
+          - name: robot pins
+            python-version: "3.11"
+            pins: "numpy==1.26.4 onnxruntime==1.20.1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install (no [train], no torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" ${{ matrix.pins }}
+      - name: Torch is not installed
+        run: >-
+          python -c "import importlib.util as u, sys;
+          sys.exit(any(u.find_spec(m) is not None for m in ('torch', 'torchvision')))"
+      - name: import easydetect pulls in no torch
+        run: >-
+          python -c "import sys, easydetect;
+          assert not {'torch', 'torchvision'} & set(sys.modules), sorted(sys.modules)"
+      - name: Inference on both runtimes, and what needs torch says so
+        shell: bash
+        run: |
+          pytest -q -rs tests/test_without_torch.py | tee without-torch.txt
+          grep -Eq "[1-9][0-9]* passed" without-torch.txt
+          if grep -q "skipped" without-torch.txt; then exit 1; fi
+      - name: Everything else (torch tests skip)
+        run: pytest -q
+
   build:
     runs-on: ubuntu-latest
     steps:

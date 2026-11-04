@@ -12,6 +12,8 @@ import importlib
 
 import pytest
 
+from .conftest import needs_torch
+
 LAB_IMPORTS = {
     "easydetect": ["Detector", "__version__"],
     "easydetect.data.dataset": ["DetDataset", "list_images", "load_data_yaml"],
@@ -24,7 +26,12 @@ LAB_IMPORTS = {
 }
 
 
-@pytest.mark.parametrize("module", sorted(LAB_IMPORTS))
+#: what the lab trains with: there only with the [train] extra
+NEEDS_TORCH = {"easydetect.data.dataset", "easydetect.validator"}
+
+
+@pytest.mark.parametrize("module", [pytest.param(m, marks=needs_torch) if m in NEEDS_TORCH
+                                    else m for m in sorted(LAB_IMPORTS)])
 def test_the_lab_finds_what_it_imports(module):
     mod = importlib.import_module(module)
     missing = [name for name in LAB_IMPORTS[module] if not hasattr(mod, name)]

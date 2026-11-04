@@ -53,12 +53,15 @@ def test_run_directories_increment_instead_of_overwriting(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("given", "expected"), [(0, "cuda:0"), ("0", "cuda:0"), ("cpu", "cpu"), (None, None)]
+    ("given", "expected"), [pytest.param(0, "cuda:0", marks=needs_torch),
+                            pytest.param("0", "cuda:0", marks=needs_torch),
+                            ("cpu", "cpu"), (None, None)]
 )
 def test_device_shorthands_map_onto_torch_devices(given, expected):
     assert _torch_device(given) == expected
 
 
+@needs_torch
 def test_val_without_weights_explains_how_to_get_them():
     model = Detector("ed-s")
     model.model_name = "not-a-mirror-name"  # simulate a local model with no torch side

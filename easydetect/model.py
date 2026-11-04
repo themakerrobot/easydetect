@@ -31,7 +31,7 @@ import numpy as np
 from easydetect.utils.imageio import cv2_path, imwrite  # any path, Hangul included
 
 from . import downloads
-from .errors import ModelNotFoundError
+from .errors import ModelNotFoundError, TorchRequiredError
 from .metrics import DetMetrics
 from .results import Results
 from .utils.checkpoint import load_checkpoint
@@ -40,7 +40,7 @@ from .utils.checkpoint import load_checkpoint
 TASKS = ("detect", "segment", "pose")
 
 _TORCH_HINT = (
-    "this needs the training extra: pip install 'easydetect[train]' "
+    'this needs PyTorch, which inference does not: pip install "easydetect[train]" '
     "(torch, torchvision, scipy, onnx)"
 )
 
@@ -1188,7 +1188,7 @@ def _import_torch():
 
         return torch
     except ImportError as exc:  # pragma: no cover - depends on the install extra
-        raise ImportError(_TORCH_HINT) from exc
+        raise TorchRequiredError(f"{_TORCH_HINT}; {exc}") from exc
 
 
 __all__ = ["Detector", "copy_class_rows", "increment_path", "transfer_weights"]

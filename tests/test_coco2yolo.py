@@ -11,6 +11,8 @@ import cv2
 import numpy as np
 import pytest
 
+from .conftest import needs_torch
+
 TOOL = Path(__file__).resolve().parents[1] / "tools" / "coco2yolo.py"
 # COCO's category ids skip numbers (12, 26, 29, 30, …): index must follow the order, not the id
 COCO_IDS = [i for i in range(1, 91) if i not in (12, 26, 29, 30, 45, 66, 68, 69, 71, 83)]
@@ -46,6 +48,7 @@ def _coco(root: Path, split: str, names: list[str]) -> None:
                     "categories": list(reversed(categories))}))
 
 
+@needs_torch
 def test_labels_follow_the_checkpoint_class_order(tmp_path):
     tool = _tool()
     names = tool.coco_names()

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A CI job installs easydetect without PyTorch and runs detection, keypoints,
+  masks, metadata and drawing on OpenVINO and ONNX Runtime (also with the
+  robot's numpy 1.26.4 and onnxruntime 1.20.1); `train`, `val`, `export` and
+  `.pt` loading without PyTorch raise `TorchRequiredError` naming
+  `pip install "easydetect[train]"`.
+
 ## 0.7.14
 
 - Training on an outline dataset with no MobileSAM to be had (offline, not in

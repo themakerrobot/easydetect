@@ -10,6 +10,8 @@ import pytest
 
 from easydetect.data import augment as aug
 
+from .conftest import needs_torch
+
 
 def _scene(h=120, w=200):
     """Black picture with two white boxes; labels in cls cx cy w h."""
@@ -71,6 +73,7 @@ def test_colour_jitter_keeps_the_picture_valid():
         assert out.dtype == np.uint8 and out.shape == img.shape
 
 
+@needs_torch
 def test_the_last_tenth_trains_on_plain_pictures():
     from easydetect.trainer import Trainer
 
@@ -140,6 +143,7 @@ def test_a_shrink_averages_instead_of_aliasing():
         assert out.std() < 20, "a 4x shrink kept the stripes as aliasing"
 
 
+@needs_torch
 def test_multiscale_sizes_favour_the_trained_size():
     from easydetect.trainer import BASE_SIZE_REPEAT, Trainer
 

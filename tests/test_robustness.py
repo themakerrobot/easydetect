@@ -62,6 +62,7 @@ def test_an_unreadable_picture_is_skipped(dataset, tmp_path, capsys):
     assert "cannot read" in capsys.readouterr().out
 
 
+@needs_torch
 def test_val_boxes_are_clipped_into_the_picture():
     from easydetect.data.dataset import _clean
 

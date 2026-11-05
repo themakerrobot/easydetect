@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Training options to compare, all off by default: `cls_loss="mal"` (DEIM's
+  matchability-aware class loss), `ema_warmups=N` (the weight average ramps up
+  over N steps), and `extra_loss=FeatureTeacher()` (a frozen DINOv2 ViT-S/14,
+  Apache-2.0, as a training-only feature teacher; `pip install timm`).
+  `tools/bench_tricks.py` runs them on the classroom datasets.
 - A CI job installs easydetect without PyTorch and runs detection, keypoints,
   masks, metadata and drawing on OpenVINO and ONNX Runtime (also with the
   robot's numpy 1.26.4 and onnxruntime 1.20.1); `train`, `val`, `export` and

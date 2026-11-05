@@ -298,6 +298,8 @@ class Trainer:
         on_progress=None,
         origin=None,
         clean_bn="auto",
+        cls_loss="vfl",
+        ema_warmups=None,
         extra_loss=None,
     ):
         seed_everything(seed)
@@ -372,13 +374,23 @@ class Trainer:
             # (an RTX 5090, ed-s at batch 16: 117 -> 100 ms a step)
             net.to(self.device, memory_format=torch.channels_last)
         self.channels_last = self.device.type == "cuda"
+        # an extra loss with weights of its own (FeatureTeacher's projection):
+        # bound to the network being trained, its weights trained alongside
+        if hasattr(extra_loss, "bind"):
+            extra_loss.bind(net)
+            extra_loss.to(self.device)
+        extra_params = list(extra_loss.parameters()) if hasattr(extra_loss, "parameters") else []
         self.opt = torch.optim.AdamW(
-            _param_groups(net, lr, lr * lr_backbone_mult), lr=lr, weight_decay=weight_decay,
+            _param_groups(net, lr, lr * lr_backbone_mult)
+            + ([{"params": extra_params}] if extra_params else []),
+            lr=lr, weight_decay=weight_decay,
             # one kernel for every parameter on a GPU, instead of a few per tensor
             fused=self.device.type == "cuda",
         )
-        self.criterion = DetectionLoss(net.num_classes, reg_max=net.decoder.reg_max)
-        self.ema = ModelEMA(net)
+        self.cls_loss = cls_loss
+        self.criterion = DetectionLoss(net.num_classes, reg_max=net.decoder.reg_max,
+                                       cls_loss=cls_loss)
+        self.ema = ModelEMA(net, **({"warmups": int(ema_warmups)} if ema_warmups else {}))
         self.warmup_epochs = warmup_epochs
         self.base_lrs = [g["lr"] for g in self.opt.param_groups]
         self.scaler = torch.amp.GradScaler(enabled=self.amp and self.amp_dtype == torch.float16)
@@ -513,6 +525,7 @@ class Trainer:
                 "grad_clip": 0.1,
             },
             "amp": self.amp,
+            "cls_loss": self.cls_loss,
             "augment": self._augment_lines(),
             "data": {"train": _split_counts(ds, self.net.num_classes)},
             "device": str(self.device),

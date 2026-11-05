@@ -565,3 +565,75 @@ def test_metadata_inside_an_onnx_is_set_replaced_and_removed(tmp_path):
     assert '"1": "공"' in meta["easydetect.names"]                # the names stay
     embed_metadata(onnx, {"other": None})
     assert "other" not in ort.InferenceSession(str(onnx)).get_modelmeta().custom_metadata_map
+
+
+
+def test_the_class_loss_can_be_deims():
+    """cls_loss="mal": DEIM's loss on the class scores, with a gradient."""
+    import pytest
+    import torch
+
+    from easydetect.utils.loss import (
+        LOSS_WEIGHTS,
+        MATCH_WEIGHTS,
+        DetectionLoss,
+        EDCriterion,
+        HungarianMatcher,
+    )
+
+    torch.manual_seed(0)
+    logits = torch.randn(2, 10, 3, requires_grad=True)
+    outputs = {"pred_logits": logits, "pred_boxes": torch.rand(2, 10, 4) * 0.5 + 0.25}
+    targets = [{"labels": torch.tensor([1]), "boxes": torch.tensor([[0.5, 0.5, 0.2, 0.2]])},
+               {"labels": torch.tensor([0, 2]),
+                "boxes": torch.tensor([[0.4, 0.4, 0.3, 0.3], [0.6, 0.6, 0.1, 0.2]])}]
+    crit = EDCriterion(HungarianMatcher(MATCH_WEIGHTS, use_focal_loss=True), dict(LOSS_WEIGHTS),
+                       ["mal"], num_classes=3)
+    indices = crit.matcher(outputs, targets)["indices"]
+    loss = crit.loss_labels_mal(outputs, targets, indices, 3)["loss_mal"]
+    loss.backward()
+    assert loss.item() > 0 and torch.isfinite(logits.grad).all()
+    with pytest.raises(ValueError):
+        DetectionLoss(3, cls_loss="focal")
+
+
+def test_a_feature_teacher_trains_its_projection_and_leaves_the_network_alone(
+        dataset, tmp_path, monkeypatch):
+    """FeatureTeacher: bound to the network trained, its projection learns, the
+    checkpoint holds the network only."""
+    import sys
+    import types
+
+    import torch
+
+    from easydetect import Detector
+    from easydetect.feature_teacher import FeatureTeacher
+
+    class Fake(torch.nn.Module):      # stands in for DINOv2: 8 dims a 14-px patch
+        num_features, num_prefix_tokens = 8, 1
+        patch_embed = types.SimpleNamespace(patch_size=(14, 14))
+
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 8, 14, 14)
+
+        def forward_features(self, x):
+            t = self.conv(x).flatten(2).transpose(1, 2)
+            return torch.cat([t.mean(1, keepdim=True), t], 1)
+
+    monkeypatch.setitem(sys.modules, "timm", types.SimpleNamespace(
+        create_model=lambda *a, **k: Fake()))
+    teacher = FeatureTeacher(size=112)
+    bind, start = teacher.bind, {}
+
+    def bind_and_keep(net):
+        bind(net)
+        start["w"] = teacher.proj.weight.detach().clone()
+
+    teacher.bind = bind_and_keep
+    best = Detector("ed-n", pretrained=False, verbose=False).train(
+        data=str(dataset), epochs=2, imgsz=64, batch=2, workers=0, device="cpu",
+        project=str(tmp_path), amp=False, extra_loss=teacher)   # epoch 1 is the warm-up
+    assert not torch.equal(start["w"], teacher.proj.weight)
+    saved = torch.load(best, map_location="cpu", weights_only=False)["model"]
+    assert not any(k.startswith("proj.") for k in saved)

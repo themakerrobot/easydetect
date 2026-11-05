@@ -230,6 +230,7 @@ class EDCriterion(nn.Module):
         self.share_matched_indices = share_matched_indices
         self.alpha = alpha
         self.gamma = gamma
+        self.mal_gamma = 1.5  # DEIM's
         self.fgl_targets, self.fgl_targets_dn = None, None
         self.own_targets, self.own_targets_dn = None, None
         self.reg_max = reg_max
@@ -283,6 +284,39 @@ class EDCriterion(nn.Module):
         )
         loss = loss.mean(1).sum() * src_logits.shape[1] / num_boxes
         return {"loss_vfl": loss}
+
+    def loss_labels_mal(self, outputs, targets, indices, num_boxes, values=None):
+        """DEIM's matchability-aware loss: the matched queries aim at IoU^gamma,
+        unweighted; the rest are pushed down by their own score^gamma."""
+        idx = self._get_src_permutation_idx(indices)
+        if values is None:
+            src_boxes = outputs["pred_boxes"][idx]
+            target_boxes = torch.cat([t["boxes"][i] for t, (_, i) in zip(targets, indices)], dim=0)
+            ious, _ = box_iou(box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
+            ious = torch.diag(ious).detach()
+        else:
+            ious = values
+
+        src_logits = outputs["pred_logits"]
+        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        target_classes = torch.full(
+            src_logits.shape[:2], self.num_classes, dtype=torch.int64, device=src_logits.device
+        )
+        target_classes[idx] = target_classes_o
+        target = F.one_hot(target_classes, num_classes=self.num_classes + 1)[..., :-1]
+
+        target_score_o = torch.zeros_like(target_classes, dtype=src_logits.dtype)
+        target_score_o[idx] = ious.to(target_score_o.dtype)
+        target_score = (target_score_o.unsqueeze(-1) * target).pow(self.mal_gamma)
+
+        pred_score = F.sigmoid(src_logits).detach()
+        weight = pred_score.pow(self.mal_gamma) * (1 - target) + target
+
+        loss = F.binary_cross_entropy_with_logits(
+            src_logits, target_score, weight=weight, reduction="none"
+        )
+        loss = loss.mean(1).sum() * src_logits.shape[1] / num_boxes
+        return {"loss_mal": loss}
 
     def loss_boxes(self, outputs, targets, indices, num_boxes, boxes_weight=None):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
@@ -451,6 +485,7 @@ class EDCriterion(nn.Module):
             "boxes": self.loss_boxes,
             "focal": self.loss_labels_focal,
             "vfl": self.loss_labels_vfl,
+            "mal": self.loss_labels_mal,
             "local": self.loss_local,
         }
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
@@ -632,7 +667,7 @@ class EDCriterion(nn.Module):
 
         if loss in ("boxes",):
             meta = {"boxes_weight": iou}
-        elif loss in ("vfl",):
+        elif loss in ("vfl", "mal"):
             meta = {"values": iou}
         else:
             meta = {}
@@ -698,7 +733,8 @@ class EDCriterion(nn.Module):
 
 
 #: the original COCO settings.
-LOSS_WEIGHTS = {"loss_vfl": 1, "loss_bbox": 5, "loss_giou": 2, "loss_fgl": 0.15, "loss_ddf": 1.5}
+LOSS_WEIGHTS = {"loss_vfl": 1, "loss_mal": 1, "loss_bbox": 5, "loss_giou": 2, "loss_fgl": 0.15,
+                "loss_ddf": 1.5}
 MATCH_WEIGHTS = {"cost_class": 2, "cost_bbox": 5, "cost_giou": 2}
 
 #: log name -> the main-layer loss it reports
@@ -710,18 +746,22 @@ class DetectionLoss(nn.Module):
     """``loss, logs = criterion(outputs, targets)`` — the total to backpropagate,
     plus the final layer's parts for the log."""
 
-    def __init__(self, num_classes: int, reg_max: int = 32):
+    def __init__(self, num_classes: int, reg_max: int = 32, cls_loss: str = "vfl"):
         super().__init__()
+        if cls_loss not in ("vfl", "mal"):
+            raise ValueError(f'cls_loss must be "vfl" or "mal", not {cls_loss!r}')
         matcher = HungarianMatcher(MATCH_WEIGHTS, use_focal_loss=True, alpha=0.25, gamma=2.0)
         self.criterion = EDCriterion(
-            matcher, dict(LOSS_WEIGHTS), ["vfl", "boxes", "local"], alpha=0.75, gamma=2.0,
+            matcher, dict(LOSS_WEIGHTS), [cls_loss, "boxes", "local"], alpha=0.75, gamma=2.0,
             num_classes=num_classes, reg_max=reg_max,
         )
+        # the class loss is logged as "vfl" either way
+        self.logged = dict(_LOGGED, vfl=f"loss_{cls_loss}")
 
     def forward(self, outputs, targets):
         losses = self.criterion(outputs, targets)
         total = sum(losses.values())
-        logs = {k: losses[v].detach() for k, v in _LOGGED.items() if v in losses}
+        logs = {k: losses[v].detach() for k, v in self.logged.items() if v in losses}
         # distillation only exists on the layers taught by the last one
         ddf = [v for k, v in losses.items() if k.startswith("loss_ddf")]
         if ddf:

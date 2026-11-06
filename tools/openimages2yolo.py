@@ -144,6 +144,38 @@ def labels_for(rows, index, up) -> tuple[list[str], list[int], set[int]]:
     return lines, sorted(boxed), grouped | (broader - boxed)
 
 
+_local = threading.local()
+
+
+def _get(url: str) -> tuple[int, bytes]:
+    """``(status, body)`` over this thread's own kept-alive connection: one
+    HTTPS handshake per thread, not per picture (an ocean away, each costs
+    more than the picture). Through $HTTPS_PROXY when one is set."""
+    import http.client
+    import os
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        if proxy:
+            p = urlsplit(proxy)   # CONNECT through it, then TLS with the bucket itself
+            conn = http.client.HTTPSConnection(p.hostname, p.port or 80, timeout=60)
+            conn.set_tunnel(parts.hostname, parts.port or 443)
+        else:
+            conn = http.client.HTTPSConnection(parts.hostname, parts.port or 443, timeout=60)
+        _local.conn = conn
+    try:
+        conn.request("GET", parts.path)
+        response = conn.getresponse()
+        return response.status, response.read()
+    except Exception:
+        conn.close()
+        _local.conn = None
+        raise
+
+
 def store_picture(url: str, dest: Path, max_side: int) -> bool:
     import cv2
     import numpy as np
@@ -152,8 +184,12 @@ def store_picture(url: str, dest: Path, max_side: int) -> bool:
         return True
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(url, timeout=60) as r:
-                data = np.frombuffer(r.read(), np.uint8)
+            status, body = _get(url)
+            if status in (403, 404):
+                return False
+            if status != 200:
+                raise OSError(f"HTTP {status}")
+            data = np.frombuffer(body, np.uint8)
             img = cv2.imdecode(data, cv2.IMREAD_COLOR)
             if img is None:
                 return False
@@ -165,10 +201,7 @@ def store_picture(url: str, dest: Path, max_side: int) -> bool:
             cv2.imwrite(str(part), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
             part.replace(dest)
             return True
-        except urllib.error.HTTPError as exc:
-            if exc.code in (403, 404):
-                return False
-        except (OSError, TimeoutError):
+        except (OSError, TimeoutError, ConnectionError):
             pass
         time.sleep(2 ** attempt)
     return False
@@ -233,7 +266,7 @@ def main() -> int:
     parser.add_argument("--val-images", type=int, default=5000,
                         help="validation pictures to keep, drawn at random (0: all 41,620)")
     parser.add_argument("--max-side", type=int, default=640)
-    parser.add_argument("--threads", type=int, default=64)
+    parser.add_argument("--threads", type=int, default=128)
     parser.add_argument("--splits", default="validation,train")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)

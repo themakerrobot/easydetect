@@ -85,6 +85,8 @@ def main() -> int:
     parser.add_argument("--device", default=None, help="training device (default: a GPU if any)")
     parser.add_argument("--score-device", default="CPU", help="OpenVINO device for scoring")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--start", default="ed-n",
+                        help="what training starts from: a name or a .pt (default ed-n)")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
     sys.path.insert(0, str(HERE))
@@ -114,7 +116,7 @@ def main() -> int:
                 if key in results:
                     continue
                 started = time.time()
-                best = Detector("ed-n", verbose=True).train(
+                best = Detector(args.start, verbose=True).train(
                     data=str(data), epochs=epochs, imgsz=320, batch=8, queries=100,
                     denoising=30, freeze="auto", augment=False, patience=epochs, seed=seed,
                     workers=args.workers, device=args.device, project=str(out / "runs"),

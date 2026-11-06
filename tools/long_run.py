@@ -198,8 +198,22 @@ def plan() -> list[tuple[str, list[str], list[str]]]:
     return steps
 
 
+#: Open Images (600 classes, 1.74M pictures, CC BY) between COCO and the
+#: small models' uses: ed-n and ed-s pretrained on it at 320 px with 100
+#: queries, from the COCO 320 checkpoints; then the 수업용 training started
+#: from ed-n's (against the COCO start, tools/bench_tricks.py), and ed-s back
+#: on COCO at 320 for Pibo, scored as Pibo runs it (against 0.381)
+OI_EPOCHS, OI_PATIENCE = 10, 3
+OPENIMAGES = [("oi-data", ["oi-data"], [])]
+OPENIMAGES += [(f"oi-{_v}320", ["oi-train", _v], ["oi-data"]) for _v in ("n", "s")]
+OPENIMAGES += [("bench-oi-n", ["bench-oi", "n"], ["oi-n320"]),
+               ("coco-s320-oi", ["coco-train", "s", "320", "100", "oi/ed-sq-320-oi/weights/best.pt",
+                                 "-oi"], ["coco-data", "oi-s320"]),
+               ("score-s320-oi", ["score-forms", "ed-sq-320-oi", "320", "pi-kit-oi"],
+                ["coco-s320-oi"])]
+
 #: run only when named (--only): set aside for later, not part of a plain run
-ON_DEMAND = RF100 + DEIM
+ON_DEMAND = RF100 + DEIM + OPENIMAGES
 
 
 def known_steps() -> list[tuple[str, list[str], list[str]]]:
@@ -378,12 +392,42 @@ def step_deim_weights(root: Path, args) -> None:
                   "--out", str(out)], cwd=root)
 
 
-def step_score_forms(root: Path, args, run: str, size: str) -> None:
+def step_score_forms(root: Path, args, run: str, size: str, kit: str = "pi-kit-deim") -> None:
     """One COCO fine-tune at its own size, whole and with 2 layers and 50 queries."""
     size = int(size)
     _score_forms(root, args, (run,), [("", size, {}, False),
                                       ("-l2q50", size, {"layers": 2, "queries": 50}, False)],
-                 "pi-kit-deim")
+                 kit)
+
+
+def step_oi_data(root: Path, args) -> None:
+    """Open Images' boxes and pictures, as tools/openimages2yolo.py makes them."""
+    _run([PY, "-u", str(HERE / "openimages2yolo.py"), "--out", args.openimages])
+
+
+def step_oi_train(root: Path, args, v: str) -> None:
+    """ed-<v> on Open Images at 320 px, 100 queries, from the COCO 320 checkpoint."""
+    from easydetect import Detector, downloads
+
+    project, name = root / "oi", f"ed-{v}q-320-oi"
+    run = project / name
+    resume = (run / "weights" / "last.pt").exists()
+    if run.exists() and not resume:
+        shutil.rmtree(run)                  # died before its first epoch: start clean
+    start = downloads.download_sized_checkpoint(f"ed-{v}", 320, 100)
+    best = Detector(str(start)).train(
+        data=str(Path(args.openimages).expanduser() / "data.yaml"), epochs=OI_EPOCHS,
+        imgsz=320, batch=VARIANTS[v], workers=args.workers, project=str(project), name=name,
+        resume=resume, patience=OI_PATIENCE, queries=100)
+    print(f"BEST {best}", flush=True)
+
+
+def step_bench_oi(root: Path, args, v: str) -> None:
+    """The 수업용 training from the Open Images checkpoint, beside the COCO one."""
+    _run([PY, "-u", str(HERE / "bench_tricks.py"), "--root", args.bench_root,
+          "--out", str(root / "bench" / "tricks-oi"), "--variants", "vfl",
+          "--start", str(root / "oi" / f"ed-{v}q-320-oi" / "weights" / "best.pt"),
+          "--workers", str(args.workers)])
 
 
 def step_speed_s(root: Path, args) -> None:
@@ -494,7 +538,8 @@ def run_step(root: Path, name: str, what: list[str], args) -> bool:
     log = root / "logs" / f"{name}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     cmd = [PY, "-u", str(Path(__file__).resolve()), "--root", str(root), "--coco", args.coco,
-           "--bench-root", args.bench_root, "--workers", str(args.workers),
+           "--bench-root", args.bench_root, "--openimages", args.openimages,
+           "--workers", str(args.workers),
            "--coco-epochs", str(args.coco_epochs), "--internal", *what]
     with log.open("a") as out:
         out.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} try\n")
@@ -569,6 +614,7 @@ def main():
     parser.add_argument("--root", default="~/longrun", help="where runs, logs and REPORT.md go")
     parser.add_argument("--coco", default="~/datasets/coco")
     parser.add_argument("--bench-root", default="~/datasets/bench")
+    parser.add_argument("--openimages", default="~/datasets/openimages")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--coco-epochs", type=int, default=COCO_EPOCHS)
     parser.add_argument("--stall", type=int, default=3 * 3600,
@@ -607,6 +653,12 @@ def main():
             step_deim_weights(root, args)
         elif kind == "score-forms":
             step_score_forms(root, args, *rest)
+        elif kind == "oi-data":
+            step_oi_data(root, args)
+        elif kind == "oi-train":
+            step_oi_train(root, args, *rest)
+        elif kind == "bench-oi":
+            step_bench_oi(root, args, *rest)
         return
 
     if args.status:

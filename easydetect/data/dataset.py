@@ -61,6 +61,10 @@ def load_data_yaml(path):
         "flip_idx": cfg.get("flip_idx"),
         "kpt_names": cfg.get("kpt_names"),
         "skeleton": cfg.get("skeleton"),
+        # not every object is boxed (Open Images): beside a label file a
+        # <stem>.unknown lists the classes neither boxed nor known to be
+        # absent there, which training does not teach as absent
+        "unknown_classes": bool(cfg.get("unknown_classes")),
     }
 
 
@@ -171,6 +175,10 @@ class DetDataset(Dataset):
         if not self.files:
             raise FileNotFoundError(f"no images for split '{split}'")
         self.kpt_shape = cfg["kpt_shape"]
+        self.unknown_classes = cfg["unknown_classes"]
+        if self.unknown_classes and (self.mosaic or self.mixup):
+            raise ValueError("unknown_classes datasets train without mosaic and mixup: "
+                             "a picture's unknown classes are its own")
         self.split = split
         self._warned: set[str] = set()   # one message per kind of problem, not per picture
 
@@ -205,12 +213,24 @@ class DetDataset(Dataset):
             raise FileNotFoundError(f)
         return img, self._load_labels(f)  # cls, cx, cy, w, h (normalized)
 
+    def _known(self, i, labels: np.ndarray) -> torch.Tensor:
+        """``(nc,)`` bool: False for the classes picture ``i``'s
+        ``<stem>.unknown`` lists, unless it has boxes of them."""
+        known = torch.ones(self.nc, dtype=torch.bool)
+        path = _label_path(self.files[i]).with_suffix(".unknown")
+        if path.exists():
+            ids = [int(t) for t in path.read_text().split() if 0 <= int(t) < self.nc]
+            known[ids] = False
+        known[torch.as_tensor(labels[:, 0], dtype=torch.long)] = True
+        return known
+
     def _readable(self, i):
         """``_raw``, or — for a picture that cannot be read (a truncated copy,
         a stray non-image) — another one, so one bad file costs a sample and
-        not the run. Said once per split."""
+        not the run. Said once per split. ``self.used`` is the one read."""
         for _ in range(10):
             try:
+                self.used = i
                 return self._raw(i)
             except FileNotFoundError:
                 self._warn("unreadable", f"cannot read {self.files[i]}; skipping unreadable "
@@ -248,6 +268,8 @@ class DetDataset(Dataset):
             "labels": torch.as_tensor(labels[:, 0], dtype=torch.long),
             "boxes": torch.as_tensor(labels[:, 1:5], dtype=torch.float32),  # cxcywh 0..1
         }
+        if self.unknown_classes:
+            target["known"] = self._known(self.used, labels)
         return tensor, target
 
     @staticmethod

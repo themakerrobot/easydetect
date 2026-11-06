@@ -147,6 +147,8 @@ def validate_torch(net, data_yaml, imgsz=640, batch=8, conf=0.0, device=None, wo
         for b in range(imgs.shape[0]):
             bx, sc, cl = top_pairs(logits[b], boxes[b])
             keep = sc >= conf
+            if "known" in targets[b]:     # a class unknown here can be neither right nor wrong
+                keep &= targets[b]["known"].to(cl.device)[cl]
             ev.add(
                 bx[keep].cpu().numpy(),
                 sc[keep].cpu().numpy(),

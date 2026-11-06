@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Datasets where not every object is boxed: with `unknown_classes: true` in
+  data.yaml, a picture's `<stem>.unknown` lists classes that training does not
+  teach as absent there and scoring does not count. `tools/openimages2yolo.py`
+  converts Open Images V7 (600 classes, CC BY) that way; `tools/long_run.py`
+  has on-demand steps that pretrain ed-n and ed-s on it at 320 px.
 - Training options to compare, all off by default: `cls_loss="mal"` (DEIM's
   matchability-aware class loss), `ema_warmups=N` (the weight average ramps up
   over N steps), and `extra_loss=FeatureTeacher()` (a frozen DINOv2 ViT-S/14,

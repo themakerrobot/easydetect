@@ -197,6 +197,14 @@ class HungarianMatcher(nn.Module):
         return indices_list
 
 
+def _known_mask(targets, logits):
+    """``(B, 1, K)`` 0 for a class unknown in that picture (a ``known`` target,
+    from an unknown_classes dataset), 1 elsewhere; None when every class is known."""
+    if not targets or "known" not in targets[0]:
+        return None
+    return torch.stack([t["known"] for t in targets]).to(logits.dtype).unsqueeze(1)
+
+
 class EDCriterion(nn.Module):
     """This class computes the loss for ed."""
 
@@ -249,6 +257,9 @@ class EDCriterion(nn.Module):
         loss = torchvision.ops.sigmoid_focal_loss(
             src_logits, target, self.alpha, self.gamma, reduction="none"
         )
+        known = _known_mask(targets, src_logits)
+        if known is not None:
+            loss = loss * known
         loss = loss.mean(1).sum() * src_logits.shape[1] / num_boxes
 
         return {"loss_focal": loss}
@@ -278,6 +289,9 @@ class EDCriterion(nn.Module):
 
         pred_score = F.sigmoid(src_logits).detach()
         weight = self.alpha * pred_score.pow(self.gamma) * (1 - target) + target_score
+        known = _known_mask(targets, src_logits)
+        if known is not None:       # an unchecked class is neither present nor absent
+            weight = weight * known
 
         loss = F.binary_cross_entropy_with_logits(
             src_logits, target_score, weight=weight, reduction="none"
@@ -311,6 +325,9 @@ class EDCriterion(nn.Module):
 
         pred_score = F.sigmoid(src_logits).detach()
         weight = pred_score.pow(self.mal_gamma) * (1 - target) + target
+        known = _known_mask(targets, src_logits)
+        if known is not None:
+            weight = weight * known
 
         loss = F.binary_cross_entropy_with_logits(
             src_logits, target_score, weight=weight, reduction="none"
@@ -585,6 +602,7 @@ class EDCriterion(nn.Module):
                 enc_targets = copy.deepcopy(targets)
                 for t in enc_targets:
                     t["labels"] = torch.zeros_like(t["labels"])
+                    t.pop("known", None)   # one class, "an object": nothing unchecked
             else:
                 enc_targets = targets
 

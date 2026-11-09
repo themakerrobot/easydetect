@@ -163,6 +163,12 @@ DEIM += [("coco-s320q300-deim", ["coco-train", "s", "320", "", "deim/ed-s-deim.p
 #: knows, 800 or 1,000 steps) on 26 Roboflow 100 datasets across seven
 #: domains, against YOLO26n: whether the defaults set on three small sets hold
 RF100 = [(f"rf100-seed{_seed}", ["rf100", str(_seed)], []) for _seed in (0, 1, 2)]
+#: the same against YOLO26s, and both sizes at 640 px with each trainer's defaults
+RF100 += [(f"rf100-s-seed{_seed}", ["rf100", str(_seed), "ed-s", "yolo26s.pt", "classroom"], [])
+          for _seed in (0, 1, 2)]
+RF100 += [(f"rf100-{_v}640-seed{_seed}", ["rf100", str(_seed), f"ed-{_v}", f"yolo26{_v}.pt",
+                                           "default"], [])
+          for _v in ("n", "s") for _seed in (0, 1, 2)]
 
 #: ed-n at 320 taught by ed-s at 320 (both COCO fine-tunes, 100 queries),
 #: and the same epochs without the teacher: what the teaching adds, apart from
@@ -271,11 +277,16 @@ def step_bench(root: Path, args, name: str, *flags: str) -> None:
          cwd=root / "bench")
 
 
-def step_rf100(root: Path, args, seed: str) -> None:
+def step_rf100(root: Path, args, seed: str, ed: str = "ed-n", yolo: str = "yolo26n.pt",
+               recipe: str = "classroom") -> None:
     data = Path(args.bench_root).expanduser().parent / "rf100"
+    size = ed.split("-")[1]
+    name = ("rf100" if size == "n" else f"rf100-{size}") if recipe == "classroom" \
+        else f"rf100-{size}640"
     _run([PY, "-u", str(HERE / "rf100.py"), "--root", str(data), "--out",
-          str(root / "bench" / f"rf100-seed{seed}"), "--seed", seed,
-          "--workers", str(args.workers)], cwd=root / "bench")
+          str(root / "bench" / f"{name}-seed{seed}"), "--seed", seed, "--ed", ed,
+          "--yolo", yolo, "--recipe", recipe, "--workers", str(args.workers)],
+         cwd=root / "bench")
 
 
 def step_coco_train(root: Path, args, v: str, size: str, queries: str | None = None,
@@ -606,6 +617,12 @@ def _repeats(root: Path) -> list[str]:
 
             diff = statistics.mean(d) - statistics.mean(y)
             lines.append(f"| {ds} | {len(d)} | {fmt(y)} | {fmt(d)} | {diff:+.3f} |")
+        diffs = [statistics.mean([r[ds]["ed"]["map"] for r in runs if ds in r])
+                 - statistics.mean([r[ds]["yolo"]["map"] for r in runs if ds in r])
+                 for ds in runs[0]]
+        lines += ["", f"ed ahead on {sum(x > 0 for x in diffs)} of {len(diffs)} datasets; "
+                      f"mean {statistics.mean(diffs):+.3f}, median "
+                      f"{statistics.median(diffs):+.3f}"]
     return lines
 
 

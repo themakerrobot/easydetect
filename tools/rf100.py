@@ -24,9 +24,10 @@ denoising queries, no zoom/crop augmentation, ``freeze="auto"``, and as many
 epochs as make 1,000 steps (800 when no class is one COCO knows, as the
 backbone then trains too), 35 to 100. YOLO26n trains the same epochs at the
 same size and batch with its own defaults. Both are scored by
-``bench_finetune.py``'s evaluator on the test split. Results land in
-``<out>/results.json`` (a dataset done is skipped on a rerun) and
-``<out>/results.md``.
+``bench_finetune.py``'s evaluator on the test split. ``--recipe default`` instead
+trains both at 640 px for 100 epochs with each trainer's own defaults, as on a
+GPU. Results land in ``<out>/results.json`` (a dataset done is skipped on a
+rerun) and ``<out>/results.md``.
 """
 
 from __future__ import annotations
@@ -64,6 +65,15 @@ SETS = {
     "mask-wearing-608pr": "real world", "construction-safety-gsnvb": "real world",
     "furniture-ngpea": "real world", "vehicles-q0x2v": "real world",
     "animals-ij5d2": "real world", "apples-fvpl5": "real world",
+}
+
+#: how both models train: the lab's 수업용 preset (epochs from the steps), or
+#: 640 px for 100 epochs with each trainer's own defaults, as a GPU user would
+RECIPES = {
+    "classroom": {"imgsz": 320, "batch": 8, "queries": 100, "denoising": 30, "freeze": "auto",
+                  "no_augment": True},
+    "default": {"imgsz": 640, "batch": 16, "epochs": 100, "queries": None, "denoising": None,
+                "freeze": None, "no_augment": False},
 }
 
 #: the lab's 수업용 epochs: about this many steps of a batch of 8
@@ -187,7 +197,10 @@ def main() -> int:
     parser.add_argument("--device", default="CPU", help="OpenVINO device for scoring")
     parser.add_argument("--yolo", default="yolo26n.pt")
     parser.add_argument("--ed", default="ed-n")
-    parser.add_argument("--epochs", type=int, help="instead of the classroom's (for a quick try)")
+    parser.add_argument("--epochs", type=int, help="instead of the recipe's (for a quick try)")
+    parser.add_argument("--recipe", choices=sorted(RECIPES), default="classroom",
+                        help="classroom: the lab's 수업용 preset at 320 px; default: 640 px, "
+                             "100 epochs, each trainer's own defaults")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
     sys.path.insert(0, str(HERE))
@@ -206,14 +219,14 @@ def main() -> int:
             continue
         train_yaml, score_yaml, facts = prepare(name, root, caps)
         known = coco_knows(facts["names"])
-        epochs = args.epochs or classroom_epochs(facts["train"], known)
+        recipe = RECIPES[args.recipe]
+        epochs = args.epochs or recipe.get("epochs") or classroom_epochs(facts["train"], known)
         print(f"=== {name} ({facts['domain']}, {facts['classes']} classes, {facts['train']} "
               f"training pictures, COCO knows one: {known}, {epochs} epochs)", flush=True)
         run = SimpleNamespace(
-            ed=args.ed, label=args.ed, yolo=args.yolo, epochs=epochs, imgsz=320, batch=8,
-            workers=args.workers, device=args.device, seed=args.seed, queries=100,
-            denoising=30, freeze="auto", no_augment=True, clean_bn=None, lr0=None,
-            new_rows=None)
+            ed=args.ed, label=args.ed, yolo=args.yolo, epochs=epochs, workers=args.workers,
+            device=args.device, seed=args.seed, clean_bn=None, lr0=None, new_rows=None,
+            **{k: v for k, v in recipe.items() if k != "epochs"})
         ed_pt, ed_s = train_ed(train_yaml, out / name, run)
         yolo_onnx, yolo_s = train_yolo(train_yaml, out / name, run)
         r = score(score_yaml, yolo_onnx, ed_pt, run)

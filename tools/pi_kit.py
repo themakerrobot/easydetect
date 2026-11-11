@@ -60,10 +60,19 @@ def score(path: Path, data: str, limit: int | None, backend: str | None = None) 
     return {"map50": round(m50, 4), "map": round(m, 4), "ms_here": round(ms, 1)}
 
 
-def ort_int8(onnx: Path, out: Path, pictures: list, size: int) -> Path:
+#: the layers 8 bits cost ed-s nothing on COCO (0.381 -> 0.383 at 320 px) and
+#: where a Pi 4 spends a third of its time; the backbone's first layers and
+#: the decoder lose accuracy in 8 bits and stay in float
+LOSSLESS_PARTS = ("fpn_blocks", "pan_blocks")
+
+
+def ort_int8(onnx: Path, out: Path, pictures: list, size: int,
+             parts: tuple[str, ...] | None = None) -> Path:
     """An 8-bit copy of an .onnx for ONNX Runtime (what a Pi runs), calibrated
     on ``pictures``: the convolutions and matrix products only, per channel,
-    as QDQ — the box decoding and the top-k selection stay in float."""
+    as QDQ — the box decoding and the top-k selection stay in float.
+    ``parts``: only the convolutions whose names hold one of these
+    (``LOSSLESS_PARTS``: the encoder's FPN and PAN blocks)."""
     import cv2
     import numpy as np
     from onnxruntime.quantization import (
@@ -92,9 +101,17 @@ def ort_int8(onnx: Path, out: Path, pictures: list, size: int) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     pre = out.with_name(out.stem + "-pre.onnx")
     quant_pre_process(str(onnx), str(pre), skip_symbolic_shape=True)
+    chosen = {}
+    if parts:
+        import onnx as onnx_lib
+
+        chosen["nodes_to_quantize"] = [
+            n.name for n in onnx_lib.load(str(pre)).graph.node
+            if n.op_type == "Conv" and any(p in n.name for p in parts)]
     quantize_static(str(pre), str(out), Reader(), quant_format=QuantFormat.QDQ,
-                    op_types_to_quantize=["Conv", "MatMul"], per_channel=True,
-                    activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8)
+                    op_types_to_quantize=["Conv"] if parts else ["Conv", "MatMul"],
+                    per_channel=True, activation_type=QuantType.QUInt8,
+                    weight_type=QuantType.QInt8, **chosen)
     pre.unlink(missing_ok=True)
     names = onnx.with_name(onnx.stem + ".names.json")   # the classes travel beside it
     if names.exists():

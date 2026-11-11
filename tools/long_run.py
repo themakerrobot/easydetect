@@ -398,7 +398,7 @@ def _score_forms(root: Path, args, runs, forms, kit_name: str) -> None:
     on all of COCO val with ONNX Runtime as Pibo runs it; the folder goes to
     the Pi for timing (``easydetect benchmark model=<folder>/``)."""
     sys.path.insert(0, str(HERE))
-    from pi_kit import ort_int8, score
+    from pi_kit import LOSSLESS_PARTS, ort_int8, score
 
     from easydetect import Detector
     from easydetect.data.dataset import DetDataset
@@ -426,10 +426,13 @@ def _score_forms(root: Path, args, runs, forms, kit_name: str) -> None:
             if key not in scores:
                 keep(key, Path(Detector(str(best), verbose=False).export(
                     format="onnx", imgsz=size, out_dir=kit / key, verbose=False, **extra)))
-            if int8 and f"{key}-int8" not in scores:
+            # int8 "fp": the FPN and PAN blocks only (what costs no accuracy)
+            tag8 = "-int8fp" if int8 == "fp" else "-int8"
+            if int8 and f"{key}{tag8}" not in scores:
                 onnx = kit / scores[key]["file"]
-                keep(f"{key}-int8",
-                     ort_int8(onnx, kit / f"{key}-int8" / f"{onnx.stem}-int8.onnx", calib, size))
+                keep(f"{key}{tag8}",
+                     ort_int8(onnx, kit / f"{key}{tag8}" / f"{onnx.stem}{tag8}.onnx", calib, size,
+                              parts=LOSSLESS_PARTS if int8 == "fp" else None))
     lines = ["| model | COCO mAP50-95 | mAP50 | file |", "| --- | --- | --- | --- |"]
     lines += [f"| {k} | {v['map']:.3f} | {v['map50']:.3f} | {v['file']} |"
               for k, v in scores.items()]
@@ -453,9 +456,10 @@ def step_deim_weights(root: Path, args) -> None:
 
 
 def step_score_forms(root: Path, args, run: str, size: str, kit: str = "pi-kit-deim") -> None:
-    """One COCO fine-tune at its own size, whole and with 2 layers and 50 queries."""
+    """One COCO fine-tune at its own size, whole (and its FPN and PAN in 8 bits)
+    and with 2 layers and 50 queries."""
     size = int(size)
-    _score_forms(root, args, (run,), [("", size, {}, False),
+    _score_forms(root, args, (run,), [("", size, {}, "fp"),
                                       ("-l2q50", size, {"layers": 2, "queries": 50}, False)],
                  kit)
 

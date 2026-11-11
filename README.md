@@ -212,6 +212,28 @@ mAP50-95, YOLO26 → ed at each size:
   classes, +0.03 to +0.11.
 * **Speed:** YOLO26 runs 15–25% faster at n and s; at m ed is the faster
   one. YOLO also trains faster.
+
+Six datasets are few. `tools/rf100.py` repeats the comparison on 26 of
+Roboflow 100's datasets across seven domains (aerial, video games,
+microscopy, underwater, documents, X-ray and thermal, everyday objects), at
+most 300 training pictures each, three seeds, scored on each test split:
+
+| ed against YOLO26, same size | ed ahead on | mean | median |
+| --- | --- | --- | --- |
+| **s, 640 px, 100 epochs, each trainer's defaults** | **19 of 26** | **+0.019** | **+0.016** |
+| n, 640 px, 100 epochs, each trainer's defaults | 8 of 26 | −0.034 | −0.018 |
+| s, 320 px, the lab's classroom preset | 6 of 26 | −0.054 | −0.049 |
+| n, 320 px, the lab's classroom preset | 4 of 26 | −0.103 | −0.076 |
+
+* **ed-s at 640 is ahead** (19 of 26, the same in each seed's run): most
+  where objects are large or must be told apart by shape (animals +0.20,
+  underwater pipes +0.11, furniture +0.07).
+* **Small objects are ed's weak side:** aerial pictures, game screens, road
+  signs and parasites lose most, and more so at 320 px and with ed-n, which
+  has no stride-8 feature map (ed-n: 16 and 32; ed-s: 8, 16 and 32).
+* **The classroom preset is behind YOLO26n here.** It was tuned on three
+  small datasets of large objects (the table below), where it is ahead; on
+  small objects at 320 px it is not.
 * mAP50-95 counts a box for every class it scores, as each project scores
   itself. Each cell is one run; how much a small dataset moves from one run to
   the next is measured below.
@@ -286,7 +308,8 @@ So the lab's classroom preset picks the epochs from the dataset — about
 keeps a laptop run near the same 10–15 minutes. It starts from `ed-n-320.pt`
 with `freeze="auto"`: the backbone stays frozen when COCO knows one of the
 classes and trains (800 steps) when it knows none. Three seeds each, YOLO26n
-with the same epochs:
+with the same epochs (on the datasets it was tuned on; across RF100's 26 it is
+behind, see above):
 
 | dataset | YOLO26n | ed-n, classroom |
 | --- | --- | --- |
@@ -351,9 +374,14 @@ COCO 가중치는 이 크기에서 성능이 크게 떨어집니다(ed-n 320: 0.
 COCO를 다시 학습하면 0.322로 올라 같은 크기의 YOLO11n·YOLO26n보다 높고, 라즈베리파이
 4B에서 쿼리 100개로 122밀리초입니다. 사진이 적은 데이터는 에폭을 늘릴수록 좋아져서
 (100장: 30에폭 0.628 → 100에폭 0.751), easydetect lab의 수업용 설정은 데이터 크기에
-맞춰 에폭을 정하고, COCO에 있는 물체면 백본을 고정합니다(`freeze="auto"`). 이 설정으로
-작은 데이터셋 3개 모두 YOLO26n보다 높습니다. 학습은 NVIDIA GPU나 인텔 GPU(XPU)에서도 됩니다. 자세한 표는 위의 "Small inputs and small computers"와
-"Small datasets" 절에 있습니다.
+맞춰 에폭을 정하고, COCO에 있는 물체면 백본을 고정합니다(`freeze="auto"`). 학습은
+NVIDIA GPU나 인텔 GPU(XPU)에서도 됩니다.
+
+Roboflow 100의 26개 데이터셋(데이터셋마다 학습 사진 최대 300장, 3번씩)에서 같은
+크기의 YOLO26과 비교하면, ed-s를 640 px로 100에폭 학습했을 때 26개 중 19개에서
+앞섭니다(평균 +0.019). 반면 작은 물체(항공 사진, 게임 화면, 도로 표지판)에는 약해서,
+320 px 수업용 설정(ed-n)은 26개 중 4개에서만 앞섭니다. 자세한 표는 위의 "Compared
+with YOLO", "Small inputs and small computers", "Small datasets" 절에 있습니다.
 
 ## Credits
 

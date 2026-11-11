@@ -218,8 +218,23 @@ OPENIMAGES += [("bench-oi-n", ["bench-oi", "n"], ["oi-n320"]),
                ("score-s320-oi", ["score-forms", "ed-sq-320-oi", "320", "pi-kit-oi"],
                 ["coco-s320-oi"])]
 
+#: Pibo's ed-s taught by ed-l at 640 px (COCO 54.0) while it sees the same
+#: pictures shrunk to 320 / 288 / 256 px, from the 320 fine-tune, KD_EPOCHS
+#: more; the same epochs at 320 without the teacher as the control; each
+#: scored at its size as Pibo runs it (pi-kit-kd), against 0.381 at 320
+KD_EPOCHS = 24
+PIBO_KD = []
+for _size in (320, 288, 256):
+    PIBO_KD += [(f"kd-s{_size}", ["coco-kd", str(_size)], ["coco-data", "coco-s320-q100"]),
+                (f"score-kd-s{_size}", ["score-forms", f"ed-sq-{_size}-kdl", str(_size),
+                                        "pi-kit-kd"], [f"kd-s{_size}"])]
+    if _size == 288:
+        PIBO_KD += [("more-s320", ["coco-kd", "320", "none"], ["coco-data", "coco-s320-q100"]),
+                    ("score-more-s320", ["score-forms", "ed-sq-320-more", "320", "pi-kit-kd"],
+                     ["more-s320"])]
+
 #: run only when named (--only): set aside for later, not part of a plain run
-ON_DEMAND = RF100 + DEIM + OPENIMAGES
+ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD
 
 
 def known_steps() -> list[tuple[str, list[str], list[str]]]:
@@ -329,6 +344,32 @@ def step_coco_distill(root: Path, args, kind: str) -> None:
         extra["extra_loss"] = Distiller(teacher, student)
     best = student.train(
         data=str(coco_yaml), epochs=DISTILL_EPOCHS, imgsz=320, batch=VARIANTS["n"],
+        workers=args.workers, project=str(project), name=name, resume=resume, patience=0,
+        **extra)
+    print(f"BEST {best}", flush=True)
+
+
+def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l") -> None:
+    """ed-sq-320 trained KD_EPOCHS more on COCO at ``size`` px, taught by
+    ``teacher`` at 640 px on the same pictures (``none``: no teacher, at 320)."""
+    from easydetect import Detector
+    from easydetect.distill import Distiller
+
+    coco_yaml = Path(args.coco).expanduser() / "data.yaml"
+    project = root / "coco"
+    size = int(size)
+    name = f"ed-sq-{size}-kdl" if teacher != "none" else f"ed-sq-{size}-more"
+    run = project / name
+    resume = (run / "weights" / "last.pt").exists()
+    if run.exists() and not resume:
+        shutil.rmtree(run)
+    student = Detector(str(project / "ed-sq-320" / "weights" / "best.pt"))
+    extra, imgsz = {}, size
+    if teacher != "none":
+        imgsz = 640                                 # what the teacher sees
+        extra["extra_loss"] = Distiller(Detector(teacher), student, student_scale=size / 640)
+    best = student.train(
+        data=str(coco_yaml), epochs=KD_EPOCHS, imgsz=imgsz, batch=VARIANTS["s"],
         workers=args.workers, project=str(project), name=name, resume=resume, patience=0,
         **extra)
     print(f"BEST {best}", flush=True)
@@ -660,6 +701,8 @@ def main():
             step_coco_score(root, args)
         elif kind == "coco-distill":
             step_coco_distill(root, args, *rest)
+        elif kind == "coco-kd":
+            step_coco_kd(root, args, *rest)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

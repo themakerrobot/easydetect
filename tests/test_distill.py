@@ -83,3 +83,39 @@ def test_boxes_without_area_do_not_break_the_matching():
     out["pred_boxes"][0, 10] = float("nan")                  # and one broken outright
     loss, logs = kd(imgs, out)
     assert logs["kd_dec"] == logs["kd_dec"]                  # not NaN
+
+
+def test_a_small_input_learns_from_the_teacher_on_a_large_one(dataset, tmp_path, capsys):
+    """student_scale: the teacher sees the pictures as loaded, the student
+    (in training and in validation) the same pictures at half the size."""
+    from easydetect.distill import Distiller
+
+    teacher = _net("s")
+    model = Detector("ed-s", verbose=False)
+    model.net = _net("s")
+    seen = []
+    model.net.backbone.register_forward_pre_hook(lambda m, a: seen.append(a[0].shape[-1]))
+    teacher.backbone.register_forward_pre_hook(lambda m, a: seen.append(-a[0].shape[-1]))
+    kd = Distiller(teacher, model.net, student_scale=0.5)
+    model.train(data=str(dataset), project=str(tmp_path), epochs=2, imgsz=128, batch=2,
+                workers=0, device="cpu", amp=False, extra_loss=kd)
+    out = capsys.readouterr().out
+    assert "kd_enc" in out and "kd_dec" in out
+    student, teacher_sizes = {s for s in seen if s > 0}, {-s for s in seen if s < 0}
+    assert max(student) <= 96 and min(teacher_sizes) >= 96, (student, teacher_sizes)
+
+
+def test_the_teacher_s_scores_are_pooled_to_the_student_s_grid():
+    import torch
+
+    from easydetect.distill import Distiller
+
+    teacher, student = _net("s").eval(), _net("s").eval()
+    kd = Distiller(teacher, student, student_scale=0.5)
+    imgs = torch.rand(2, 3, 128, 128)
+    with torch.no_grad():
+        out = student(imgs)                      # shrunk to 64 by the hook
+        loss, logs = kd(imgs, out)
+    assert kd._seen["student"].shape[1] == 8 * 8 + 4 * 4 + 2 * 2
+    assert kd._seen["teacher"].shape[1] == 16 * 16 + 8 * 8 + 4 * 4
+    assert torch.isfinite(loss) and logs["kd_enc"] > 0

@@ -19,6 +19,12 @@ Two signals, both on the pictures the student trains on:
 
 The teacher must know the same classes in the same order (two COCO models,
 say); it runs in eval mode and is never trained.
+
+``student_scale`` teaches a small input from a large one: train at the
+teacher's size (``imgsz=640``) with ``student_scale=0.5`` and the teacher sees
+the 640 px pictures while the student sees them shrunk to 320 px (validation
+too); the teacher's score maps are max-pooled to the student's grid. Export
+the result at the student's size.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
+from torch import nn
 
 from .devices import bf16_supported
 from .nn.ops import box_cxcywh_to_xyxy
@@ -57,6 +64,23 @@ def _net(model):
     return model
 
 
+def _shrink(scale: float):
+    """A forward pre-hook: the pictures resized by ``scale``, to a multiple of 32."""
+    def hook(module, args):
+        imgs = args[0]
+        h, w = (max(32, round(d * scale / 32) * 32) for d in imgs.shape[-2:])
+        if (h, w) != tuple(imgs.shape[-2:]):
+            imgs = F.interpolate(imgs, size=(h, w), mode="bilinear", align_corners=False,
+                                 antialias=True)
+        return (imgs, *args[1:])
+    return hook
+
+
+def _grids(net: nn.Module, h: int, w: int) -> list[tuple[int, int]]:
+    """The encoder's feature-map sizes for an h x w input, level by level."""
+    return [(h // s, w // s) for s in net.decoder.feat_strides]
+
+
 def _quality_focal(logits, target, gamma=2.0):
     """BCE towards soft targets, scaled by how far off the prediction is."""
     p = logits.sigmoid()
@@ -68,9 +92,10 @@ class Distiller:
     """The extra loss a student trains with; called once a batch by the trainer."""
 
     def __init__(self, teacher, student, enc_weight: float = 1.0, dec_weight: float = 1.0,
-                 box_weight: float = 5.0, giou_weight: float = 2.0):
+                 box_weight: float = 5.0, giou_weight: float = 2.0,
+                 student_scale: float | None = None):
         self.teacher = _net(teacher)
-        student_net = _net(student)
+        self.student = student_net = _net(student)
         if self.teacher.num_classes != student_net.num_classes:
             raise ValueError("teacher and student must know the same classes")
         self.teacher.eval()
@@ -84,6 +109,9 @@ class Distiller:
             lambda m, i, o: self._seen.__setitem__("teacher", o))
         student_net.decoder.enc_score_head.register_forward_hook(
             lambda m, i, o: self._seen.__setitem__("student", o))
+        self.student_scale = float(student_scale) if student_scale else None
+        if self.student_scale:
+            student_net.register_forward_pre_hook(_shrink(self.student_scale))
 
     @torch.no_grad()
     def _teach(self, imgs):
@@ -97,6 +125,31 @@ class Distiller:
         return out["pred_logits"].float(), out["pred_boxes"].float(), \
             self._seen["teacher"].float()
 
+    def _enc_target(self, imgs, t_enc, n):
+        """The teacher's per-place probabilities on the student's places."""
+        h, w = imgs.shape[-2:]
+        t_grids = _grids(self.teacher, h, w)
+        if self.student_scale:
+            h, w = (max(32, round(d * self.student_scale / 32) * 32) for d in (h, w))
+        s_grids = _grids(self.student, h, w)
+        if sum(a * b for a, b in t_grids) != t_enc.shape[1] \
+                or sum(a * b for a, b in s_grids) != n:
+            s_grids = t_grids = None                    # not plain grids: by position
+        if s_grids is None or t_grids[-len(s_grids):] == s_grids:
+            if t_enc.shape[1] < n:
+                raise ValueError("the teacher's feature maps do not cover the student's")
+            return t_enc[:, -n:].sigmoid()
+        if len(t_grids) < len(s_grids):
+            raise ValueError("the teacher's feature maps do not cover the student's")
+        prob = t_enc.sigmoid()
+        levels = prob.split([a * b for a, b in t_grids], dim=1)[-len(s_grids):]
+        pooled = []
+        for level, (th, tw), (sh, sw) in zip(levels, t_grids[-len(s_grids):], s_grids,
+                                                strict=True):
+            grid = level.transpose(1, 2).reshape(level.shape[0], -1, th, tw)
+            pooled.append(F.adaptive_max_pool2d(grid, (sh, sw)).flatten(2).transpose(1, 2))
+        return torch.cat(pooled, 1)
+
     def __call__(self, imgs, out) -> tuple[torch.Tensor, dict[str, float]]:
         s_enc = self._seen["student"].float()          # this batch's, from the forward just done
         t_logits, t_boxes, t_enc = self._teach(imgs)
@@ -104,10 +157,7 @@ class Distiller:
         total = imgs.new_zeros(())
 
         if self.enc_weight:
-            n = s_enc.shape[1]
-            if t_enc.shape[1] < n:
-                raise ValueError("the teacher's feature maps do not cover the student's")
-            target = t_enc[:, -n:].sigmoid()
+            target = self._enc_target(imgs, t_enc, s_enc.shape[1])
             enc = _quality_focal(s_enc, target).sum() / target.sum().clamp(min=1.0)
             total = total + self.enc_weight * enc
             logs["kd_enc"] = float(enc.detach())

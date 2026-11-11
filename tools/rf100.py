@@ -164,10 +164,10 @@ def coco_knows(names: dict) -> bool:
     return bool(match_classes(dict(enumerate(ALIASES)), {int(k): v for k, v in names.items()}))
 
 
-def table(results: dict) -> str:
+def table(results: dict, ed: str = "ed-n", yolo: str = "YOLO26n") -> str:
     import statistics
 
-    rows = ["| dataset | domain | classes | train | COCO knows one | epochs | YOLO26n | ed-n | "
+    rows = [f"| dataset | domain | classes | train | COCO knows one | epochs | {yolo} | {ed} | "
             "ed − YOLO |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     diffs = []
     for name, r in results.items():
@@ -178,7 +178,7 @@ def table(results: dict) -> str:
                     f"{d - y:+.3f} |")
     if diffs:
         wins = sum(x > 0 for x in diffs)
-        rows += ["", f"ed-n ahead on {wins} of {len(diffs)}; mean difference "
+        rows += ["", f"{ed} ahead on {wins} of {len(diffs)}; mean difference "
                  f"{statistics.mean(diffs):+.3f}, median {statistics.median(diffs):+.3f} "
                  "(mAP50-95 on each test split, one evaluator)."]
     return "\n".join(rows) + "\n"
@@ -235,13 +235,13 @@ def main() -> int:
                  train_minutes={"ed": round(ed_s / 60, 1), "yolo": round(yolo_s / 60, 1)})
         results[name] = r
         record.write_text(json.dumps(results, indent=2))
-        (out / "results.md").write_text(table(results))
+        (out / "results.md").write_text(table(results, args.ed, Path(args.yolo).stem))
         print(json.dumps(r), flush=True)
         # the weights are not needed again: the disk is not
         for weights in (out / name).glob("**/weights"):
             shutil.rmtree(weights, ignore_errors=True)
-    (out / "results.md").write_text(table(results))
-    print("\n" + table(results))
+    (out / "results.md").write_text(table(results, args.ed, Path(args.yolo).stem))
+    print("\n" + table(results, args.ed, Path(args.yolo).stem))
     return 0
 
 

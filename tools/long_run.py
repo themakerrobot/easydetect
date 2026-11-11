@@ -232,6 +232,11 @@ for _size in (320, 288, 256):
         PIBO_KD += [("more-s320", ["coco-kd", "320", "none"], ["coco-data", "coco-s320-q100"]),
                     ("score-more-s320", ["score-forms", "ed-sq-320-more", "320", "pi-kit-kd"],
                      ["more-s320"])]
+#: the same teaching from the DEIM 320 fine-tune (0.390) instead: whether the two add up
+PIBO_KD += [("kd-s320-deim", ["coco-kd", "320", "ed-l", "ed-sq-320-deim"],
+             ["coco-data", "coco-s320-deim"]),
+            ("score-kd-s320-deim", ["score-forms", "ed-sq-320-deim-kdl", "320", "pi-kit-kd"],
+             ["kd-s320-deim"])]
 
 #: run only when named (--only): set aside for later, not part of a plain run
 ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD
@@ -349,21 +354,24 @@ def step_coco_distill(root: Path, args, kind: str) -> None:
     print(f"BEST {best}", flush=True)
 
 
-def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l") -> None:
-    """ed-sq-320 trained KD_EPOCHS more on COCO at ``size`` px, taught by
-    ``teacher`` at 640 px on the same pictures (``none``: no teacher, at 320)."""
+def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
+                 start: str = "ed-sq-320") -> None:
+    """``start`` (a COCO fine-tune under <root>/coco) trained KD_EPOCHS more at
+    ``size`` px, taught by ``teacher`` at 640 px on the same pictures
+    (``none``: no teacher, at ``size``)."""
     from easydetect import Detector
     from easydetect.distill import Distiller
 
     coco_yaml = Path(args.coco).expanduser() / "data.yaml"
     project = root / "coco"
     size = int(size)
-    name = f"ed-sq-{size}-kdl" if teacher != "none" else f"ed-sq-{size}-more"
+    base = f"ed-sq-{size}" if start == "ed-sq-320" else start
+    name = f"{base}-kdl" if teacher != "none" else f"{base}-more"
     run = project / name
     resume = (run / "weights" / "last.pt").exists()
     if run.exists() and not resume:
         shutil.rmtree(run)
-    student = Detector(str(project / "ed-sq-320" / "weights" / "best.pt"))
+    student = Detector(str(project / start / "weights" / "best.pt"))
     extra, imgsz = {}, size
     if teacher != "none":
         imgsz = 640                                 # what the teacher sees

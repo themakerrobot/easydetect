@@ -238,6 +238,17 @@ PIBO_KD += [("kd-s320-deim", ["coco-kd", "320", "ed-l", "ed-sq-320-deim"],
             ("score-kd-s320-deim", ["score-forms", "ed-sq-320-deim-kdl", "320", "pi-kit-kd"],
              ["kd-s320-deim"])]
 
+#: the 0.5 s / 0.45 target on a Pi 4: ed-s at 352-416 px (from the 416 fine-tune)
+#: in float, with its FPN and PAN in 8 bits, and all in 8 bits, each scored on
+#: COCO as Pibo runs it (pi-kit-frontier/, then timed on the Pi); then the
+#: teaching at 384 and 416 from the 416 fine-tune
+PIBO_KD += [("pibo-frontier", ["frontier"], ["coco-data", "coco-s416-q100"])]
+PIBO_KD += [(f"kd-s{_size}-from416", ["coco-kd", str(_size), "ed-l", "ed-sq-416"],
+             ["coco-data", "coco-s416-q100"]) for _size in (384, 416)]
+PIBO_KD += [(f"score-kd-s{_size}-from416",
+             ["score-forms", f"ed-sq-{_size}-from416-kdl" if _size != 416 else "ed-sq-416-kdl",
+              str(_size), "pi-kit-kd"], [f"kd-s{_size}-from416"]) for _size in (384, 416)]
+
 #: run only when named (--only): set aside for later, not part of a plain run
 ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD
 
@@ -365,7 +376,12 @@ def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
     coco_yaml = Path(args.coco).expanduser() / "data.yaml"
     project = root / "coco"
     size = int(size)
-    base = f"ed-sq-{size}" if start == "ed-sq-320" else start
+    if start == "ed-sq-320":
+        base = f"ed-sq-{size}"
+    elif start.startswith(f"ed-sq-{size}"):
+        base = start                                # ed-sq-320-deim at 320
+    else:
+        base = f"ed-sq-{size}-from{start.removeprefix('ed-sq-')}"
     name = f"{base}-kdl" if teacher != "none" else f"{base}-more"
     run = project / name
     resume = (run / "weights" / "last.pt").exists()
@@ -462,6 +478,14 @@ def step_score_forms(root: Path, args, run: str, size: str, kit: str = "pi-kit-d
     _score_forms(root, args, (run,), [("", size, {}, "fp"),
                                       ("-l2q50", size, {"layers": 2, "queries": 50}, False)],
                  kit)
+
+
+def step_frontier(root: Path, args) -> None:
+    """ed-sq-416 at 352, 384 and 416 px: float and all 8-bit, then FPN/PAN 8-bit."""
+    forms = [(f"-{size}", size, {}, True) for size in (352, 384, 416)]
+    _score_forms(root, args, ("ed-sq-416",), forms, "pi-kit-frontier")
+    _score_forms(root, args, ("ed-sq-416",), [(t, z, e, "fp") for t, z, e, _ in forms],
+                 "pi-kit-frontier")
 
 
 def step_oi_data(root: Path, args) -> None:
@@ -715,6 +739,8 @@ def main():
             step_coco_distill(root, args, *rest)
         elif kind == "coco-kd":
             step_coco_kd(root, args, *rest)
+        elif kind == "frontier":
+            step_frontier(root, args)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

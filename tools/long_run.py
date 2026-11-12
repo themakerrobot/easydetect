@@ -281,6 +281,14 @@ for _size in (416, 384):
                                                  str(_size), "pi-kit-kd"],
                 [f"kd-s{_size}-obj365-pl"])]
 PIBO_KD += OBJ365
+#: the order these run in when named together: what the others need first, then
+#: the whole recipe, then the runs that tell what each part of it adds
+PIBO_ORDER = ["obj365-weights", "oi-pseudo",
+              "kd-s416-obj365-pl", "score-kd-s416-obj365-pl",
+              "kd-s416-obj365", "score-kd-s416-obj365",
+              "kd-s416-from416", "score-kd-s416-from416",
+              "kd-s384-obj365-pl", "score-kd-s384-obj365-pl"]
+PIBO_KD.sort(key=lambda st: PIBO_ORDER.index(st[0]) if st[0] in PIBO_ORDER else len(PIBO_ORDER))
 
 #: run only when named (--only): set aside for later, not part of a plain run
 ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD

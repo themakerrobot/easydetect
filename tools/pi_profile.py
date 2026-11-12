@@ -5,6 +5,10 @@ milliseconds a picture with 1-4 threads, then ONNX Runtime's own profile
 by part of the network and by operator. Needs only numpy and onnxruntime.
 
     python3 pi_profile.py /home/pi/.model/object/ed-s-320.onnx
+    python3 pi_profile.py ~/pi-kit-kd/          # every .onnx under it, 4 threads
+
+Given a folder, it times every .onnx under it with 4 threads and writes
+``times.json`` there (``{"<sub-folder>": ms}``), which pibo_pick.py reads.
 """
 
 from __future__ import annotations
@@ -43,9 +47,30 @@ def part(name: str) -> str:
     return "(rest)"
 
 
+def time_folder(folder: str, n: int) -> int:
+    from pathlib import Path
+
+    root = Path(folder).expanduser()
+    record = root / "times.json"
+    times = json.loads(record.read_text()) if record.exists() else {}
+    for f in sorted(root.rglob("*.onnx")):
+        key = f.parent.name if f.parent != root else f.stem
+        if key in times:
+            continue
+        s = session(str(f), 4)
+        inp = s.get_inputs()[0]
+        shape = [d if isinstance(d, int) else 320 for d in inp.shape]
+        times[key] = round(timed(s, {inp.name: np.random.rand(*shape).astype(np.float32)}, n), 1)
+        record.write_text(json.dumps(times, indent=1))
+        print(f"{times[key]:8.1f} ms  {key}", flush=True)
+    return 0
+
+
 def main() -> int:
     path = sys.argv[1]
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+    if os.path.isdir(os.path.expanduser(path)):
+        return time_folder(path, n)
     s = session(path, 4)
     inp = s.get_inputs()[0]
     shape = [d if isinstance(d, int) else 320 for d in inp.shape]

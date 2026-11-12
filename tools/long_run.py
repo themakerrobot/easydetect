@@ -249,6 +249,18 @@ PIBO_KD += [(f"score-kd-s{_size}-from416",
              ["score-forms", f"ed-sq-{_size}-from416-kdl" if _size != 416 else "ed-sq-416-kdl",
               str(_size), "pi-kit-kd"], [f"kd-s{_size}-from416"]) for _size in (384, 416)]
 
+#: more pictures without Objects365: PSEUDO_PICTURES Open Images pictures boxed
+#: with COCO's classes by ed-x (tools/pseudo_label.py), then the teaching at
+#: 384 / 416 on COCO and those together
+PSEUDO_PICTURES, PSEUDO_EPOCHS = 300000, 8
+PIBO_KD += [("oi-pseudo", ["oi-pseudo"], ["oi-data"])]
+for _size in (384, 416):
+    _name = f"ed-sq-{_size}-from416-kdl-pl" if _size != 416 else "ed-sq-416-kdl-pl"
+    PIBO_KD += [(f"kd-s{_size}-pseudo", ["coco-kd", str(_size), "ed-l", "ed-sq-416", "pseudo"],
+                 ["coco-data", "coco-s416-q100", "oi-pseudo"]),
+                (f"score-kd-s{_size}-pseudo", ["score-forms", _name, str(_size), "pi-kit-kd"],
+                 [f"kd-s{_size}-pseudo"])]
+
 #: run only when named (--only): set aside for later, not part of a plain run
 ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD
 
@@ -366,14 +378,15 @@ def step_coco_distill(root: Path, args, kind: str) -> None:
 
 
 def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
-                 start: str = "ed-sq-320") -> None:
+                 start: str = "ed-sq-320", data: str = "coco") -> None:
     """``start`` (a COCO fine-tune under <root>/coco) trained KD_EPOCHS more at
     ``size`` px, taught by ``teacher`` at 640 px on the same pictures
     (``none``: no teacher, at ``size``)."""
     from easydetect import Detector
     from easydetect.distill import Distiller
 
-    coco_yaml = Path(args.coco).expanduser() / "data.yaml"
+    # data "pseudo": COCO and the Open Images pictures ed-x boxed (oi-pseudo)
+    coco_yaml = Path(args.coco if data == "coco" else args.pseudo).expanduser() / "data.yaml"
     project = root / "coco"
     size = int(size)
     if start == "ed-sq-320":
@@ -382,7 +395,8 @@ def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
         base = start                                # ed-sq-320-deim at 320
     else:
         base = f"ed-sq-{size}-from{start.removeprefix('ed-sq-')}"
-    name = f"{base}-kdl" if teacher != "none" else f"{base}-more"
+    name = (f"{base}-kdl" if teacher != "none" else f"{base}-more") \
+        + ("-pl" if data == "pseudo" else "")
     run = project / name
     resume = (run / "weights" / "last.pt").exists()
     if run.exists() and not resume:
@@ -393,7 +407,8 @@ def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
         imgsz = 640                                 # what the teacher sees
         extra["extra_loss"] = Distiller(Detector(teacher), student, student_scale=size / 640)
     best = student.train(
-        data=str(coco_yaml), epochs=KD_EPOCHS, imgsz=imgsz, batch=VARIANTS["s"],
+        data=str(coco_yaml), epochs=KD_EPOCHS if data == "coco" else PSEUDO_EPOCHS,
+        imgsz=imgsz, batch=VARIANTS["s"],
         workers=args.workers, project=str(project), name=name, resume=resume, patience=0,
         **extra)
     print(f"BEST {best}", flush=True)
@@ -478,6 +493,14 @@ def step_score_forms(root: Path, args, run: str, size: str, kit: str = "pi-kit-d
     _score_forms(root, args, (run,), [("", size, {}, "fp"),
                                       ("-l2q50", size, {"layers": 2, "queries": 50}, False)],
                  kit)
+
+
+def step_oi_pseudo(root: Path, args) -> None:
+    """PSEUDO_PICTURES Open Images training pictures boxed by ed-x (COCO classes)."""
+    _run([PY, "-u", str(HERE / "pseudo_label.py"),
+          "--images", str(Path(args.openimages).expanduser() / "images" / "train"),
+          "--coco", args.coco, "--out", args.pseudo, "--limit", str(PSEUDO_PICTURES),
+          "--workers", str(args.workers)])
 
 
 def step_frontier(root: Path, args) -> None:
@@ -628,7 +651,8 @@ def run_step(root: Path, name: str, what: list[str], args) -> bool:
     cmd = [PY, "-u", str(Path(__file__).resolve()), "--root", str(root), "--coco", args.coco,
            "--bench-root", args.bench_root, "--openimages", args.openimages,
            "--workers", str(args.workers),
-           "--coco-epochs", str(args.coco_epochs), "--internal", *what]
+           "--coco-epochs", str(args.coco_epochs), "--pseudo", args.pseudo,
+           "--internal", *what]
     with log.open("a") as out:
         out.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} try\n")
         out.flush()
@@ -709,6 +733,8 @@ def main():
     parser.add_argument("--coco", default="~/datasets/coco")
     parser.add_argument("--bench-root", default="~/datasets/bench")
     parser.add_argument("--openimages", default="~/datasets/openimages")
+    parser.add_argument("--pseudo", default="~/datasets/oi-pseudo",
+                        help="Open Images boxed with COCO's classes (tools/pseudo_label.py)")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--coco-epochs", type=int, default=COCO_EPOCHS)
     parser.add_argument("--stall", type=int, default=3 * 3600,
@@ -741,6 +767,8 @@ def main():
             step_coco_kd(root, args, *rest)
         elif kind == "frontier":
             step_frontier(root, args)
+        elif kind == "oi-pseudo":
+            step_oi_pseudo(root, args)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

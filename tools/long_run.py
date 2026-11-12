@@ -261,6 +261,17 @@ for _size in (384, 416):
                 (f"score-kd-s{_size}-pseudo", ["score-forms", _name, str(_size), "pi-kit-kd"],
                  [f"kd-s{_size}-pseudo"])]
 
+#: Objects365-pretrained, COCO-finished weights (D-FINE's obj2coco; their
+#: terms to be checked before shipping): ed-s (50.7 at 640) taught by ed-l
+#: (57.3) at 416 and 384, straight from the 640 px weights
+OBJ365 = [("obj365-weights", ["obj365-weights"], [])]
+for _size in (416, 384):
+    OBJ365 += [(f"kd-s{_size}-obj365", ["coco-kd", str(_size), "obj365/ed-l-obj365.pt",
+                                        "obj365/ed-s-obj365.pt"], ["coco-data", "obj365-weights"]),
+               (f"score-kd-s{_size}-obj365", ["score-forms", f"ed-sq-{_size}-obj365-kdl",
+                                              str(_size), "pi-kit-kd"], [f"kd-s{_size}-obj365"])]
+PIBO_KD += OBJ365
+
 #: run only when named (--only): set aside for later, not part of a plain run
 ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD
 
@@ -379,8 +390,9 @@ def step_coco_distill(root: Path, args, kind: str) -> None:
 
 def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
                  start: str = "ed-sq-320", data: str = "coco") -> None:
-    """``start`` (a COCO fine-tune under <root>/coco) trained KD_EPOCHS more at
-    ``size`` px, taught by ``teacher`` at 640 px on the same pictures
+    """``start`` (a COCO fine-tune under <root>/coco, or a .pt under <root>)
+    trained KD_EPOCHS more at ``size`` px with 100 queries, taught by
+    ``teacher`` (a name, or a .pt under <root>) at 640 px on the same pictures
     (``none``: no teacher, at ``size``)."""
     from easydetect import Detector
     from easydetect.distill import Distiller
@@ -389,7 +401,9 @@ def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
     coco_yaml = Path(args.coco if data == "coco" else args.pseudo).expanduser() / "data.yaml"
     project = root / "coco"
     size = int(size)
-    if start == "ed-sq-320":
+    if start.endswith(".pt"):                       # obj365/ed-s-obj365.pt -> ed-sq-416-obj365
+        base = f"ed-sq-{size}-{Path(start).stem.removeprefix('ed-s-')}"
+    elif start == "ed-sq-320":
         base = f"ed-sq-{size}"
     elif start.startswith(f"ed-sq-{size}"):
         base = start                                # ed-sq-320-deim at 320
@@ -401,11 +415,15 @@ def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
     resume = (run / "weights" / "last.pt").exists()
     if run.exists() and not resume:
         shutil.rmtree(run)
-    student = Detector(str(project / start / "weights" / "best.pt"))
+    student = Detector(str(root / start) if start.endswith(".pt")
+                       else str(project / start / "weights" / "best.pt"))
     extra, imgsz = {}, size
+    if start.endswith(".pt"):
+        extra["queries"] = 100                      # a 640 px checkpoint has 300
     if teacher != "none":
         imgsz = 640                                 # what the teacher sees
-        extra["extra_loss"] = Distiller(Detector(teacher), student, student_scale=size / 640)
+        t = Detector(str(root / teacher) if teacher.endswith(".pt") else teacher)
+        extra["extra_loss"] = Distiller(t, student, student_scale=size / 640)
     best = student.train(
         data=str(coco_yaml), epochs=KD_EPOCHS if data == "coco" else PSEUDO_EPOCHS,
         imgsz=imgsz, batch=VARIANTS["s"],
@@ -501,6 +519,15 @@ def step_oi_pseudo(root: Path, args) -> None:
           "--images", str(Path(args.openimages).expanduser() / "images" / "train"),
           "--coco", args.coco, "--out", args.pseudo, "--limit", str(PSEUDO_PICTURES),
           "--workers", str(args.workers)])
+
+
+def step_obj365_weights(root: Path, args) -> None:
+    """D-FINE's Objects365-pretrained, COCO-finished s and l, converted."""
+    for v in ("s", "l"):
+        out = root / "obj365" / f"ed-{v}-obj365.pt"
+        if not out.exists():
+            _run([PY, "-u", str(HERE / "convert_upstream.py"), "--size", v,
+                  "--source", "obj365", "--out", str(out)], cwd=root)
 
 
 def step_frontier(root: Path, args) -> None:
@@ -769,6 +796,8 @@ def main():
             step_frontier(root, args)
         elif kind == "oi-pseudo":
             step_oi_pseudo(root, args)
+        elif kind == "obj365-weights":
+            step_obj365_weights(root, args)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

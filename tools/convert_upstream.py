@@ -13,8 +13,11 @@ Google Drive: downloading them needs ``pip install gdown``.
 
 With no --weights it downloads the matching Apache-2.0 COCO checkpoint from
 the D-FINE release (https://github.com/Peterande/D-FINE) and caches it under
-~/.easydetect/official/. Only the COCO-trained checkpoints are used: the
-Objects365-pretrained ones may carry that dataset's terms.
+~/.easydetect/official/. By default only the COCO-trained checkpoints are
+used. ``--source obj365`` takes the release's Objects365-pretrained,
+COCO-finished ones instead (s/m/l/x; COCO 50.7/55.1/57.3/59.3 at 640): they
+may carry Objects365's terms, so check those before shipping a model made
+from them.
 
 This package's network matches the reference module for module, so the weights
 load with ``strict=True``. The only tensors left behind are the anchor grid the
@@ -44,7 +47,8 @@ DEIM_DRIVE = {"n": "1ZPEhiU9nhW4M5jLnYOFwTSLQC1Ugf62e", "s": "1tB8gVJNrfb6dhFvoH
 
 #: per source: (decoder activation, credit line)
 SOURCES = {"dfine": ("relu", "Peterande/D-FINE {name} (Apache-2.0)"),
-           "deim": ("silu", "Intellindust-AI-Lab/DEIM {name} (Apache-2.0)")}
+           "deim": ("silu", "Intellindust-AI-Lab/DEIM {name} (Apache-2.0)"),
+           "obj365": ("relu", "Peterande/D-FINE {name} (Apache-2.0 code, Objects365-pretrained)")}
 
 DROPPED = ("decoder.anchors", "decoder.valid_mask")
 
@@ -102,6 +106,10 @@ def resolve_weights(args) -> Path:
                 raise SystemExit(f"could not fetch DEIM's {args.size} checkpoint from Google Drive")
         return dest
     name = OFFICIAL[args.size]
+    if args.source == "obj365":
+        if args.size == "n":
+            raise SystemExit("D-FINE has no Objects365-pretrained n checkpoint")
+        name = f"dfine_{args.size}_obj2coco.pth"
     return download(f"{RELEASE_URL}/{name}", cache_dir() / "official" / name)
 
 

@@ -20,50 +20,54 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 
 def score(path: Path, data: str, limit: int | None, backend: str | None = None) -> dict:
-    """mAP of one exported model on the val split, as tools/compare_yolo.py scores.
-    ``backend="onnxruntime"`` scores an .onnx the way the Pibo robot runs it."""
-    import cv2
-    import numpy as np
+    """mAP50-95 and mAP50 of one exported model on the val split, two ways:
+    ``map``/``map50`` with each query's best class (what Pibo shows), and
+    ``map_official``/``map50_official`` with the 300 best (query, class)
+    pairs, as the original authors and COCO tables score.
+    ``backend="onnxruntime"`` runs an .onnx the way the Pibo robot does."""
+    import time
 
-    sys.path.insert(0, str(Path(__file__).parent))
-    from compare_yolo import evaluate
+    import numpy as np
 
     from easydetect import Detector
     from easydetect.data.dataset import DetDataset
+    from easydetect.predictor import _looks_like_logits
+    from easydetect.utils.imageio import imread
+    from easydetect.utils.ops import cxcywh2xyxy_np
+    from easydetect.validator import Evaluator
 
     ds = DetDataset(data, "val", 64, augment=False)
     files = ds.files[:limit] if limit else ds.files
-    truth = []
-    for f in files:
-        lab = ds._load_labels(f)
-        cx, cy, bw, bh = lab[:, 1], lab[:, 2], lab[:, 3], lab[:, 4]
-        truth.append((np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1),
-                      lab[:, 0].astype(int)))
     model = Detector(str(path), device="CPU", verbose=False,
                      **({"backend": backend} if backend else {}))
     model(np.zeros((32, 32, 3), np.uint8))
-
-    class Runner:
-        def __call__(self, img, conf=0.001, max_det=300):
-            h, w = img.shape[:2]
-            r = model.predict(img, conf=conf, max_det=max_det, iou=None, verbose=False)[0]
-            return (r.boxes.xyxy / [w, h, w, h], r.boxes.conf, r.boxes.cls.astype(int),
-                    r.speed["inference"])
-
-    del cv2
-    m50, m, ms = evaluate(path.name, Runner(), files, truth, ds.nc)
-    return {"map50": round(m50, 4), "map": round(m, 4), "ms_here": round(ms, 1)}
-
-
-#: the layers 8 bits cost ed-s nothing on COCO (0.381 -> 0.383 at 320 px) and
-#: where a Pi 4 spends a third of its time; the backbone's first layers and
-#: the decoder lose accuracy in 8 bits and stay in float
-LOSSLESS_PARTS = ("fpn_blocks", "pan_blocks")
+    predictor = model.predictor
+    pibo, official, times = Evaluator(ds.nc), Evaluator(ds.nc), []
+    for f in files:
+        img = imread(str(f))
+        lab = ds._load_labels(f)
+        cx, cy, bw, bh = lab[:, 1], lab[:, 2], lab[:, 3], lab[:, 4]
+        gt = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
+        gc = lab[:, 0].astype(int)
+        t = time.perf_counter()
+        boxes, scores = predictor.infer(predictor.preprocess(img))
+        times.append((time.perf_counter() - t) * 1000)
+        if _looks_like_logits(scores):
+            scores = 1.0 / (1.0 + np.exp(-scores))
+        xyxy = np.clip(cxcywh2xyxy_np(boxes.astype(np.float32)), 0, 1)
+        pibo.add(xyxy, scores.max(-1), scores.argmax(-1), gt, gc)
+        nc = scores.shape[-1]
+        flat = scores.reshape(-1)
+        top = np.argsort(-flat)[:300]
+        official.add(xyxy[top // nc], flat[top], (top % nc).astype(int), gt, gc)
+    a, b = pibo.compute(), official.compute()
+    return {"map50": round(a["map50"], 4), "map": round(a["map"], 4),
+            "map50_official": round(b["map50"], 4), "map_official": round(b["map"], 4),
+            "ms_here": round(float(np.median(times[5:] or times)), 1)}
 
 
 def ort_int8(onnx: Path, out: Path, pictures: list, size: int,

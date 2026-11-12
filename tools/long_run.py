@@ -253,7 +253,8 @@ PIBO_KD += [(f"score-kd-s{_size}-from416",
 #: with COCO's classes by ed-x (tools/pseudo_label.py), then the teaching at
 #: 384 / 416 on COCO and those together
 PSEUDO_PICTURES, PSEUDO_EPOCHS = 300000, 8
-PIBO_KD += [("oi-pseudo", ["oi-pseudo"], ["oi-data"])]
+PSEUDO_TEACHER = "obj365/ed-x-obj365.pt"       # COCO 59.3 at 640
+PIBO_KD += [("oi-pseudo", ["oi-pseudo"], ["oi-data", "obj365-weights"])]
 for _size in (384, 416):
     _name = f"ed-sq-{_size}-from416-kdl-pl" if _size != 416 else "ed-sq-416-kdl-pl"
     PIBO_KD += [(f"kd-s{_size}-pseudo", ["coco-kd", str(_size), "ed-l", "ed-sq-416", "pseudo"],
@@ -270,6 +271,15 @@ for _size in (416, 384):
                                         "obj365/ed-s-obj365.pt"], ["coco-data", "obj365-weights"]),
                (f"score-kd-s{_size}-obj365", ["score-forms", f"ed-sq-{_size}-obj365-kdl",
                                               str(_size), "pi-kit-kd"], [f"kd-s{_size}-obj365"])]
+#: the whole recipe for Pibo's new ed-s: the Objects365 start, taught by the
+#: Objects365 ed-l at 640, on COCO and the Open Images pictures ed-x boxed
+for _size in (416, 384):
+    OBJ365 += [(f"kd-s{_size}-obj365-pl", ["coco-kd", str(_size), "obj365/ed-l-obj365.pt",
+                                           "obj365/ed-s-obj365.pt", "pseudo"],
+                ["coco-data", "obj365-weights", "oi-pseudo"]),
+               (f"score-kd-s{_size}-obj365-pl", ["score-forms", f"ed-sq-{_size}-obj365-kdl-pl",
+                                                 str(_size), "pi-kit-kd"],
+                [f"kd-s{_size}-obj365-pl"])]
 PIBO_KD += OBJ365
 
 #: run only when named (--only): set aside for later, not part of a plain run
@@ -482,8 +492,13 @@ def _score_forms(root: Path, args, runs, forms, kit_name: str) -> None:
                 keep(f"{key}{tag8}",
                      ort_int8(onnx, kit / f"{key}{tag8}" / f"{onnx.stem}{tag8}.onnx", calib, size,
                               parts=LOSSLESS_PARTS if int8 == "fp" else None))
-    lines = ["| model | COCO mAP50-95 | mAP50 | file |", "| --- | --- | --- | --- |"]
-    lines += [f"| {k} | {v['map']:.3f} | {v['map50']:.3f} | {v['file']} |"
+    def official(v, key):
+        return f"{v[key]:.3f}" if key in v else ""
+
+    lines = ["| model | mAP50-95 (Pibo) | mAP50 (Pibo) | mAP50-95 (official) | mAP50 (official) "
+             "| file |", "| --- | --- | --- | --- | --- | --- |"]
+    lines += [f"| {k} | {v['map']:.3f} | {v['map50']:.3f} | {official(v, 'map_official')} "
+              f"| {official(v, 'map50_official')} | {v['file']} |"
               for k, v in scores.items()]
     (kit / "accuracy.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines), flush=True)
@@ -518,12 +533,12 @@ def step_oi_pseudo(root: Path, args) -> None:
     _run([PY, "-u", str(HERE / "pseudo_label.py"),
           "--images", str(Path(args.openimages).expanduser() / "images" / "train"),
           "--coco", args.coco, "--out", args.pseudo, "--limit", str(PSEUDO_PICTURES),
-          "--workers", str(args.workers)])
+          "--teacher", str(root / PSEUDO_TEACHER), "--workers", str(args.workers)])
 
 
 def step_obj365_weights(root: Path, args) -> None:
-    """D-FINE's Objects365-pretrained, COCO-finished s and l, converted."""
-    for v in ("s", "l"):
+    """D-FINE's Objects365-pretrained, COCO-finished s, l and x, converted."""
+    for v in ("s", "l", "x"):
         out = root / "obj365" / f"ed-{v}-obj365.pt"
         if not out.exists():
             _run([PY, "-u", str(HERE / "convert_upstream.py"), "--size", v,

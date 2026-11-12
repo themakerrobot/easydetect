@@ -70,6 +70,12 @@ def score(path: Path, data: str, limit: int | None, backend: str | None = None) 
             "ms_here": round(float(np.median(times[5:] or times)), 1)}
 
 
+#: the layers 8 bits cost ed-s nothing on COCO (0.381 -> 0.383 at 320 px) and
+#: where a Pi 4 spends a third of its time; the backbone's first layers and
+#: the decoder lose accuracy in 8 bits and stay in float
+LOSSLESS_PARTS = ("fpn_blocks", "pan_blocks")
+
+
 def ort_int8(onnx: Path, out: Path, pictures: list, size: int,
              parts: tuple[str, ...] | None = None) -> Path:
     """An 8-bit copy of an .onnx for ONNX Runtime (what a Pi runs), calibrated

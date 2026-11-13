@@ -489,7 +489,14 @@ class Detector:
         # a checkpoint from before 0.7.13 has no decoder_act: the original ReLU
         self.net = EDNet(ckpt["variant"], ckpt["num_classes"], pretrained_backbone=False,
                          decoder_act=ckpt.get("decoder_act") or "relu")
-        self.net.load_state_dict(ckpt["model"])
+        if ckpt.get("qat"):                         # quantization-aware weights
+            from .qat import mark_calibrated, prepare_qat
+
+            prepare_qat(self.net)
+            self.net.load_state_dict(ckpt["model"])
+            mark_calibrated(self.net)
+        else:
+            self.net.load_state_dict(ckpt["model"])
         # trained with fewer queries: runs (and fine-tunes again) with as many
         if ckpt.get("queries") and ckpt["queries"] != self.net.decoder.num_queries:
             self.net.trim(queries=int(ckpt["queries"]))

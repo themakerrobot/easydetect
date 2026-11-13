@@ -289,6 +289,14 @@ OBJ365 += [("ft-s448-obj365-pl", ["coco-kd", "448", "none", "obj365/ed-s-obj365.
             ["coco-data", "obj365-weights", "oi-pseudo"]),
            ("score-ft-s448-obj365-pl", ["score-forms", "ed-sq-448-obj365-more-pl", "448",
                                         "pi-kit-kd"], ["ft-s448-obj365-pl"])]
+#: quantization-aware training (easydetect/qat.py) for the candidates: every
+#: convolution but the stem in 8 bits, QAT_EPOCHS on COCO at QAT_LR; the
+#: 8-bit file before training (ranges only) is scored too
+QAT_EPOCHS, QAT_LR = 2, 2e-5
+for _run, _size in (("ed-sq-416-obj365-kdl-pl", 416), ("ed-sq-448-obj365-more-pl", 448)):
+    _src = {"ed-sq-416-obj365-kdl-pl": "kd-s416-obj365-pl",
+            "ed-sq-448-obj365-more-pl": "ft-s448-obj365-pl"}[_run]
+    OBJ365 += [(f"qat-{_src}", ["qat", _run, str(_size)], ["coco-data", _src])]
 PIBO_KD += OBJ365
 #: the order these run in when named together: what the others need first, then
 #: the whole recipe, then the runs that tell what each part of it adds
@@ -552,6 +560,68 @@ def step_oi_pseudo(root: Path, args) -> None:
           "--images", str(Path(args.openimages).expanduser() / "images" / "train"),
           "--coco", args.coco, "--out", args.pseudo, "--limit", str(PSEUDO_PICTURES),
           "--teacher", str(root / PSEUDO_TEACHER), "--workers", str(args.workers)])
+
+
+def _keep_score(kit: Path, key: str, onnx: Path, coco_yaml: str) -> None:
+    """``onnx`` scored as Pibo runs it, recorded in <kit>/scores.json."""
+    sys.path.insert(0, str(HERE))
+    from pi_kit import score
+
+    record = kit / "scores.json"
+    scores = json.loads(record.read_text()) if record.exists() else {}
+    scores[key] = {"file": str(onnx.relative_to(kit)),
+                   **score(onnx, coco_yaml, None, backend="onnxruntime")}
+    record.write_text(json.dumps(scores, indent=2))
+    print(f"{key}: {scores[key]}", flush=True)
+
+
+def step_qat(root: Path, args, run: str, size: str) -> None:
+    """<root>/coco/<run> in 8 bits: ranges from COCO pictures, QAT_EPOCHS of
+    quantization-aware training, the QDQ .onnx scored before and after."""
+    import random
+
+    import cv2
+    import torch
+
+    from easydetect import Detector
+    from easydetect.data.dataset import DetDataset
+    from easydetect.qat import calibrate, export_qat_onnx, prepare_qat
+
+    size = int(size)
+    coco_yaml = str(Path(args.coco).expanduser() / "data.yaml")
+    project, name, kit = root / "coco", f"{run}-qat", root / "pi-kit-kd"
+    resume = (project / name / "weights" / "last.pt").exists()
+    model = Detector(str(project / run / "weights" / "best.pt"))
+    prepare_qat(model._ensure_net())
+    if not resume:
+        if (project / name).exists():
+            shutil.rmtree(project / name)
+        files = DetDataset(coco_yaml, "train", size, augment=False).files
+        random.Random(0).shuffle(files)
+
+        def batches(n=32, b=16):
+            for i in range(n):
+                chunk = files[i * b:(i + 1) * b]
+                if not chunk:
+                    return
+                yield torch.stack([torch.from_numpy(
+                    cv2.resize(cv2.imread(str(f)), (size, size))[:, :, ::-1].copy())
+                    .permute(2, 0, 1).float().div(255) for f in chunk])
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.net.to(device)
+        calibrate(model.net, batches(), device=device)
+        model.net.cpu()
+        onnx = export_qat_onnx(model.net, model.names, size,
+                               kit / f"{run}-q8cal" / f"{run}-q8cal.onnx")
+        _keep_score(kit, f"{run}-q8cal", onnx, coco_yaml)
+    best = model.train(data=coco_yaml, epochs=QAT_EPOCHS, imgsz=size, batch=VARIANTS["s"],
+                       lr0=QAT_LR, workers=args.workers, project=str(project), name=name,
+                       resume=resume, patience=0)
+    trained = Detector(str(best))
+    trained._ensure_net()
+    onnx = export_qat_onnx(trained.net, trained.names, size, kit / name / f"{name}.onnx")
+    _keep_score(kit, name, onnx, coco_yaml)
 
 
 def step_obj365_weights(root: Path, args) -> None:
@@ -831,6 +901,8 @@ def main():
             step_oi_pseudo(root, args)
         elif kind == "obj365-weights":
             step_obj365_weights(root, args)
+        elif kind == "qat":
+            step_qat(root, args, *rest)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

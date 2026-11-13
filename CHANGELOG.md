@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Quantization-aware training (`easydetect.qat`): BatchNorms folded, every
+  convolution but the stem rounded to 8 bits while training, exported as a
+  QDQ .onnx that ONNX Runtime runs in 8 bits. ed-s at 320 px, ranges only, no
+  training: 0.392 COCO mAP50-95 against 0.398 in float and 0.383 with ONNX
+  Runtime's own 8-bit tool, at its 8-bit speed.
+- `Distiller(student_scale=)`: a teacher at a large input teaching a student
+  at a small one.
+
 - Datasets where not every object is boxed: with `unknown_classes: true` in
   data.yaml, a picture's `<stem>.unknown` lists classes that training does not
   teach as absent there and scoring does not count. `tools/openimages2yolo.py`

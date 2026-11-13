@@ -829,6 +829,8 @@ class Trainer:
                 "variant": net.variant,
                 "num_classes": net.num_classes,
                 "decoder_act": getattr(net, "decoder_act", "relu"),
+                # quantization-aware: folded and rounding (easydetect/qat.py)
+                "qat": bool(getattr(net, "qat", False)),
                 "queries": net.decoder.num_queries,
                 "denoising": net.decoder.num_denoising,
                 "names": self.cfg["names"],

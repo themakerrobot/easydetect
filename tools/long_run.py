@@ -503,10 +503,9 @@ def _score_forms(root: Path, args, runs, forms, kit_name: str) -> None:
     def official(v, key):
         return f"{v[key]:.3f}" if key in v else ""
 
-    lines = ["| model | mAP50-95 (Pibo) | mAP50 (Pibo) | mAP50-95 (official) | mAP50 (official) "
-             "| file |", "| --- | --- | --- | --- | --- | --- |"]
-    lines += [f"| {k} | {v['map']:.3f} | {v['map50']:.3f} | {official(v, 'map_official')} "
-              f"| {official(v, 'map50_official')} | {v['file']} |"
+    lines = ["| model | mAP50-95 (official) | mAP50-95 (Pibo) | file |",
+             "| --- | --- | --- | --- |"]
+    lines += [f"| {k} | {official(v, 'map_official')} | {v['map']:.3f} | {v['file']} |"
               for k, v in scores.items()]
     (kit / "accuracy.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines), flush=True)

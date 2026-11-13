@@ -281,7 +281,10 @@ for _size in (416, 384):
                                                  str(_size), "pi-kit-kd"],
                 [f"kd-s{_size}-obj365-pl"])]
 #: the same at 448 px without the teacher: the teaching added nothing at 320
-#: (0.390 -> 0.386) and its matching on the CPU holds the GPU at ~65%
+#: (0.390 -> 0.386) and its matching on the CPU holds the GPU at ~65%. At 416
+#: the first epoch was the best (0.446, then 0.443-0.445): FT_EPOCHS, at half
+#: the usual learning rate, so less of the Objects365 start is trained away
+FT_EPOCHS, FT_LR = 4, 1e-4
 OBJ365 += [("ft-s448-obj365-pl", ["coco-kd", "448", "none", "obj365/ed-s-obj365.pt", "pseudo"],
             ["coco-data", "obj365-weights", "oi-pseudo"]),
            ("score-ft-s448-obj365-pl", ["score-forms", "ed-sq-448-obj365-more-pl", "448",
@@ -442,15 +445,17 @@ def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
     student = Detector(str(root / start) if start.endswith(".pt")
                        else str(project / start / "weights" / "best.pt"))
     extra, imgsz = {}, size
+    epochs = KD_EPOCHS if data == "coco" else PSEUDO_EPOCHS
     if start.endswith(".pt"):
         extra["queries"] = 100                      # a 640 px checkpoint has 300
+        if teacher == "none" and data == "pseudo":
+            epochs, extra["lr0"] = FT_EPOCHS, FT_LR
     if teacher != "none":
         imgsz = 640                                 # what the teacher sees
         t = Detector(str(root / teacher) if teacher.endswith(".pt") else teacher)
         extra["extra_loss"] = Distiller(t, student, student_scale=size / 640)
     best = student.train(
-        data=str(coco_yaml), epochs=KD_EPOCHS if data == "coco" else PSEUDO_EPOCHS,
-        imgsz=imgsz, batch=VARIANTS["s"],
+        data=str(coco_yaml), epochs=epochs, imgsz=imgsz, batch=VARIANTS["s"],
         workers=args.workers, project=str(project), name=name, resume=resume, patience=0,
         **extra)
     print(f"BEST {best}", flush=True)

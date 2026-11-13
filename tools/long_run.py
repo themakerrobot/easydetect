@@ -280,6 +280,12 @@ for _size in (416, 384):
                (f"score-kd-s{_size}-obj365-pl", ["score-forms", f"ed-sq-{_size}-obj365-kdl-pl",
                                                  str(_size), "pi-kit-kd"],
                 [f"kd-s{_size}-obj365-pl"])]
+#: the same at 448 px without the teacher: the teaching added nothing at 320
+#: (0.390 -> 0.386) and its matching on the CPU holds the GPU at ~65%
+OBJ365 += [("ft-s448-obj365-pl", ["coco-kd", "448", "none", "obj365/ed-s-obj365.pt", "pseudo"],
+            ["coco-data", "obj365-weights", "oi-pseudo"]),
+           ("score-ft-s448-obj365-pl", ["score-forms", "ed-sq-448-obj365-more-pl", "448",
+                                        "pi-kit-kd"], ["ft-s448-obj365-pl"])]
 PIBO_KD += OBJ365
 #: the order these run in when named together: what the others need first, then
 #: the whole recipe, then the runs that tell what each part of it adds
@@ -553,8 +559,8 @@ def step_obj365_weights(root: Path, args) -> None:
 
 
 def step_frontier(root: Path, args) -> None:
-    """ed-sq-416 at 352, 384 and 416 px: float and all 8-bit, then FPN/PAN 8-bit."""
-    forms = [(f"-{size}", size, {}, True) for size in (352, 384, 416)]
+    """ed-sq-416 at 352-448 px: float and all 8-bit, then FPN/PAN 8-bit."""
+    forms = [(f"-{size}", size, {}, True) for size in (352, 384, 416, 448)]
     _score_forms(root, args, ("ed-sq-416",), forms, "pi-kit-frontier")
     _score_forms(root, args, ("ed-sq-416",), [(t, z, e, "fp") for t, z, e, _ in forms],
                  "pi-kit-frontier")

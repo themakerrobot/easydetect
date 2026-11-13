@@ -83,6 +83,8 @@ class QuantConv2d(nn.Module):
         self.observing = True                       # follow the input range in training
         self.fresh = True                           # no range yet: the next one sets it
         self.calibrating = False                    # follow it in eval mode too
+        self.percentile: float | None = None        # calibrating: clip the rarest values
+        self.batches = 0                            # calibrating: pictures averaged so far
         self.frozen: dict | None = None             # constants for the export
 
     # the input: uint8, one scale for the tensor (as tensors: no GPU sync)
@@ -96,6 +98,17 @@ class QuantConv2d(nn.Module):
         return self._qparams(self.lo, self.hi)
 
     def _track(self, lo_buf, hi_buf, t: torch.Tensor, first: bool) -> None:
+        if self.calibrating and self.percentile:
+            # the range holding all but the rarest values, averaged over batches
+            flat = t.detach().float().flatten()
+            if flat.numel() > 1 << 20:
+                flat = flat[torch.randint(flat.numel(), (1 << 20,), device=flat.device)]
+            q = torch.tensor([1 - self.percentile, self.percentile], device=flat.device)
+            lo, hi = torch.quantile(flat, q)
+            w = 1.0 / (self.batches + 1)
+            lo_buf.copy_(lo if first else lo_buf * (1 - w) + lo * w)
+            hi_buf.copy_(hi if first else hi_buf * (1 - w) + hi * w)
+            return
         lo, hi = t.detach().amin().float(), t.detach().amax().float()
         if first:
             lo_buf.copy_(lo)
@@ -142,6 +155,8 @@ class QuantConv2d(nn.Module):
         if observe:
             self._track(self.out_lo, self.out_hi, y, first)
             self.fresh = False
+            if self.calibrating:
+                self.batches += 1
         if self.frozen is not None:
             y = torch.fake_quantize_per_tensor_affine(
                 y, self.frozen["out_scale"], self.frozen["out_zp"], 0, 255)
@@ -174,11 +189,18 @@ def mark_calibrated(net: nn.Module) -> None:
 
 
 @torch.no_grad()
-def calibrate(net: nn.Module, batches, device="cpu", steps: int | None = None) -> None:
-    """Input ranges from ``batches`` of pictures (B,3,H,W, 0..1)."""
+def calibrate(net: nn.Module, batches, device="cpu", steps: int | None = None,
+              percentile: float | None = None) -> None:
+    """Input and output ranges from ``batches`` of pictures (B,3,H,W, 0..1).
+
+    ``percentile`` (0.9999, say): each range leaves out the rarest values on
+    either side, averaged over the batches, and stays fixed while training
+    (the weights learn to fit it); otherwise the full range, which training
+    then keeps following."""
     convs = quant_convs(net)
     for c in convs:
         c.fresh, c.calibrating = True, True
+        c.percentile, c.batches = percentile, 0
     was = net.training
     net.eval()                                      # no targets: the inference path
     try:
@@ -189,6 +211,7 @@ def calibrate(net: nn.Module, batches, device="cpu", steps: int | None = None) -
     finally:
         for c in convs:
             c.calibrating = False
+            c.observing = not percentile
         net.train(was)
 
 

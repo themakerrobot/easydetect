@@ -297,10 +297,13 @@ for _run, _size in (("ed-sq-416-obj365-kdl-pl", 416), ("ed-sq-448-obj365-more-pl
     _src = {"ed-sq-416-obj365-kdl-pl": "kd-s416-obj365-pl",
             "ed-sq-448-obj365-more-pl": "ft-s448-obj365-pl"}[_run]
     OBJ365 += [(f"qat-{_src}", ["qat", _run, str(_size)], ["coco-data", _src])]
+    # ranges at the 99.99th percentile, fixed while training: Objects365 ed-s at
+    # 416, ranges only, 0.447 -> 0.442 (the full range: 0.419)
+    OBJ365 += [(f"qatp-{_src}", ["qat", _run, str(_size), "0.9999"], ["coco-data", _src])]
 PIBO_KD += OBJ365
 #: the order these run in when named together: what the others need first, then
 #: the whole recipe, then the runs that tell what each part of it adds
-PIBO_ORDER = ["obj365-weights", "oi-pseudo",
+PIBO_ORDER = ["qatp-kd-s416-obj365-pl", "obj365-weights", "oi-pseudo",
               "kd-s416-obj365-pl", "score-kd-s416-obj365-pl",
               "kd-s416-obj365", "score-kd-s416-obj365",
               "kd-s416-from416", "score-kd-s416-from416",
@@ -575,9 +578,10 @@ def _keep_score(kit: Path, key: str, onnx: Path, coco_yaml: str) -> None:
     print(f"{key}: {scores[key]}", flush=True)
 
 
-def step_qat(root: Path, args, run: str, size: str) -> None:
-    """<root>/coco/<run> in 8 bits: ranges from COCO pictures, QAT_EPOCHS of
-    quantization-aware training, the QDQ .onnx scored before and after."""
+def step_qat(root: Path, args, run: str, size: str, percentile: str = "") -> None:
+    """<root>/coco/<run> in 8 bits: ranges from COCO pictures (the full range,
+    or ``percentile`` of it, then fixed), QAT_EPOCHS of quantization-aware
+    training, the QDQ .onnx scored before and after."""
     import random
 
     import cv2
@@ -585,14 +589,19 @@ def step_qat(root: Path, args, run: str, size: str) -> None:
 
     from easydetect import Detector
     from easydetect.data.dataset import DetDataset
-    from easydetect.qat import calibrate, export_qat_onnx, prepare_qat
+    from easydetect.qat import calibrate, export_qat_onnx, prepare_qat, quant_convs
 
     size = int(size)
+    pct = float(percentile) if percentile else None
+    tag = "-qatp" if pct else "-qat"
     coco_yaml = str(Path(args.coco).expanduser() / "data.yaml")
-    project, name, kit = root / "coco", f"{run}-qat", root / "pi-kit-kd"
+    project, name, kit = root / "coco", f"{run}{tag}", root / "pi-kit-kd"
     resume = (project / name / "weights" / "last.pt").exists()
     model = Detector(str(project / run / "weights" / "best.pt"))
     prepare_qat(model._ensure_net())
+    if pct:
+        for c in quant_convs(model.net):           # the ranges stay where calibration put them
+            c.observing = False
     if not resume:
         if (project / name).exists():
             shutil.rmtree(project / name)
@@ -610,16 +619,18 @@ def step_qat(root: Path, args, run: str, size: str) -> None:
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model.net.to(device)
-        calibrate(model.net, batches(), device=device)
+        calibrate(model.net, batches(), device=device, percentile=pct)
         model.net.cpu()
-        onnx = export_qat_onnx(model.net, model.names, size,
-                               kit / f"{run}-q8cal" / f"{run}-q8cal.onnx")
-        _keep_score(kit, f"{run}-q8cal", onnx, coco_yaml)
+        cal = f"{run}-q8cal" + ("p" if pct else "")
+        onnx = export_qat_onnx(model.net, model.names, size, kit / cal / f"{cal}.onnx")
+        _keep_score(kit, cal, onnx, coco_yaml)
     best = model.train(data=coco_yaml, epochs=QAT_EPOCHS, imgsz=size, batch=VARIANTS["s"],
                        lr0=QAT_LR, workers=args.workers, project=str(project), name=name,
                        resume=resume, patience=0)
     trained = Detector(str(best))
     trained._ensure_net()
+    for c in quant_convs(trained.net):
+        c.observing = not pct
     onnx = export_qat_onnx(trained.net, trained.names, size, kit / name / f"{name}.onnx")
     _keep_score(kit, name, onnx, coco_yaml)
 

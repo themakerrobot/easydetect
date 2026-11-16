@@ -293,9 +293,13 @@ OBJ365 += [("ft-s448-obj365-pl", ["coco-kd", "448", "none", "obj365/ed-s-obj365.
 #: convolution but the stem in 8 bits, QAT_EPOCHS on COCO at QAT_LR; the
 #: 8-bit file before training (ranges only) is scored too
 QAT_EPOCHS, QAT_LR = 2, 2e-5
-for _run, _size in (("ed-sq-416-obj365-kdl-pl", 416), ("ed-sq-448-obj365-more-pl", 448)):
+#: ed-sq-416 is COCO only (no Objects365, whose pictures are for academic use):
+#: the one to ship until those terms are cleared
+for _run, _size in (("ed-sq-416-obj365-kdl-pl", 416), ("ed-sq-448-obj365-more-pl", 448),
+                    ("ed-sq-416", 416)):
     _src = {"ed-sq-416-obj365-kdl-pl": "kd-s416-obj365-pl",
-            "ed-sq-448-obj365-more-pl": "ft-s448-obj365-pl"}[_run]
+            "ed-sq-448-obj365-more-pl": "ft-s448-obj365-pl",
+            "ed-sq-416": "coco-s416-q100"}[_run]
     OBJ365 += [(f"qat-{_src}", ["qat", _run, str(_size)], ["coco-data", _src])]
     # ranges at the 99.99th percentile, fixed while training: Objects365 ed-s at
     # 416, ranges only, 0.447 -> 0.442 (the full range: 0.419)
@@ -657,6 +661,14 @@ def _ort_form(kit: Path, name: str, plain: Path, coco_yaml: str, size: int) -> N
     ort = ort_int8(plain, kit / f"{name}-ortc" / f"{name}-ortc.onnx", calib, size,
                    parts=("",), percentile=0.9999, skip=("stem",))
     _keep_score(kit, f"{name}-ortc", ort, coco_yaml)
+    # the threshold Pibo should use with it, inside the file (easydetect.conf)
+    from pibo_conf import pick
+
+    from easydetect.exporter import embed_metadata
+
+    conf, _ = pick(ort, coco_yaml)
+    embed_metadata(ort, {"easydetect.conf": f"{conf:.2f}"})
+    print(f"{name}-ortc: easydetect.conf = {conf:.2f}", flush=True)
 
 
 def step_qat_ort(root: Path, args, run: str, size: str) -> None:

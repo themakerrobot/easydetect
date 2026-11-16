@@ -1,15 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.7.15
 
 - Quantization-aware training (`easydetect.qat`): BatchNorms folded, every
-  convolution but the stem rounded to 8 bits while training, exported as a
-  QDQ .onnx that ONNX Runtime runs in 8 bits. ed-s at 320 px, ranges only, no
-  training: 0.392 COCO mAP50-95 against 0.398 in float and 0.383 with ONNX
-  Runtime's own 8-bit tool, at its 8-bit speed.
+  convolution but the stem rounded to 8 bits while training (input ranges at
+  the 99.99th percentile, fixed), exported as a QDQ .onnx, or as float weights
+  for ONNX Runtime's own quantizer, whose files a Raspberry Pi 4 runs faster
+  (`tools/pi_kit.py`: convolutions only, stem in float). A checkpoint trained
+  this way loads as it was trained (`qat` in the checkpoint). Pibo's model
+  made this way: ed-s at 320, 0.384 COCO mAP50-95 in 318 ms on a Pi 4
+  (float: 0.388 in 396 ms); at 640, 0.463 in 1,058 ms.
+- `tools/pibo_conf.py` picks the score threshold Pibo should use with a model
+  (best F1 on the validation pictures, through Pibo's own steps) and writes
+  it into the .onnx; `tools/pi_profile.py` times an .onnx (or every one in a
+  folder) on the robot, by thread count and by part of the network;
+  `tools/pibo_pick.py` picks the most accurate file fast enough.
 - `Distiller(student_scale=)`: a teacher at a large input teaching a student
   at a small one.
-
 - Datasets where not every object is boxed: with `unknown_classes: true` in
   data.yaml, a picture's `<stem>.unknown` lists classes that training does not
   teach as absent there and scoring does not count. `tools/openimages2yolo.py`

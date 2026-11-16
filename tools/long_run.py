@@ -300,6 +300,7 @@ for _run, _size in (("ed-sq-416-obj365-kdl-pl", 416), ("ed-sq-448-obj365-more-pl
     # ranges at the 99.99th percentile, fixed while training: Objects365 ed-s at
     # 416, ranges only, 0.447 -> 0.442 (the full range: 0.419)
     OBJ365 += [(f"qatp-{_src}", ["qat", _run, str(_size), "0.9999"], ["coco-data", _src])]
+    OBJ365 += [(f"qatp-ort-{_src}", ["qat-ort", _run, str(_size)], [f"qatp-{_src}"])]
 PIBO_KD += OBJ365
 #: the order these run in when named together: what the others need first, then
 #: the whole recipe, then the runs that tell what each part of it adds
@@ -522,15 +523,8 @@ def _score_forms(root: Path, args, runs, forms, kit_name: str) -> None:
                 keep(f"{key}{tag8}",
                      ort_int8(onnx, kit / f"{key}{tag8}" / f"{onnx.stem}{tag8}.onnx", calib, size,
                               parts=LOSSLESS_PARTS if int8 == "fp" else None))
-    def official(v, key):
-        return f"{v[key]:.3f}" if key in v else ""
-
-    lines = ["| model | mAP50-95 (official) | mAP50-95 (Pibo) | file |",
-             "| --- | --- | --- | --- |"]
-    lines += [f"| {k} | {official(v, 'map_official')} | {v['map']:.3f} | {v['file']} |"
-              for k, v in scores.items()]
-    (kit / "accuracy.md").write_text("\n".join(lines) + "\n")
-    print("\n".join(lines), flush=True)
+    _accuracy_table(kit, scores)
+    print((kit / "accuracy.md").read_text(), flush=True)
 
 
 def step_speed(root: Path, args) -> None:
@@ -576,6 +570,18 @@ def _keep_score(kit: Path, key: str, onnx: Path, coco_yaml: str) -> None:
                    **score(onnx, coco_yaml, None, backend="onnxruntime")}
     record.write_text(json.dumps(scores, indent=2))
     print(f"{key}: {scores[key]}", flush=True)
+    _accuracy_table(kit, scores)
+
+
+def _accuracy_table(kit: Path, scores: dict) -> None:
+    """<kit>/accuracy.md from scores.json: mAP50-95 both ways."""
+    def official(v):
+        return f"{v['map_official']:.3f}" if "map_official" in v else ""
+
+    lines = ["| model | mAP50-95 (official) | mAP50-95 (Pibo) | file |",
+             "| --- | --- | --- | --- |"]
+    lines += [f"| {k} | {official(v)} | {v['map']:.3f} | {v['file']} |" for k, v in scores.items()]
+    (kit / "accuracy.md").write_text("\n".join(lines) + "\n")
 
 
 def step_qat(root: Path, args, run: str, size: str, percentile: str = "") -> None:
@@ -635,15 +641,39 @@ def step_qat(root: Path, args, run: str, size: str, percentile: str = "") -> Non
     _keep_score(kit, name, onnx, coco_yaml)
     # the same weights through ONNX Runtime's own quantizer: the form a Pi 4
     # runs fastest (416: 491 ms, against ~700 ms for the QDQ file above)
+    plain = export_qat_onnx(trained.net, trained.names, size,
+                            kit / f"{name}-float" / f"{name}-float.onnx", quantized=False)
+    _ort_form(kit, name, plain, coco_yaml, size)
+
+
+def _ort_form(kit: Path, name: str, plain: Path, coco_yaml: str, size: int) -> None:
+    """``plain`` through ONNX Runtime's quantizer: the convolutions only (the
+    decoder's matrix products in 8 bits took 0.456 to 0.314), the stem in
+    float, ranges at the 99.99th percentile; scored as <name>-ortc."""
     sys.path.insert(0, str(HERE))
     from pi_kit import ort_int8
 
+    from easydetect.data.dataset import DetDataset
+
+    calib = DetDataset(coco_yaml, "train", size, augment=False).files[::900][:128]
+    ort = ort_int8(plain, kit / f"{name}-ortc" / f"{name}-ortc.onnx", calib, size,
+                   parts=("",), percentile=0.9999, skip=("stem",))
+    _keep_score(kit, f"{name}-ortc", ort, coco_yaml)
+
+
+def step_qat_ort(root: Path, args, run: str, size: str) -> None:
+    """The ONNX Runtime form of <run>-qatp's trained weights (no training)."""
+    from easydetect import Detector
+    from easydetect.qat import export_qat_onnx
+
+    size = int(size)
+    coco_yaml = str(Path(args.coco).expanduser() / "data.yaml")
+    kit, name = root / "pi-kit-kd", f"{run}-qatp"
+    trained = Detector(str(root / "coco" / name / "weights" / "best.pt"))
+    trained._ensure_net()
     plain = export_qat_onnx(trained.net, trained.names, size,
                             kit / f"{name}-float" / f"{name}-float.onnx", quantized=False)
-    calib = DetDataset(coco_yaml, "train", size, augment=False).files[::900][:128]
-    ort = ort_int8(plain, kit / f"{name}-ort" / f"{name}-ort.onnx", calib, size,
-                   percentile=0.9999, skip=("stem",))
-    _keep_score(kit, f"{name}-ort", ort, coco_yaml)
+    _ort_form(kit, name, plain, coco_yaml, size)
 
 
 def step_obj365_weights(root: Path, args) -> None:
@@ -925,6 +955,8 @@ def main():
             step_obj365_weights(root, args)
         elif kind == "qat":
             step_qat(root, args, *rest)
+        elif kind == "qat-ort":
+            step_qat_ort(root, args, *rest)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

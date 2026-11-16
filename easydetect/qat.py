@@ -246,16 +246,20 @@ def export_qat_onnx(net: nn.Module, names: dict, imgsz: int, out: str | Path,
 
 
 def _store_int8_weights(path: Path) -> None:
-    """Each weight's QuantizeLinear done ahead: the int8 weight stored, only its
-    DequantizeLinear left, the form ONNX Runtime fuses into 8-bit convolutions."""
+    """The file in the form ONNX Runtime's own quantizer writes, which a
+    Raspberry Pi runs as 8-bit convolutions (a float bias, or a weight at
+    -128, kept it in float there): each weight stored as int8 in -127..127,
+    each bias as int32 at the input scale x the weight scale, both behind a
+    DequantizeLinear."""
     import numpy as np
     import onnx
-    from onnx import numpy_helper
+    from onnx import helper, numpy_helper
 
     model = onnx.load(str(path))
     g = model.graph
     inits = {i.name: i for i in g.initializer}
     consts = {n.output[0]: n for n in g.node if n.op_type == "Constant"}
+    producer = {o: n for n in g.node for o in n.output}
 
     def value(name):
         if name in inits:
@@ -264,6 +268,7 @@ def _store_int8_weights(path: Path) -> None:
             return numpy_helper.to_array(consts[name].attribute[0].t)
         return None
 
+    # 1. weights: QuantizeLinear done ahead, int8 in -127..127
     dropped = []
     for n in g.node:
         if n.op_type != "QuantizeLinear":
@@ -274,19 +279,62 @@ def _store_int8_weights(path: Path) -> None:
         axis = next((a.i for a in n.attribute if a.name == "axis"), 1)
         shape = [1] * w.ndim
         shape[axis] = -1
-        q = np.clip(np.round(w / scale.reshape(shape)) + zp.reshape(shape).astype(np.int32),
-                    np.iinfo(zp.dtype).min, np.iinfo(zp.dtype).max).astype(zp.dtype)
+        q = np.clip(np.round(w / scale.reshape(shape)), -127, 127).astype(np.int8)
         name = n.output[0] + "_int8"
         g.initializer.append(numpy_helper.from_array(q, name))
-        for m in g.node:                              # its DequantizeLinear reads the int8 weight
+        for m in g.node:
             m.input[:] = [name if i == n.output[0] else i for i in m.input]
         dropped.append(n)
     for n in dropped:
         g.node.remove(n)
+
+    # 2. biases: int32 at input scale x weight scale, behind a DequantizeLinear
+    inits = {i.name: i for i in g.initializer}      # with the int8 weights of step 1
+    added = []
+    for n in g.node:
+        if n.op_type != "Conv" or len(n.input) < 3:
+            continue
+        dq_x, dq_w = producer.get(n.input[0]), producer.get(n.input[1])
+        bias = value(n.input[2])
+        if (bias is None or dq_x is None or dq_w is None
+                or dq_x.op_type != "DequantizeLinear" or dq_w.op_type != "DequantizeLinear"):
+            continue
+        x_scale, w_scale = value(dq_x.input[1]), value(dq_w.input[1])
+        w_q = value(dq_w.input[0])
+        if x_scale is None or w_scale is None or w_q is None:
+            continue
+        # a channel with (almost) no weight has a tiny scale, and its bias would
+        # not fit in int32 at input x weight scale: widen that weight scale
+        # (its weights, near 0, requantized) until the bias fits, as ONNX
+        # Runtime's own quantizer does
+        x_scale = np.float32(x_scale)
+        need = (np.abs(bias) / (x_scale * np.float32(2**30))).astype(np.float32)
+        if (need > w_scale).any():
+            w_float = w_q.astype(np.float32) * w_scale.reshape(-1, 1, 1, 1)
+            w_scale = np.maximum(w_scale, need).astype(np.float32)
+            w_q = np.clip(np.round(w_float / w_scale.reshape(-1, 1, 1, 1)), -127, 127)
+            wq_name, ws_name = dq_w.input[0] + "_w", dq_w.input[1] + "_w"
+            g.initializer.extend([numpy_helper.from_array(w_q.astype(np.int8), wq_name),
+                                  numpy_helper.from_array(w_scale, ws_name)])
+            dq_w.input[0], dq_w.input[1] = wq_name, ws_name
+        b_scale = (x_scale * w_scale.astype(np.float32)).astype(np.float32)
+        b_q = np.clip(np.round(bias / b_scale), -2**31, 2**31 - 1).astype(np.int32)
+        base = n.input[2] + "_q"
+        g.initializer.extend([numpy_helper.from_array(b_q, base),
+                              numpy_helper.from_array(b_scale, base + "_scale"),
+                              numpy_helper.from_array(np.zeros_like(b_q), base + "_zp")])
+        out = base + "_dq"
+        added.append(helper.make_node("DequantizeLinear", [base, base + "_scale", base + "_zp"],
+                                      [out], axis=0, name=base + "_DequantizeLinear"))
+        n.input[2] = out
+    for k, node in enumerate(added):
+        g.node.insert(k, node)
+
     used = {i for n in g.node for i in n.input}
     for init in [i for i in g.initializer if i.name not in used]:
         g.initializer.remove(init)
     onnx.save(model, str(path))
 
 
-__all__ = ["QuantConv2d", "calibrate", "export_qat_onnx", "fold_batchnorm", "prepare_qat"]
+__all__ = ["QuantConv2d", "calibrate", "export_qat_onnx", "fold_batchnorm", "mark_calibrated",
+           "prepare_qat", "quant_convs"]

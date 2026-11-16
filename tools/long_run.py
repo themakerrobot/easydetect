@@ -305,6 +305,10 @@ for _run, _size in (("ed-sq-416-obj365-kdl-pl", 416), ("ed-sq-448-obj365-more-pl
     # 416, ranges only, 0.447 -> 0.442 (the full range: 0.419)
     OBJ365 += [(f"qatp-{_src}", ["qat", _run, str(_size), "0.9999"], ["coco-data", _src])]
     OBJ365 += [(f"qatp-ort-{_src}", ["qat-ort", _run, str(_size)], [f"qatp-{_src}"])]
+#: Pibo's slower, more accurate choice: the original COCO ed-s at 640 (best
+#: there as it is), 100 queries, the same QAT and 8-bit form
+OBJ365 += [("qatp-ed-s640", ["qat", "ed-s", "640", "0.9999"], ["coco-data"]),
+           ("qatp-ort-ed-s640", ["qat-ort", "ed-s", "640"], ["qatp-ed-s640"])]
 PIBO_KD += OBJ365
 #: the order these run in when named together: what the others need first, then
 #: the whole recipe, then the runs that tell what each part of it adds
@@ -603,9 +607,13 @@ def step_qat(root: Path, args, run: str, size: str, percentile: str = "") -> Non
     pct = float(percentile) if percentile else None
     tag = "-qatp" if pct else "-qat"
     coco_yaml = str(Path(args.coco).expanduser() / "data.yaml")
-    project, name, kit = root / "coco", f"{run}{tag}", root / "pi-kit-kd"
+    mirror = not (root / "coco" / run).exists()       # "ed-s": the original weights
+    base = f"{run}q-{size}" if mirror else run          # ed-sq-640
+    project, name, kit = root / "coco", f"{base}{tag}", root / "pi-kit-kd"
     resume = (project / name / "weights" / "last.pt").exists()
-    model = Detector(str(project / run / "weights" / "best.pt"))
+    model = Detector(run if mirror else str(project / run / "weights" / "best.pt"))
+    if mirror:
+        model._ensure_net().trim(queries=100)
     prepare_qat(model._ensure_net())
     if pct:
         for c in quant_convs(model.net):           # the ranges stay where calibration put them
@@ -629,12 +637,12 @@ def step_qat(root: Path, args, run: str, size: str, percentile: str = "") -> Non
         model.net.to(device)
         calibrate(model.net, batches(), device=device, percentile=pct)
         model.net.cpu()
-        cal = f"{run}-q8cal" + ("p" if pct else "")
+        cal = f"{base}-q8cal" + ("p" if pct else "")
         onnx = export_qat_onnx(model.net, model.names, size, kit / cal / f"{cal}.onnx")
         _keep_score(kit, cal, onnx, coco_yaml)
     best = model.train(data=coco_yaml, epochs=QAT_EPOCHS, imgsz=size, batch=VARIANTS["s"],
                        lr0=QAT_LR, workers=args.workers, project=str(project), name=name,
-                       resume=resume, patience=0)
+                       resume=resume, patience=0, queries=100 if mirror else None)
     trained = Detector(str(best))
     trained._ensure_net()
     for c in quant_convs(trained.net):
@@ -678,7 +686,8 @@ def step_qat_ort(root: Path, args, run: str, size: str) -> None:
 
     size = int(size)
     coco_yaml = str(Path(args.coco).expanduser() / "data.yaml")
-    kit, name = root / "pi-kit-kd", f"{run}-qatp"
+    base = run if (root / "coco" / run).exists() else f"{run}q-{size}"
+    kit, name = root / "pi-kit-kd", f"{base}-qatp"
     trained = Detector(str(root / "coco" / name / "weights" / "best.pt"))
     trained._ensure_net()
     plain = export_qat_onnx(trained.net, trained.names, size,

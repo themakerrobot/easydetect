@@ -85,7 +85,7 @@ def ort_int8(onnx: Path, out: Path, pictures: list, size: int,
     ``parts``: only the convolutions whose names hold one of these
     (``LOSSLESS_PARTS``: the encoder's FPN and PAN blocks). ``percentile``
     (0.9999): ranges that leave out the rarest values, much better than the
-    full range for ed-s (Objects365 ed-s at 416: 0.437 against 0.419);
+    full range for ed-s;
     ``skip``: node names holding one of these stay in float ("stem")."""
     import cv2
     import numpy as np

@@ -238,86 +238,17 @@ PIBO_KD += [("kd-s320-deim", ["coco-kd", "320", "ed-l", "ed-sq-320-deim"],
             ("score-kd-s320-deim", ["score-forms", "ed-sq-320-deim-kdl", "320", "pi-kit-kd"],
              ["kd-s320-deim"])]
 
-#: the 0.5 s / 0.45 target on a Pi 4: ed-s at 352-416 px (from the 416 fine-tune)
-#: in float, with its FPN and PAN in 8 bits, and all in 8 bits, each scored on
-#: COCO as Pibo runs it (pi-kit-frontier/, then timed on the Pi); then the
-#: teaching at 384 and 416 from the 416 fine-tune
-PIBO_KD += [("pibo-frontier", ["frontier"], ["coco-data", "coco-s416-q100"])]
-PIBO_KD += [(f"kd-s{_size}-from416", ["coco-kd", str(_size), "ed-l", "ed-sq-416"],
-             ["coco-data", "coco-s416-q100"]) for _size in (384, 416)]
-PIBO_KD += [(f"score-kd-s{_size}-from416",
-             ["score-forms", f"ed-sq-{_size}-from416-kdl" if _size != 416 else "ed-sq-416-kdl",
-              str(_size), "pi-kit-kd"], [f"kd-s{_size}-from416"]) for _size in (384, 416)]
-
-#: more pictures without Objects365: PSEUDO_PICTURES Open Images pictures boxed
-#: with COCO's classes by ed-x (tools/pseudo_label.py), then the teaching at
-#: 384 / 416 on COCO and those together
-PSEUDO_PICTURES, PSEUDO_EPOCHS = 300000, 8
-PSEUDO_TEACHER = "obj365/ed-x-obj365.pt"       # COCO 59.3 at 640
-PIBO_KD += [("oi-pseudo", ["oi-pseudo"], ["oi-data", "obj365-weights"])]
-for _size in (384, 416):
-    _name = f"ed-sq-{_size}-from416-kdl-pl" if _size != 416 else "ed-sq-416-kdl-pl"
-    PIBO_KD += [(f"kd-s{_size}-pseudo", ["coco-kd", str(_size), "ed-l", "ed-sq-416", "pseudo"],
-                 ["coco-data", "coco-s416-q100", "oi-pseudo"]),
-                (f"score-kd-s{_size}-pseudo", ["score-forms", _name, str(_size), "pi-kit-kd"],
-                 [f"kd-s{_size}-pseudo"])]
-
-#: Objects365-pretrained, COCO-finished weights (D-FINE's obj2coco; their
-#: terms to be checked before shipping): ed-s (50.7 at 640) taught by ed-l
-#: (57.3) at 416 and 384, straight from the 640 px weights
-OBJ365 = [("obj365-weights", ["obj365-weights"], [])]
-for _size in (416, 384):
-    OBJ365 += [(f"kd-s{_size}-obj365", ["coco-kd", str(_size), "obj365/ed-l-obj365.pt",
-                                        "obj365/ed-s-obj365.pt"], ["coco-data", "obj365-weights"]),
-               (f"score-kd-s{_size}-obj365", ["score-forms", f"ed-sq-{_size}-obj365-kdl",
-                                              str(_size), "pi-kit-kd"], [f"kd-s{_size}-obj365"])]
-#: the whole recipe for Pibo's new ed-s: the Objects365 start, taught by the
-#: Objects365 ed-l at 640, on COCO and the Open Images pictures ed-x boxed
-for _size in (416, 384):
-    OBJ365 += [(f"kd-s{_size}-obj365-pl", ["coco-kd", str(_size), "obj365/ed-l-obj365.pt",
-                                           "obj365/ed-s-obj365.pt", "pseudo"],
-                ["coco-data", "obj365-weights", "oi-pseudo"]),
-               (f"score-kd-s{_size}-obj365-pl", ["score-forms", f"ed-sq-{_size}-obj365-kdl-pl",
-                                                 str(_size), "pi-kit-kd"],
-                [f"kd-s{_size}-obj365-pl"])]
-#: the same at 448 px without the teacher: the teaching added nothing at 320
-#: (0.390 -> 0.386) and its matching on the CPU holds the GPU at ~65%. At 416
-#: the first epoch was the best (0.446, then 0.443-0.445): FT_EPOCHS, at half
-#: the usual learning rate, so less of the Objects365 start is trained away
-FT_EPOCHS, FT_LR = 4, 1e-4
-OBJ365 += [("ft-s448-obj365-pl", ["coco-kd", "448", "none", "obj365/ed-s-obj365.pt", "pseudo"],
-            ["coco-data", "obj365-weights", "oi-pseudo"]),
-           ("score-ft-s448-obj365-pl", ["score-forms", "ed-sq-448-obj365-more-pl", "448",
-                                        "pi-kit-kd"], ["ft-s448-obj365-pl"])]
-#: quantization-aware training (easydetect/qat.py) for the candidates: every
-#: convolution but the stem in 8 bits, QAT_EPOCHS on COCO at QAT_LR; the
-#: 8-bit file before training (ranges only) is scored too
+#: quantization-aware training (easydetect/qat.py) for Pibo's two models, ed-s
+#: at 320 (the default) and the original ed-s at 640 (the accurate choice):
+#: every convolution but the stem in 8 bits, ranges at the 99.99th percentile
+#: fixed while training, QAT_EPOCHS on COCO at QAT_LR; then the same weights in
+#: ONNX Runtime's 8-bit form (pi-kit-kd/<run>-qatp-ortc), the threshold inside
 QAT_EPOCHS, QAT_LR = 2, 2e-5
-#: ed-sq-416 is COCO only (no Objects365, whose pictures are for academic use):
-#: the one to ship until those terms are cleared
-for _run, _size in (("ed-sq-416-obj365-kdl-pl", 416), ("ed-sq-448-obj365-more-pl", 448),
-                    ("ed-sq-416", 416), ("ed-sq-320", 320)):
-    _src = {"ed-sq-416-obj365-kdl-pl": "kd-s416-obj365-pl",
-            "ed-sq-448-obj365-more-pl": "ft-s448-obj365-pl",
-            "ed-sq-416": "coco-s416-q100", "ed-sq-320": "coco-s320-q100"}[_run]
-    OBJ365 += [(f"qat-{_src}", ["qat", _run, str(_size)], ["coco-data", _src])]
-    # ranges at the 99.99th percentile, fixed while training: Objects365 ed-s at
-    # 416, ranges only, 0.447 -> 0.442 (the full range: 0.419)
-    OBJ365 += [(f"qatp-{_src}", ["qat", _run, str(_size), "0.9999"], ["coco-data", _src])]
-    OBJ365 += [(f"qatp-ort-{_src}", ["qat-ort", _run, str(_size)], [f"qatp-{_src}"])]
-#: Pibo's slower, more accurate choice: the original COCO ed-s at 640 (best
-#: there as it is), 100 queries, the same QAT and 8-bit form
-OBJ365 += [("qatp-ed-s640", ["qat", "ed-s", "640", "0.9999"], ["coco-data"]),
-           ("qatp-ort-ed-s640", ["qat-ort", "ed-s", "640"], ["qatp-ed-s640"])]
-PIBO_KD += OBJ365
-#: the order these run in when named together: what the others need first, then
-#: the whole recipe, then the runs that tell what each part of it adds
-PIBO_ORDER = ["qatp-kd-s416-obj365-pl", "obj365-weights", "oi-pseudo",
-              "kd-s416-obj365-pl", "score-kd-s416-obj365-pl",
-              "kd-s416-obj365", "score-kd-s416-obj365",
-              "kd-s416-from416", "score-kd-s416-from416",
-              "kd-s384-obj365-pl", "score-kd-s384-obj365-pl"]
-PIBO_KD.sort(key=lambda st: PIBO_ORDER.index(st[0]) if st[0] in PIBO_ORDER else len(PIBO_ORDER))
+PIBO_KD += [("qatp-coco-s320-q100", ["qat", "ed-sq-320", "320", "0.9999"],
+             ["coco-data", "coco-s320-q100"]),
+            ("qatp-ort-coco-s320-q100", ["qat-ort", "ed-sq-320", "320"], ["qatp-coco-s320-q100"]),
+            ("qatp-ed-s640", ["qat", "ed-s", "640", "0.9999"], ["coco-data"]),
+            ("qatp-ort-ed-s640", ["qat-ort", "ed-s", "640"], ["qatp-ed-s640"])]
 
 #: run only when named (--only): set aside for later, not part of a plain run
 ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD
@@ -436,46 +367,29 @@ def step_coco_distill(root: Path, args, kind: str) -> None:
 
 
 def step_coco_kd(root: Path, args, size: str, teacher: str = "ed-l",
-                 start: str = "ed-sq-320", data: str = "coco") -> None:
-    """``start`` (a COCO fine-tune under <root>/coco, or a .pt under <root>)
-    trained KD_EPOCHS more at ``size`` px with 100 queries, taught by
-    ``teacher`` (a name, or a .pt under <root>) at 640 px on the same pictures
+                 start: str = "ed-sq-320") -> None:
+    """``start`` (a COCO fine-tune under <root>/coco) trained KD_EPOCHS more at
+    ``size`` px, taught by ``teacher`` at 640 px on the same pictures
     (``none``: no teacher, at ``size``)."""
     from easydetect import Detector
     from easydetect.distill import Distiller
 
-    # data "pseudo": COCO and the Open Images pictures ed-x boxed (oi-pseudo)
-    coco_yaml = Path(args.coco if data == "coco" else args.pseudo).expanduser() / "data.yaml"
+    coco_yaml = Path(args.coco).expanduser() / "data.yaml"
     project = root / "coco"
     size = int(size)
-    if start.endswith(".pt"):                       # obj365/ed-s-obj365.pt -> ed-sq-416-obj365
-        base = f"ed-sq-{size}-{Path(start).stem.removeprefix('ed-s-')}"
-    elif start == "ed-sq-320":
-        base = f"ed-sq-{size}"
-    elif start.startswith(f"ed-sq-{size}"):
-        base = start                                # ed-sq-320-deim at 320
-    else:
-        base = f"ed-sq-{size}-from{start.removeprefix('ed-sq-')}"
-    name = (f"{base}-kdl" if teacher != "none" else f"{base}-more") \
-        + ("-pl" if data == "pseudo" else "")
+    base = f"ed-sq-{size}" if start == "ed-sq-320" else start     # ed-sq-320-deim
+    name = f"{base}-kdl" if teacher != "none" else f"{base}-more"
     run = project / name
     resume = (run / "weights" / "last.pt").exists()
     if run.exists() and not resume:
         shutil.rmtree(run)
-    student = Detector(str(root / start) if start.endswith(".pt")
-                       else str(project / start / "weights" / "best.pt"))
+    student = Detector(str(project / start / "weights" / "best.pt"))
     extra, imgsz = {}, size
-    epochs = KD_EPOCHS if data == "coco" else PSEUDO_EPOCHS
-    if start.endswith(".pt"):
-        extra["queries"] = 100                      # a 640 px checkpoint has 300
-        if teacher == "none" and data == "pseudo":
-            epochs, extra["lr0"] = FT_EPOCHS, FT_LR
     if teacher != "none":
         imgsz = 640                                 # what the teacher sees
-        t = Detector(str(root / teacher) if teacher.endswith(".pt") else teacher)
-        extra["extra_loss"] = Distiller(t, student, student_scale=size / 640)
+        extra["extra_loss"] = Distiller(Detector(teacher), student, student_scale=size / 640)
     best = student.train(
-        data=str(coco_yaml), epochs=epochs, imgsz=imgsz, batch=VARIANTS["s"],
+        data=str(coco_yaml), epochs=KD_EPOCHS, imgsz=imgsz, batch=VARIANTS["s"],
         workers=args.workers, project=str(project), name=name, resume=resume, patience=0,
         **extra)
     print(f"BEST {best}", flush=True)
@@ -557,14 +471,6 @@ def step_score_forms(root: Path, args, run: str, size: str, kit: str = "pi-kit-d
     _score_forms(root, args, (run,), [("", size, {}, "fp"),
                                       ("-l2q50", size, {"layers": 2, "queries": 50}, False)],
                  kit)
-
-
-def step_oi_pseudo(root: Path, args) -> None:
-    """PSEUDO_PICTURES Open Images training pictures boxed by ed-x (COCO classes)."""
-    _run([PY, "-u", str(HERE / "pseudo_label.py"),
-          "--images", str(Path(args.openimages).expanduser() / "images" / "train"),
-          "--coco", args.coco, "--out", args.pseudo, "--limit", str(PSEUDO_PICTURES),
-          "--teacher", str(root / PSEUDO_TEACHER), "--workers", str(args.workers)])
 
 
 def _keep_score(kit: Path, key: str, onnx: Path, coco_yaml: str) -> None:
@@ -650,7 +556,7 @@ def step_qat(root: Path, args, run: str, size: str, percentile: str = "") -> Non
     onnx = export_qat_onnx(trained.net, trained.names, size, kit / name / f"{name}.onnx")
     _keep_score(kit, name, onnx, coco_yaml)
     # the same weights through ONNX Runtime's own quantizer: the form a Pi 4
-    # runs fastest (416: 491 ms, against ~700 ms for the QDQ file above)
+    # runs fast (the QDQ file above is as accurate but slower there)
     plain = export_qat_onnx(trained.net, trained.names, size,
                             kit / f"{name}-float" / f"{name}-float.onnx", quantized=False)
     _ort_form(kit, name, plain, coco_yaml, size)
@@ -658,7 +564,7 @@ def step_qat(root: Path, args, run: str, size: str, percentile: str = "") -> Non
 
 def _ort_form(kit: Path, name: str, plain: Path, coco_yaml: str, size: int) -> None:
     """``plain`` through ONNX Runtime's quantizer: the convolutions only (the
-    decoder's matrix products in 8 bits took 0.456 to 0.314), the stem in
+    decoder's matrix products in 8 bits lose most of the accuracy), the stem in
     float, ranges at the 99.99th percentile; scored as <name>-ortc."""
     sys.path.insert(0, str(HERE))
     from pi_kit import ort_int8
@@ -693,23 +599,6 @@ def step_qat_ort(root: Path, args, run: str, size: str) -> None:
     plain = export_qat_onnx(trained.net, trained.names, size,
                             kit / f"{name}-float" / f"{name}-float.onnx", quantized=False)
     _ort_form(kit, name, plain, coco_yaml, size)
-
-
-def step_obj365_weights(root: Path, args) -> None:
-    """D-FINE's Objects365-pretrained, COCO-finished s, l and x, converted."""
-    for v in ("s", "l", "x"):
-        out = root / "obj365" / f"ed-{v}-obj365.pt"
-        if not out.exists():
-            _run([PY, "-u", str(HERE / "convert_upstream.py"), "--size", v,
-                  "--source", "obj365", "--out", str(out)], cwd=root)
-
-
-def step_frontier(root: Path, args) -> None:
-    """ed-sq-416 at 352-448 px: float and all 8-bit, then FPN/PAN 8-bit."""
-    forms = [(f"-{size}", size, {}, True) for size in (352, 384, 416, 448)]
-    _score_forms(root, args, ("ed-sq-416",), forms, "pi-kit-frontier")
-    _score_forms(root, args, ("ed-sq-416",), [(t, z, e, "fp") for t, z, e, _ in forms],
-                 "pi-kit-frontier")
 
 
 def step_oi_data(root: Path, args) -> None:
@@ -852,8 +741,7 @@ def run_step(root: Path, name: str, what: list[str], args) -> bool:
     cmd = [PY, "-u", str(Path(__file__).resolve()), "--root", str(root), "--coco", args.coco,
            "--bench-root", args.bench_root, "--openimages", args.openimages,
            "--workers", str(args.workers),
-           "--coco-epochs", str(args.coco_epochs), "--pseudo", args.pseudo,
-           "--internal", *what]
+           "--coco-epochs", str(args.coco_epochs), "--internal", *what]
     with log.open("a") as out:
         out.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} try\n")
         out.flush()
@@ -934,8 +822,6 @@ def main():
     parser.add_argument("--coco", default="~/datasets/coco")
     parser.add_argument("--bench-root", default="~/datasets/bench")
     parser.add_argument("--openimages", default="~/datasets/openimages")
-    parser.add_argument("--pseudo", default="~/datasets/oi-pseudo",
-                        help="Open Images boxed with COCO's classes (tools/pseudo_label.py)")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--coco-epochs", type=int, default=COCO_EPOCHS)
     parser.add_argument("--stall", type=int, default=3 * 3600,
@@ -966,12 +852,6 @@ def main():
             step_coco_distill(root, args, *rest)
         elif kind == "coco-kd":
             step_coco_kd(root, args, *rest)
-        elif kind == "frontier":
-            step_frontier(root, args)
-        elif kind == "oi-pseudo":
-            step_oi_pseudo(root, args)
-        elif kind == "obj365-weights":
-            step_obj365_weights(root, args)
         elif kind == "qat":
             step_qat(root, args, *rest)
         elif kind == "qat-ort":

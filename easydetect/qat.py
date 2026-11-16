@@ -12,7 +12,7 @@ convolutions, which ONNX Runtime runs as 8-bit ones.
     net = prepare_qat(detector.net)              # in place: folded, rounding
     calibrate(net, batches)                      # input ranges from pictures
     ... train a few epochs at a low learning rate ...
-    export_qat_onnx(net, names, 416, "out/model-qat.onnx")
+    export_qat_onnx(net, names, 320, "out/model-qat.onnx")
 
 The backbone's stem stays in float (8 bits there cost the most), and so does
 everything that is not a convolution: the decoder's attention and box

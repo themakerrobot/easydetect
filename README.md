@@ -268,7 +268,9 @@ model runs as fast as the original of the same size and queries):
 * **100 queries cost almost nothing** in accuracy (0.323 → 0.322 at 320) and
   save a third of the time on the Pi. Through ONNX Runtime, as the Pibo
   robot runs it, YOLO11s at 320 takes 300 ms on the same Pi and ed-s at 320
-  with 100 queries 407 ms; Pibo runs ed-s for its accuracy.
+  with 100 queries 407 ms. Pibo now runs ed-s at 416 in 8 bits (Objects365
+  start, quantization-aware training): 0.437 COCO mAP50-95 in 470 ms
+  (ROADMAP.md).
 * The fine-tuned 320 and 416 columns were trained with 100 queries; 640
   with all 300 (it did not beat the original either way).
 * `ed-n-320.pt` and `ed-s-320.pt` are on the mirror: a run at 320 px with at

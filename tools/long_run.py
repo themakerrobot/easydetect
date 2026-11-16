@@ -574,13 +574,11 @@ def _keep_score(kit: Path, key: str, onnx: Path, coco_yaml: str) -> None:
 
 
 def _accuracy_table(kit: Path, scores: dict) -> None:
-    """<kit>/accuracy.md from scores.json: mAP50-95 both ways."""
-    def official(v):
-        return f"{v['map_official']:.3f}" if "map_official" in v else ""
-
-    lines = ["| model | mAP50-95 (official) | mAP50-95 (Pibo) | file |",
-             "| --- | --- | --- | --- |"]
-    lines += [f"| {k} | {official(v)} | {v['map']:.3f} | {v['file']} |" for k, v in scores.items()]
+    """<kit>/accuracy.md from scores.json: COCO mAP50-95 as the original
+    authors score it (the 300 best query x class pairs)."""
+    lines = ["| model | COCO mAP50-95 | file |", "| --- | --- | --- |"]
+    lines += [f"| {k} | {v['map_official']:.3f} | {v['file']} |"
+              for k, v in scores.items() if "map_official" in v]
     (kit / "accuracy.md").write_text("\n".join(lines) + "\n")
 
 

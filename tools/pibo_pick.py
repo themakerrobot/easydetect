@@ -31,21 +31,21 @@ def main() -> int:
     rows = []
     for key, v in scores.items():
         ms = times.get(Path(v["file"]).parent.name)
-        acc = v.get("map_official", v["map"])
-        rows.append((acc, v["map"], ms, key, v["file"]))
+        if "map_official" in v:
+            rows.append((v["map_official"], ms, key, v["file"]))
     rows.sort(key=lambda r: -r[0])
-    print(f"{'mAP50-95 official':>18} {'Pibo':>6} {'ms':>8}  model")
-    for acc, pibo, ms, key, _ in rows:
+    print(f"{'COCO mAP50-95':>14} {'ms':>8}  model")
+    for acc, ms, key, _ in rows:
         flag = "" if ms is None else ("  <= ok" if ms <= args.ms else "")
-        print(f"{acc:18.3f} {pibo:6.3f} {ms if ms is not None else '?':>8}  {key}{flag}")
+        print(f"{acc:14.3f} {ms if ms is not None else '?':>8}  {key}{flag}")
     fit = [r for r in rows if r[2] is not None and r[2] <= args.ms]
     if not fit:
         print(f"\nnothing at {args.ms:.0f} ms or less")
         return 1
-    acc, pibo, ms, key, file = fit[0]
+    acc, ms, key, file = fit[0]
     out = Path(args.out).expanduser()
     shutil.copyfile(kit / file, out)
-    print(f"\nbest: {key}: mAP50-95 {acc:.3f} (official), {pibo:.3f} (Pibo), {ms} ms -> {out}")
+    print(f"\nbest: {key}: COCO mAP50-95 {acc:.3f}, {ms} ms -> {out}")
     return 0
 
 

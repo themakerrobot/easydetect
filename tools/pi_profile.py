@@ -27,6 +27,10 @@ def session(path: str, threads: int, profile: bool = False):
     o = ort.SessionOptions()
     o.intra_op_num_threads = threads
     o.enable_profiling = profile
+    if profile:          # the profile goes to a temporary folder, not where this runs
+        import tempfile
+
+        o.profile_file_prefix = os.path.join(tempfile.mkdtemp(), "profile")
     return ort.InferenceSession(path, o, providers=["CPUExecutionProvider"])
 
 
@@ -80,7 +84,11 @@ def main() -> int:
         print(f"threads {threads}: {timed(session(path, threads), feed, n):.1f} ms")
     s = session(path, 4, profile=True)
     timed(s, feed, n)
-    events = json.load(open(s.end_profiling()))
+    profile = s.end_profiling()
+    with open(profile) as f:
+        events = json.load(f)
+    os.remove(profile)
+    os.rmdir(os.path.dirname(profile))
     ops, parts = collections.Counter(), collections.Counter()
     for e in events:
         if e.get("cat") == "Node" and e["name"].endswith("_kernel_time"):

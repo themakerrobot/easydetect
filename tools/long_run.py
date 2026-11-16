@@ -296,10 +296,10 @@ QAT_EPOCHS, QAT_LR = 2, 2e-5
 #: ed-sq-416 is COCO only (no Objects365, whose pictures are for academic use):
 #: the one to ship until those terms are cleared
 for _run, _size in (("ed-sq-416-obj365-kdl-pl", 416), ("ed-sq-448-obj365-more-pl", 448),
-                    ("ed-sq-416", 416)):
+                    ("ed-sq-416", 416), ("ed-sq-320", 320)):
     _src = {"ed-sq-416-obj365-kdl-pl": "kd-s416-obj365-pl",
             "ed-sq-448-obj365-more-pl": "ft-s448-obj365-pl",
-            "ed-sq-416": "coco-s416-q100"}[_run]
+            "ed-sq-416": "coco-s416-q100", "ed-sq-320": "coco-s320-q100"}[_run]
     OBJ365 += [(f"qat-{_src}", ["qat", _run, str(_size)], ["coco-data", _src])]
     # ranges at the 99.99th percentile, fixed while training: Objects365 ed-s at
     # 416, ranges only, 0.447 -> 0.442 (the full range: 0.419)

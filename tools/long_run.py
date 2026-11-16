@@ -633,6 +633,17 @@ def step_qat(root: Path, args, run: str, size: str, percentile: str = "") -> Non
         c.observing = not pct
     onnx = export_qat_onnx(trained.net, trained.names, size, kit / name / f"{name}.onnx")
     _keep_score(kit, name, onnx, coco_yaml)
+    # the same weights through ONNX Runtime's own quantizer: the form a Pi 4
+    # runs fastest (416: 491 ms, against ~700 ms for the QDQ file above)
+    sys.path.insert(0, str(HERE))
+    from pi_kit import ort_int8
+
+    plain = export_qat_onnx(trained.net, trained.names, size,
+                            kit / f"{name}-float" / f"{name}-float.onnx", quantized=False)
+    calib = DetDataset(coco_yaml, "train", size, augment=False).files[::900][:128]
+    ort = ort_int8(plain, kit / f"{name}-ort" / f"{name}-ort.onnx", calib, size,
+                   percentile=0.9999, skip=("stem",))
+    _keep_score(kit, f"{name}-ort", ort, coco_yaml)
 
 
 def step_obj365_weights(root: Path, args) -> None:

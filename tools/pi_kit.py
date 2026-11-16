@@ -77,16 +77,21 @@ LOSSLESS_PARTS = ("fpn_blocks", "pan_blocks")
 
 
 def ort_int8(onnx: Path, out: Path, pictures: list, size: int,
-             parts: tuple[str, ...] | None = None) -> Path:
+             parts: tuple[str, ...] | None = None, percentile: float | None = None,
+             skip: tuple[str, ...] = ()) -> Path:
     """An 8-bit copy of an .onnx for ONNX Runtime (what a Pi runs), calibrated
     on ``pictures``: the convolutions and matrix products only, per channel,
     as QDQ — the box decoding and the top-k selection stay in float.
     ``parts``: only the convolutions whose names hold one of these
-    (``LOSSLESS_PARTS``: the encoder's FPN and PAN blocks)."""
+    (``LOSSLESS_PARTS``: the encoder's FPN and PAN blocks). ``percentile``
+    (0.9999): ranges that leave out the rarest values, much better than the
+    full range for ed-s (Objects365 ed-s at 416: 0.437 against 0.419);
+    ``skip``: node names holding one of these stay in float ("stem")."""
     import cv2
     import numpy as np
     from onnxruntime.quantization import (
         CalibrationDataReader,
+        CalibrationMethod,
         QuantFormat,
         QuantType,
         quantize_static,
@@ -111,13 +116,18 @@ def ort_int8(onnx: Path, out: Path, pictures: list, size: int,
     out.parent.mkdir(parents=True, exist_ok=True)
     pre = out.with_name(out.stem + "-pre.onnx")
     quant_pre_process(str(onnx), str(pre), skip_symbolic_shape=True)
-    chosen = {}
-    if parts:
+    chosen: dict = {}
+    if parts or skip:
         import onnx as onnx_lib
 
+        ops = ("Conv",) if parts else ("Conv", "MatMul")
         chosen["nodes_to_quantize"] = [
             n.name for n in onnx_lib.load(str(pre)).graph.node
-            if n.op_type == "Conv" and any(p in n.name for p in parts)]
+            if n.op_type in ops and (not parts or any(p in n.name for p in parts))
+            and not any(k in n.name for k in skip)]
+    if percentile:
+        chosen["calibrate_method"] = CalibrationMethod.Percentile
+        chosen["extra_options"] = {"CalibPercentile": percentile * 100}
     quantize_static(str(pre), str(out), Reader(), quant_format=QuantFormat.QDQ,
                     op_types_to_quantize=["Conv"] if parts else ["Conv", "MatMul"],
                     per_channel=True, activation_type=QuantType.QUInt8,

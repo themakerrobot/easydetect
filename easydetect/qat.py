@@ -215,9 +215,24 @@ def calibrate(net: nn.Module, batches, device="cpu", steps: int | None = None,
         net.train(was)
 
 
+def _plain(q: QuantConv2d) -> nn.Conv2d:
+    """A QuantConv2d's weights as an ordinary convolution."""
+    w = q.weight
+    conv = nn.Conv2d(w.shape[1] * q.groups, w.shape[0], tuple(w.shape[2:]), q.stride, q.padding,
+                     q.dilation, q.groups, bias=q.bias is not None)
+    conv.weight.data = w.data.clone()
+    if q.bias is not None:
+        conv.bias.data = q.bias.data.clone()
+    return conv
+
+
 def export_qat_onnx(net: nn.Module, names: dict, imgsz: int, out: str | Path,
-                    queries: int | None = None) -> Path:
-    """The trained 8-bit network as a QDQ .onnx (opset 17), names inside."""
+                    queries: int | None = None, quantized: bool = True) -> Path:
+    """The trained 8-bit network as a QDQ .onnx (opset 17), names inside.
+
+    ``quantized=False``: its weights as a plain float .onnx instead (the
+    BatchNorms folded), for ONNX Runtime's own quantizer, whose files a
+    Raspberry Pi 4 runs faster (tools/pi_kit.py ``ort_int8``)."""
     import warnings
 
     from .exporter import _EXPORT_LOCK, _embed_names, _write_labels
@@ -231,8 +246,14 @@ def export_qat_onnx(net: nn.Module, names: dict, imgsz: int, out: str | Path,
     for name, m in deployed.named_modules():        # the decoder's training heads go
         if name.startswith("decoder") and hasattr(m, "convert_to_deploy"):
             m.convert_to_deploy()
-    for c in quant_convs(deployed):
-        c.freeze()
+    if quantized:
+        for c in quant_convs(deployed):
+            c.freeze()
+    else:
+        for m in list(deployed.modules()):
+            for child_name, child in list(m.named_children()):
+                if isinstance(child, QuantConv2d):
+                    setattr(m, child_name, _plain(child))
     wrapper = DeployWrapper(deployed).eval()
     with _EXPORT_LOCK, warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -241,7 +262,8 @@ def export_qat_onnx(net: nn.Module, names: dict, imgsz: int, out: str | Path,
                           opset_version=17, dynamo=False)
         table = _write_labels(out.parent, out.stem, names)
         _embed_names(out, table)
-    _store_int8_weights(out)
+    if quantized:
+        _store_int8_weights(out)
     return out
 
 

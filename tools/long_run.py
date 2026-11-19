@@ -993,6 +993,15 @@ def main():
                      if not any(wanted(s[0], [o]) for s in known_steps()))
     if unknown:
         raise SystemExit(f"no such step: {', '.join(unknown)}")
+    if any(name.startswith("hub-") for name, _, _ in steps):
+        # the datasets ahead are downloaded while the GPU trains on this one
+        prefetch_log = root / "logs" / "hub-prefetch.log"
+        prefetch_log.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen([PY, "-u", str(HERE / "hub_data.py"), "--all", "--prefetch",
+                          "--root", args.hub_root, "--coco", args.coco],
+                         stdout=prefetch_log.open("a"), stderr=subprocess.STDOUT,
+                         start_new_session=True)
+        print(f"downloading the datasets ahead: {prefetch_log}", flush=True)
     for rnd in range(2):                            # a second pass for what failed
         for name, what, needs in steps:
             done, failed = state / f"{name}.done", state / f"{name}.failed"

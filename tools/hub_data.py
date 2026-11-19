@@ -21,6 +21,7 @@ for scoring (``score.yaml``), as ``rf100.py`` lays them out.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import random
@@ -434,29 +435,83 @@ MAKERS = {"bccd": bccd, "plantdoc": plantdoc, "gwhd": gwhd, "taco": taco,
           "doclaynet": doclaynet, "caltech-camera-traps": caltech_camera_traps}
 
 
+#: the order long_run.py trains them in, so a prefetch gets the next one first
+ORDER = ["bccd", "taco", "plantdoc", "gwhd", *(f"rf100-{n}" for n in RF100_SETS),
+         "doclaynet", "caltech-camera-traps", "lvis"]
+
+
+@contextlib.contextmanager
+def _locked(path: Path, what: str):
+    """One process at a time on a dataset (a prefetch and a training step may
+    both want it); the other waits, saying so every ten minutes."""
+    import fcntl
+    import time
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as handle:
+        waited = 0
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if waited % 600 == 0:
+                    print(f"{what}: another process is preparing it; waiting", flush=True)
+                time.sleep(30)
+                waited += 30
+        yield
+
+
 def prepare(key: str, root: Path, coco: Path) -> tuple[Path, Path | None]:
     """(data.yaml to train on, data.yaml to score on when not the same)."""
-    if key.startswith("rf100-"):
-        return rf100(key[len("rf100-"):], root)
-    folder = root / key
-    if (folder / ".ready").exists():
-        return folder / "data.yaml", None
-    folder.mkdir(parents=True, exist_ok=True)
-    if key == "lvis":
-        return lvis(folder, coco), None
-    return MAKERS[key](folder), None
+    with _locked(root / ".locks" / f"{key}.lock", key):
+        if key.startswith("rf100-"):
+            return rf100(key[len("rf100-"):], root)
+        folder = root / key
+        if (folder / ".ready").exists():
+            return folder / "data.yaml", None
+        folder.mkdir(parents=True, exist_ok=True)
+        if key == "lvis":
+            return lvis(folder, coco), None
+        return MAKERS[key](folder), None
+
+
+def prefetch(keys: list[str], root: Path, coco: Path) -> int:
+    """Every dataset in ``keys`` made ready, one after another, while training
+    runs on the GPU; one prefetch at a time, a failure left for the training
+    step to try again."""
+    import fcntl
+
+    (root / ".locks").mkdir(parents=True, exist_ok=True)
+    handle = open(root / ".locks" / "prefetch.lock", "w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("a prefetch is running already", flush=True)
+        return 0
+    for key in keys:
+        try:
+            print(f"{key}: {prepare(key, root, coco)[0]}", flush=True)
+        except Exception as exc:  # noqa: BLE001  (its training step tries again)
+            print(f"{key}: not ready ({exc}); its training step will try again", flush=True)
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("keys", nargs="*")
-    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--all", action="store_true", help="every dataset, in training order")
+    parser.add_argument("--skip", nargs="*", default=[], help="leave these out")
+    parser.add_argument("--prefetch", action="store_true",
+                        help="one at a time behind a lock, going on past a failure")
     parser.add_argument("--root", default="~/datasets/hub")
     parser.add_argument("--coco", default="~/datasets/coco")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
-    keys = [*MAKERS, "lvis", *(f"rf100-{n}" for n in RF100_SETS)] if args.all else args.keys
+    keys = [k for k in (ORDER if args.all else args.keys) if k not in args.skip]
     root, coco = Path(args.root).expanduser(), Path(args.coco).expanduser()
+    if args.prefetch:
+        return prefetch(keys, root, coco)
     for key in keys:
         print(prepare(key, root, coco), flush=True)
     return 0

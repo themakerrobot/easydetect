@@ -267,6 +267,8 @@ from hub_data import RF100_SETS  # noqa: E402
 HUB_ORDER = ["coco", "bccd", "construction-ppe", "taco", "plantdoc", "gwhd",
              *(f"rf100-{_n}" for _n in RF100_SETS),
              "doclaynet", "caltech-camera-traps", "lvis", "openimages"]
+#: a training still improving at its last epochs goes on this much longer, once
+HUB_EXTEND = 1.5
 #: epochs and patience where the picture count does not decide them
 HUB_FIXED = {"openimages": (10, 3), "lvis": (24, 6)}
 HUB = [(f"hub-{_k}-{_size}", ["hub", _k, str(_size)],
@@ -715,6 +717,20 @@ def step_hub(root: Path, args, key: str, size: str) -> None:
             data=str(train), epochs=epochs, imgsz=size, batch=VARIANTS["s"],
             workers=args.workers, project=str(project), name=name, resume=resume,
             patience=patience, queries=queries))
+        # still improving when the schedule ran out (the best in its last tenth,
+        # no early stop): once more, half as long again; best.pt only improves
+        done = json.loads((run / "summary.json").read_text()) \
+            if (run / "summary.json").exists() else {}
+        last_best = done.get("best_epoch") or 0
+        if (not done.get("stopped_early") and last_best >= 0.9 * epochs
+                and (done.get("epochs_run") or 0) <= epochs):
+            more = round(epochs * HUB_EXTEND)
+            print(f"{name}: best at epoch {last_best} of {epochs}, still improving; "
+                  f"on to {more}", flush=True)
+            best = Path(Detector(str(start)).train(
+                data=str(train), epochs=more, imgsz=size, batch=VARIANTS["s"],
+                workers=args.workers, project=str(project), name=name, resume=True,
+                patience=patience, queries=queries))
     _run([PY, "-u", str(HERE / "hub_publish.py"), "--weights", str(best), "--data", str(train),
           "--dataset", key, "--size", str(size), "--stage", str(root / "hub-stage"),
           *(["--score-data", str(scored)] if scored else [])])

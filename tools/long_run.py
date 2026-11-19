@@ -254,8 +254,16 @@ PIBO_KD += [("qatp-coco-s320-q100", ["qat", "ed-sq-320", "320", "0.9999"],
 #: float and ONNX Runtime's 8-bit form, for timing on the Pi
 LAB_FORM = [("lab-form-n320", ["lab-form"], ["coco-data"])]
 
+#: easydetect-hub: ed-s at 320 (100 queries, from the COCO 320 start) and 640 on
+#: each dataset, then published with its licence (tools/hub_publish.py). Open
+#: Images at 320 is the oi-s320 run already made.
+HUB_DATASETS = {"construction-ppe": (100, 20, []), "openimages": (10, 3, ["oi-data"])}
+HUB = [(f"hub-{_k}-{_size}", ["hub", _k, str(_size)],
+        _needs + (["oi-s320"] if (_k, _size) == ("openimages", 320) else []))
+       for _k, (_e, _p, _needs) in HUB_DATASETS.items() for _size in (320, 640)]
+
 #: run only when named (--only): set aside for later, not part of a plain run
-ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD + LAB_FORM
+ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD + LAB_FORM + HUB
 
 
 def known_steps() -> list[tuple[str, list[str], list[str]]]:
@@ -620,6 +628,46 @@ def step_lab_form(root: Path, args) -> None:
     _ort_form(kit, "ed-n-320", plain, coco_yaml, 320)
 
 
+def _hub_data(args, key: str) -> tuple[Path, Path | None]:
+    """(data.yaml to train on, data.yaml to score on when not the same)"""
+    if key == "openimages":
+        return Path(args.openimages).expanduser() / "data.yaml", None
+    if key == "construction-ppe":
+        sys.path.insert(0, str(HERE))
+        from bench_finetune import fetch
+
+        return fetch(key, Path(args.bench_root).expanduser()), None
+    if key.startswith("rf100-"):
+        folder = Path(args.bench_root).expanduser().parent / "rf100" / key[len("rf100-"):]
+        return folder / "train.yaml", folder / "score.yaml"
+    raise SystemExit(f"{key}: no data for it here")
+
+
+def step_hub(root: Path, args, key: str, size: str) -> None:
+    """ed-s on one dataset at one size, then into easydetect-hub with its licence."""
+    from easydetect import Detector, downloads
+
+    size = int(size)
+    train, scored = _hub_data(args, key)
+    best = root / "oi" / "ed-sq-320-oi" / "weights" / "best.pt"
+    if (key, size) != ("openimages", 320) or not best.exists():
+        epochs, patience, _ = HUB_DATASETS.get(key, (100, 20, []))
+        project, name = root / "hub", f"{key}-s{size}"
+        run = project / name
+        resume = (run / "weights" / "last.pt").exists()
+        if run.exists() and not resume:
+            shutil.rmtree(run)
+        queries = 100 if size <= 320 else None
+        start = downloads.download_sized_checkpoint("ed-s", size, queries) or "ed-s"
+        best = Path(Detector(str(start)).train(
+            data=str(train), epochs=epochs, imgsz=size, batch=VARIANTS["s"],
+            workers=args.workers, project=str(project), name=name, resume=resume,
+            patience=patience, queries=queries))
+    _run([PY, "-u", str(HERE / "hub_publish.py"), "--weights", str(best), "--data", str(train),
+          "--dataset", key, "--size", str(size), "--stage", str(root / "hub-stage"),
+          *(["--score-data", str(scored)] if scored else [])])
+
+
 def step_oi_data(root: Path, args) -> None:
     """Open Images' boxes and pictures, as tools/openimages2yolo.py makes them."""
     _run([PY, "-u", str(HERE / "openimages2yolo.py"), "--out", args.openimages])
@@ -877,6 +925,8 @@ def main():
             step_qat_ort(root, args, *rest)
         elif kind == "lab-form":
             step_lab_form(root, args)
+        elif kind == "hub":
+            step_hub(root, args, *rest)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

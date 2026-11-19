@@ -47,9 +47,11 @@ def score(path: Path, data: str, limit: int | None, backend: str | None = None) 
     model(np.zeros((32, 32, 3), np.uint8))
     predictor = model.predictor
     pibo, official, times = Evaluator(ds.nc), Evaluator(ds.nc), []
-    for f in files:
+    for i, f in enumerate(files):
         img = imread(str(f))
         lab = ds._load_labels(f)
+        # a class unknown in this picture (Open Images) is neither right nor wrong
+        known = ds._known(i, lab).numpy() if ds.unknown_classes else None
         cx, cy, bw, bh = lab[:, 1], lab[:, 2], lab[:, 3], lab[:, 4]
         gt = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
         gc = lab[:, 0].astype(int)
@@ -59,10 +61,14 @@ def score(path: Path, data: str, limit: int | None, backend: str | None = None) 
         if _looks_like_logits(scores):
             scores = 1.0 / (1.0 + np.exp(-scores))
         xyxy = np.clip(cxcywh2xyxy_np(boxes.astype(np.float32)), 0, 1)
-        pibo.add(xyxy, scores.max(-1), scores.argmax(-1), gt, gc)
+        best = scores.argmax(-1)
+        keep = known[best] if known is not None else slice(None)
+        pibo.add(xyxy[keep], scores.max(-1)[keep], best[keep], gt, gc)
         nc = scores.shape[-1]
         flat = scores.reshape(-1)
         top = np.argsort(-flat)[:300]
+        if known is not None:
+            top = top[known[top % nc]]
         official.add(xyxy[top // nc], flat[top], (top % nc).astype(int), gt, gc)
     a, b = pibo.compute(), official.compute()
     return {"map50": round(a["map50"], 4), "map": round(a["map"], 4),

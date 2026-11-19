@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -172,7 +173,20 @@ def _by_dataset(index: dict) -> dict:
     return grouped
 
 
-HEADER = "| | dataset | classes | mAP50-95, 320 px | mAP50-95, 640 px | dataset licence |"
+HEADER = "| | dataset | classes | mAP50-95, 320 px (8-bit) | mAP50-95, 640 px | licence |"
+
+
+def short_title(title: str) -> str:
+    """What fits a table cell: 'TACO (Trash Annotations in Context)' -> 'TACO'."""
+    if title.startswith("Roboflow 100: "):
+        return title[len("Roboflow 100: "):] + " (RF100)"
+    return title.split(" (")[0].replace(" Dataset", "")
+
+
+def short_license(text: str) -> str:
+    """'CC BY 4.0 (annotations); pictures ...' -> 'CC BY 4.0 *' (the rest on its page)."""
+    head = re.split(r" \(|;", text)[0].strip()
+    return head if head == text.strip() else head + " *"
 
 
 def front_readme(index: dict, repo: str = REPO) -> str:
@@ -187,11 +201,12 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         for size in (320, 640):
             m = next((m for m in models.values() if m["imgsz"] == size), None)
             cells.append("—" if m is None else f"{m['map50_95']:.3f}" + (
-                f" (8-bit {m['map50_95_int8']:.3f})" if m.get("map50_95_int8") else ""))
+                f" ({m['map50_95_int8']:.3f})" if m.get("map50_95_int8") else ""))
         sections.setdefault(category(dataset), []).append(
             f"| <img src=\"{thumb}\" width=\"120\" height=\"90\"> | "
-            f"[{first['title']}]({dataset}/) | "
-            f"{len(first['classes'])} | {cells[0]} | {cells[1]} | {first['license']} |")
+            f"[{short_title(first['title'])}]({dataset}/) | "
+            f"{len(first['classes'])} | {cells[0]} | {cells[1]} | "
+            f"{short_license(first['license'])} |")
     order = [c for c in [*CATEGORIES, "Other"] if c in sections]
     contents = " · ".join(f"[{c}](#{c.lower().replace(',', '').replace(' ', '-')}) "
                           f"({len(sections[c])})" for c in order)
@@ -217,6 +232,7 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "ed-s. mAP50-95 on each dataset's own val split, COCO's way; in brackets",
         "the 8-bit file (for a Raspberry Pi or Pibo).", "",
         f"{len(_by_dataset(index))} datasets: {contents}", "", *tables,
+        "\\* more terms on the dataset's page (the pictures' own licences).", "",
         "The weights are Apache-2.0. Each dataset's licence and attribution are in its",
         "folder's README; keep them when you use a model trained on it.", ""])
 

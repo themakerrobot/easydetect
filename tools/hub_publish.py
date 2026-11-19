@@ -173,7 +173,7 @@ def _by_dataset(index: dict) -> dict:
     return grouped
 
 
-HEADER = "| | dataset | classes | mAP50-95, 320 px (8-bit) | mAP50-95, 640 px | licence |"
+HEADER = "| | dataset | classes | 320&nbsp;px (8&#8209;bit) | 640&nbsp;px | licence |"
 
 
 def short_title(title: str) -> str:
@@ -207,7 +207,7 @@ def front_readme(index: dict, repo: str = REPO) -> str:
             f"| <img src=\"{thumb}\" width=\"120\" height=\"90\"> | "
             f"[{short_title(first['title'])}]({dataset}/)<br><sub>{group}</sub> | "
             f"{len(first['classes'])} | {cells[0]} | {cells[1]} | "
-            f"{short_license(first['license'])} |")
+            f"{short_license(first['license']).replace(' ', '&nbsp;')} |")
     order = [c for c in [*CATEGORIES, "Other"] if c in sections]
     contents = " · ".join(f"{c} ({len(sections[c])})" for c in order)
     # one table (every row the same widths), grouped by category, each row

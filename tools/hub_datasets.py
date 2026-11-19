@@ -9,6 +9,18 @@ listed. Each licence was read on the dataset's official page (Nov 2026).
 from __future__ import annotations
 
 DATASETS = {
+    "coco": {
+        "title": "COCO 2017",
+        "license": "CC BY 4.0 (annotations); pictures under the Flickr terms",
+        "source": "https://cocodataset.org",
+        "attribution": "COCO 2017 annotations, CC BY 4.0 (the COCO Consortium); pictures "
+                       "from Flickr under its terms of use.",
+        "citation": "T.-Y. Lin et al. Microsoft COCO: Common Objects in Context. ECCV 2014. "
+                    "arXiv:1405.0312.",
+        "note": "640 px: easydetect's ed-s (from D-FINE's Apache-2.0 COCO weights). 320 px: "
+                "the same trained again at 320 with 100 queries; its 8-bit file is "
+                "quantization-aware (trained in 8 bits), as the Pibo robot runs it.",
+    },
     "openimages": {
         "title": "Open Images V7",
         "license": "CC BY 4.0 (boxes, Google LLC); pictures listed as CC BY 2.0",
@@ -113,7 +125,7 @@ def lookup(key: str) -> dict:
 
 #: how easydetect-hub's front page groups them, in this order
 CATEGORIES = {
-    "General objects": "openimages lvis",
+    "General objects": "coco openimages lvis",
     "Everyday objects": "chess-pieces-mjzgj coins-1apki currency-v4f8j furniture-ngpea marbles "
                         "poker-cards-cxcvz soda-bottles uno-deck valentines-chocolate "
                         "washroom-rf1fa wine-labels pills-sxdht lettuce-pallets",

@@ -264,14 +264,14 @@ LAB_FORM = [("lab-form-n320", ["lab-form"], ["coco-data"])]
 sys.path.insert(0, str(HERE))
 from hub_data import RF100_SETS  # noqa: E402
 
-HUB_ORDER = ["bccd", "construction-ppe", "taco", "plantdoc", "gwhd",
+HUB_ORDER = ["coco", "bccd", "construction-ppe", "taco", "plantdoc", "gwhd",
              *(f"rf100-{_n}" for _n in RF100_SETS),
              "doclaynet", "caltech-camera-traps", "lvis", "openimages"]
 #: epochs and patience where the picture count does not decide them
 HUB_FIXED = {"openimages": (10, 3), "lvis": (24, 6)}
 HUB = [(f"hub-{_k}-{_size}", ["hub", _k, str(_size)],
         {"openimages": ["oi-data"] + (["oi-s320"] if _size == 320 else []),
-         "lvis": ["coco-data"]}.get(_k, []))
+         "lvis": ["coco-data"], "coco": ["coco-data"]}.get(_k, []))
        for _k in HUB_ORDER for _size in (320, 640)]
 
 #: run only when named (--only): set aside for later, not part of a plain run
@@ -652,7 +652,7 @@ def _light(what: list[str]) -> bool:
 def _data_on_its_way(what: list[str], args) -> bool:
     """A hub step whose dataset is not laid out yet while a prefetch runs (it
     will get to it), or that another process is laying out right now."""
-    if what[0] != "hub" or what[1] in ("construction-ppe", "openimages"):
+    if what[0] != "hub" or what[1] in ("construction-ppe", "openimages", "coco"):
         return False
     from hub_data import is_busy, is_ready, prefetch_running
 
@@ -688,6 +688,18 @@ def step_hub(root: Path, args, key: str, size: str) -> None:
     from easydetect import Detector, downloads
 
     size = int(size)
+    if key == "coco":                     # trained already: the package's and Pibo's
+        coco_yaml = Path(args.coco).expanduser() / "data.yaml"
+        if size == 640:
+            weights, int8 = downloads.download_checkpoint("ed-s"), None
+        else:
+            weights = root / "coco" / "ed-sq-320" / "weights" / "best.pt"
+            int8 = root / "pi-kit-kd" / "ed-sq-320-qatp-ortc" / "ed-sq-320-qatp-ortc.onnx"
+        _run([PY, "-u", str(HERE / "hub_publish.py"), "--weights", str(weights),
+              "--data", str(coco_yaml), "--dataset", "coco", "--size", str(size),
+              "--stage", str(root / "hub-stage"),
+              *(["--int8", str(int8)] if int8 and int8.exists() else [])])
+        return
     train, scored = _hub_data(args, key)
     best = root / "oi" / "ed-sq-320-oi" / "weights" / "best.pt"
     if (key, size) != ("openimages", 320) or not best.exists():

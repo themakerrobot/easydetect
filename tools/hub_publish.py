@@ -113,7 +113,9 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200) -> Path:
 
 
 def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
-          score_data: str | None = None) -> dict:
+          score_data: str | None = None, int8_from: Path | None = None) -> dict:
+    """The files of one model in ``folder``; ``int8_from``: an 8-bit .onnx made
+    already (a quantization-aware one) instead of quantizing this one."""
     sys.path.insert(0, str(HERE))
     from pi_kit import ort_int8, score
     from pibo_conf import pick
@@ -145,11 +147,14 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
     scores = {"onnx": score(onnx, score_data, limit, backend="onnxruntime")}
     files = [f"{name}.pt", f"{name}.onnx", f"{name}.xml", f"{name}.bin", f"{name}.names.json"]
     if size <= 320:
-        calib = DetDataset(data, "train", size, augment=False).files
-        calib = calib[:: max(1, len(calib) // 100)][:100]
-        int8 = ort_int8(onnx, work / f"{name}-int8.onnx", calib, size, parts=("",),
-                        percentile=0.9999, skip=("stem",))
-        int8 = Path(shutil.move(str(int8), folder / f"{name}-int8.onnx"))
+        if int8_from:
+            int8 = Path(shutil.copyfile(int8_from, folder / f"{name}-int8.onnx"))
+        else:
+            calib = DetDataset(data, "train", size, augment=False).files
+            calib = calib[:: max(1, len(calib) // 100)][:100]
+            int8 = ort_int8(onnx, work / f"{name}-int8.onnx", calib, size, parts=("",),
+                            percentile=0.9999, skip=("stem",))
+            int8 = Path(shutil.move(str(int8), folder / f"{name}-int8.onnx"))
         conf8, _ = pick(int8, data, limit)
         embed_metadata(int8, {"easydetect.conf": f"{conf8:.2f}"})
         scores["int8"] = score(int8, score_data, limit, backend="onnxruntime")
@@ -367,6 +372,8 @@ def main() -> int:
     parser.add_argument("--license", help="instead of hub_datasets.py's")
     parser.add_argument("--source", help="instead of hub_datasets.py's")
     parser.add_argument("--size", type=int, help="input size (default: the checkpoint's)")
+    parser.add_argument("--int8", help="an 8-bit .onnx made already (e.g. quantization-aware) "
+                        "instead of quantizing the float one; 320 px or less")
     parser.add_argument("--repo", default=REPO)
     parser.add_argument("--stage", default="~/hub-stage", help="where the files are built")
     parser.add_argument("--limit", type=int, help="val pictures to score (a quick try)")
@@ -395,7 +402,9 @@ def main() -> int:
     stage = Path(args.stage).expanduser()
     folder = stage / key
     score_data = str(Path(args.score_data).expanduser()) if args.score_data else None
-    info = build(weights, str(Path(args.data).expanduser()), folder, size, args.limit, score_data)
+    int8_from = Path(args.int8).expanduser() if args.int8 else None
+    info = build(weights, str(Path(args.data).expanduser()), folder, size, args.limit, score_data,
+                 int8_from)
     info.update(facts, category=category(args.dataset))
     (folder / "model.json").write_text(json.dumps(info, ensure_ascii=False, indent=2))
     print(json.dumps({k: v for k, v in info.items() if k != "classes"}, ensure_ascii=False))

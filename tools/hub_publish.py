@@ -27,6 +27,7 @@ before uploading.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import shutil
@@ -173,7 +174,18 @@ def _by_dataset(index: dict) -> dict:
     return grouped
 
 
-HEADER = "| | dataset | classes | mAP50-95, 320 px (8-bit) | mAP50-95, 640 px | licence |"
+#: (heading, share of the width): the same in every category's table
+COLUMNS = (("", 15), ("dataset", 25), ("classes", 10), ("mAP50-95, 320 px (8-bit)", 20),
+           ("mAP50-95, 640 px", 15), ("licence", 15))
+
+
+def html_table(rows: list[list[str]]) -> str:
+    """An HTML table with fixed column shares, so tables line up one under another."""
+    head = "".join(f'<th width="{w}%">{h}</th>' for h, w in COLUMNS)
+    body = "".join("<tr>" + "".join(f'<td width="{w}%">{cell}</td>'
+                                    for cell, (_, w) in zip(row, COLUMNS, strict=True))
+                   + "</tr>" for row in rows)
+    return f'<table width="100%"><tr>{head}</tr>{body}</table>'
 
 
 def short_title(title: str) -> str:
@@ -202,18 +214,18 @@ def front_readme(index: dict, repo: str = REPO) -> str:
             m = next((m for m in models.values() if m["imgsz"] == size), None)
             cells.append("—" if m is None else f"{m['map50_95']:.3f}" + (
                 f" ({m['map50_95_int8']:.3f})" if m.get("map50_95_int8") else ""))
+        page = f"https://huggingface.co/{repo}/tree/main/{dataset}"
         sections.setdefault(category(dataset), []).append(
-            f"| <img src=\"{thumb}\" width=\"120\" height=\"90\"> | "
-            f"[{short_title(first['title'])}]({dataset}/) | "
-            f"{len(first['classes'])} | {cells[0]} | {cells[1]} | "
-            f"{short_license(first['license'])} |")
+            [f'<img src="{thumb}" width="120" height="90">',
+             f'<a href="{page}">{html.escape(short_title(first["title"]))}</a>',
+             str(len(first["classes"])), *cells,
+             html.escape(short_license(first["license"]))])
     order = [c for c in [*CATEGORIES, "Other"] if c in sections]
-    contents = " · ".join(f"{c} ({len(sections[c])})" for c in order)
-    # one table, a row naming each category: every row then has the same widths
-    tables = [HEADER, "| --- | --- | --- | --- | --- | --- |"]
+    contents = " · ".join(f"[{c}](#{c.lower().replace(',', '').replace(' ', '-')}) "
+                          f"({len(sections[c])})" for c in order)
+    tables = []
     for c in order:
-        tables += [f"| | **{c}** | | | | |", *sections[c]]
-    tables.append("")
+        tables += [f"## {c}", "", html_table(sections[c]), ""]
     example = next(iter(sorted(index)), "construction-ppe/ed-s-640")
     return "\n".join([
         "---", "license: apache-2.0", "library_name: easydetect",

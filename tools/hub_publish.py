@@ -48,21 +48,34 @@ def slim(src: Path, dst: Path) -> dict:
 
 
 def thumbnail(onnx: Path, data: str, out: Path, look: int = 200) -> Path:
-    """One val picture with the model's boxes on it, its longer side 640 px:
-    of the first ``look``, the one with the most boxes found, up to 20."""
+    """One val picture with the model's boxes on it, its longer side 640 px.
+    Of the first ``look``, one with 3-8 boxes found where they are largest (the
+    clearest to look at); failing that, the one with the most, up to 20. Black
+    bands baked into the picture are cut off."""
     import cv2
+    import numpy as np
 
     from easydetect import Detector
     from easydetect.data.dataset import DetDataset
 
     model = Detector(str(onnx), verbose=False)
-    best, most = None, -1
+    clear, clearest, busy, most = None, -1.0, None, -1
     for f in DetDataset(data, "val", 64, augment=False).files[:look]:
         result = model(str(f), verbose=False)[0]
         found = len(result.boxes)
+        if 3 <= found <= 8:
+            wh = result.boxes.xywhn[:, 2:]
+            area = float((wh[:, 0] * wh[:, 1]).mean())
+            if area > clearest:
+                clear, clearest = result, area
         if most < found <= 20:
-            best, most = result, found
-    image = best.plot(line_width=2)
+            busy, most = result, found
+    best = clear or busy
+    image = best.plot(conf=False, line_width=2)
+    lit = best.orig_img.max(axis=2) > 12
+    rows, cols = np.flatnonzero(lit.any(axis=1)), np.flatnonzero(lit.any(axis=0))
+    if len(rows) and len(cols):
+        image = image[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
     scale = 640 / max(image.shape[:2])
     if scale < 1:
         image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)

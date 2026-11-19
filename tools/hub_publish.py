@@ -27,6 +27,7 @@ before uploading.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import shutil
@@ -313,13 +314,30 @@ def dataset_readme(dataset: str, index: dict) -> str:
                       ""])
 
 
+@contextlib.contextmanager
+def _publishing(stage: Path):
+    """One process at a time on the hub's list and front page."""
+    import fcntl
+
+    stage.mkdir(parents=True, exist_ok=True)
+    with open(stage / ".publish.lock", "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
 def refresh_thumbs(repo: str, stage: Path, dry_run: bool) -> int:
     """Every dataset's thumb.jpg on the hub cut to THUMB, and the front page
     rebuilt, in one commit."""
-    import cv2
     from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download
 
-    index = json.loads(Path(hf_hub_download(repo, "index.json")).read_text())
+    with _publishing(stage):
+        return _refresh_thumbs(repo, stage, dry_run, CommitOperationAdd, HfApi, hf_hub_download)
+
+
+def _refresh_thumbs(repo, stage, dry_run, CommitOperationAdd, HfApi, hf_hub_download) -> int:
+    import cv2
+
+    index = json.loads(Path(hf_hub_download(repo, "index.json", force_download=True)).read_text())
     ops = []
     for dataset in _by_dataset(index):
         thumb = Path(hf_hub_download(repo, f"{dataset}/thumb.jpg", force_download=True))
@@ -382,28 +400,33 @@ def main() -> int:
     (folder / "model.json").write_text(json.dumps(info, ensure_ascii=False, indent=2))
     print(json.dumps({k: v for k, v in info.items() if k != "classes"}, ensure_ascii=False))
 
-    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download
     from huggingface_hub.utils import EntryNotFoundError
 
     api = HfApi()
-    try:
-        index = json.loads(Path(hf_hub_download(args.repo, "index.json")).read_text())
-    except EntryNotFoundError:
-        index = {}
-    index[key] = info
-    (stage / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2))
-    (stage / "README.md").write_text(front_readme(index, args.repo))
-    shutil.copyfile(folder / "sample.jpg", stage / args.dataset / "thumb.jpg")
-    (stage / args.dataset / "README.md").write_text(dataset_readme(args.dataset, index))
-    if args.dry_run:
-        print(f"built {folder} (not uploaded)")
-        return 0
-    api.upload_folder(folder_path=str(folder), path_in_repo=key, repo_id=args.repo,
-                      commit_message=f"{key}")
-    for name in ("index.json", "README.md", f"{args.dataset}/README.md",
-                 f"{args.dataset}/thumb.jpg"):
-        api.upload_file(path_or_fileobj=str(stage / name), path_in_repo=name,
-                        repo_id=args.repo, commit_message=f"{key}: {name}")
+    if not args.dry_run:
+        api.upload_folder(folder_path=str(folder), path_in_repo=key, repo_id=args.repo,
+                          commit_message=f"{key}")
+    # the list and the front page: one publisher at a time, or two at once
+    # would each write the list without the other's model
+    with _publishing(stage):
+        try:
+            index = json.loads(Path(hf_hub_download(args.repo, "index.json",
+                                                    force_download=True)).read_text())
+        except EntryNotFoundError:
+            index = {}
+        index[key] = info
+        (stage / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2))
+        (stage / "README.md").write_text(front_readme(index, args.repo))
+        shutil.copyfile(folder / "sample.jpg", stage / args.dataset / "thumb.jpg")
+        (stage / args.dataset / "README.md").write_text(dataset_readme(args.dataset, index))
+        if args.dry_run:
+            print(f"built {folder} (not uploaded)")
+            return 0
+        ops = [CommitOperationAdd(name, str(stage / name)) for name in
+               ("index.json", "README.md", f"{args.dataset}/README.md",
+                f"{args.dataset}/thumb.jpg")]
+        api.create_commit(args.repo, ops, commit_message=f"{key}: list and pages")
     print(f"https://huggingface.co/{args.repo}/tree/main/{key}")
     return 0
 

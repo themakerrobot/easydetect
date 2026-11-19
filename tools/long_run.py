@@ -640,6 +640,15 @@ def step_lab_form(root: Path, args) -> None:
     _ort_form(kit, "ed-n-320", plain, coco_yaml, 320)
 
 
+#: hub datasets too big to share the GPU with another training
+HUB_HEAVY = ("doclaynet", "caltech-camera-traps", "lvis", "openimages")
+
+
+def _light(what: list[str]) -> bool:
+    """A step that may train beside another: a hub dataset that is not big."""
+    return what[0] == "hub" and what[1] not in HUB_HEAVY
+
+
 def _data_on_its_way(what: list[str], args) -> bool:
     """A hub step whose dataset is not laid out yet while a prefetch runs (it
     will get to it), or that another process is laying out right now."""
@@ -929,6 +938,8 @@ def main():
     parser.add_argument("--tries", type=int, default=3)
     parser.add_argument("--pause", type=int, default=120, help="seconds between tries")
     parser.add_argument("--only", nargs="*", help="these steps only")
+    parser.add_argument("--parallel", type=int, default=2,
+                        help="small hub datasets trained at once on the GPU (others run alone)")
     parser.add_argument("--status", action="store_true")
     parser.add_argument("--wait-lock", action="store_true",
                         help="queue behind whatever holds <root>/.lock (another long_run, or "
@@ -1014,32 +1025,60 @@ def main():
                          start_new_session=True)
         print(f"downloading the datasets ahead: {prefetch_log}", flush=True)
         time.sleep(15)                  # it holds its lock before a step looks
+    import concurrent.futures
+    import threading
+
+    noted = threading.Lock()                      # REPORT.md, one writer at a time
+
+    def attempt(name: str, what: list[str]) -> None:
+        done, failed = state / f"{name}.done", state / f"{name}.failed"
+        for try_no in range(1, args.tries + 1):
+            print(f"{time.strftime('%m-%d %H:%M')} {name} (try {try_no}), "
+                  f"log {root / 'logs' / (name + '.log')}", flush=True)
+            if run_step(root, name, what, args):
+                done.touch()
+                failed.unlink(missing_ok=True)
+                break
+            time.sleep(args.pause)
+        else:
+            failed.touch()
+            print(f"{name}: failed {args.tries} times; going on", flush=True)
+        with noted:
+            report(root)
+
     def one_pass() -> bool:
         """Every step not done yet, once; True when one was put off because
-        its data is still downloading (it is then tried again)."""
+        its data is still downloading (it is then tried again). Small hub
+        datasets train ``--parallel`` at a time on the one GPU; anything else
+        runs alone."""
         deferred = False
-        for name, what, needs in steps:
-            done, failed = state / f"{name}.done", state / f"{name}.failed"
-            if done.exists():
-                continue
-            if any(not (state / f"{n}.done").exists() for n in needs):
-                print(f"{name}: waits for {', '.join(needs)}", flush=True)
-                continue
-            if _data_on_its_way(what, args):         # train what is here meanwhile
-                deferred = True
-                continue
-            for attempt in range(1, args.tries + 1):
-                print(f"{time.strftime('%m-%d %H:%M')} {name} (try {attempt}), "
-                      f"log {root / 'logs' / (name + '.log')}", flush=True)
-                if run_step(root, name, what, args):
-                    done.touch()
-                    failed.unlink(missing_ok=True)
-                    break
-                time.sleep(args.pause)
-            else:
-                failed.touch()
-                print(f"{name}: failed {args.tries} times; going on", flush=True)
-            report(root)
+        with concurrent.futures.ThreadPoolExecutor(max(1, args.parallel)) as pool:
+            active: set = set()
+            for name, what, needs in steps:
+                if (state / f"{name}.done").exists():
+                    continue
+                if any(not (state / f"{n}.done").exists() for n in needs):
+                    if active:                       # a need may be running now
+                        concurrent.futures.wait(active)
+                        active.clear()
+                    if any(not (state / f"{n}.done").exists() for n in needs):
+                        print(f"{name}: waits for {', '.join(needs)}", flush=True)
+                        continue
+                if _data_on_its_way(what, args):     # train what is here meanwhile
+                    deferred = True
+                    continue
+                if not _light(what):                 # alone on the GPU
+                    concurrent.futures.wait(active)
+                    active.clear()
+                    attempt(name, what)
+                    continue
+                while len(active) >= max(1, args.parallel):
+                    finished, _ = concurrent.futures.wait(
+                        active, return_when=concurrent.futures.FIRST_COMPLETED)
+                    active -= finished
+                active.add(pool.submit(attempt, name, what))
+                time.sleep(20)                       # not both loading at once
+            concurrent.futures.wait(active)
         return deferred
 
     for rnd in range(2):                            # a second pass for what failed

@@ -109,3 +109,44 @@ def lookup(key: str) -> dict:
                 "citation": RF100["citation"]}
     raise KeyError(f"{key}: not a dataset easydetect-hub carries "
                    f"(known: {', '.join(DATASETS)}, rf100-<name>)")
+
+
+#: how easydetect-hub's front page groups them, in this order
+CATEGORIES = {
+    "General objects": "openimages lvis",
+    "Everyday objects": "chess-pieces-mjzgj coins-1apki currency-v4f8j furniture-ngpea marbles "
+                        "poker-cards-cxcvz soda-bottles uno-deck valentines-chocolate "
+                        "washroom-rf1fa wine-labels pills-sxdht lettuce-pallets",
+    "People, safety and traffic": "construction-ppe construction-safety-gsnvb mask-wearing-608pr "
+                                  "hand-gestures-jps7z sign-language-sokdr people-in-paintings "
+                                  "soccer-players-5fuqs thermal-dogs-and-people-x6ejw smoke-uvylj "
+                                  "road-signs-6ih4y road-traffic vehicles-q0x2v street-work "
+                                  "truck-movement excavators-czvg9",
+    "Animals and environment": "caltech-camera-traps animals-ij5d2 bees-jt5in insects-mytwu "
+                               "pests-2xlvx thermal-cheetah-my4dp trail-camera shark-teeth-5atku "
+                               "cloud-types taco",
+    "Agriculture and plants": "gwhd plantdoc apples-fvpl5 cotton-20xz5 cotton-plant-disease "
+                              "grass-weeds leaf-disease-nsdsr peanuts-sd4kf weed-crop-aerial",
+    "Underwater": "aquarium-qlnqy coral-lwptl underwater-objects-5v7p8 underwater-pipes-4ng4t "
+                  "peixos-fish fish-market-ggjso",
+    "Aerial and earth": "aerial-cows aerial-pool aerial-spheres solar-panels-taxvb "
+                        "sedimentary-features-9eosf",
+    "Medical and microscopy": "bccd abdomen-mri acl-x-ray axial-mri bacteria-ptywi "
+                              "bone-fracture-7fylg brain-tumor-m2pbp cavity-rs0uf cells-uyemf "
+                              "gynecology-mri liver-disease mitosis-gjs3g parasites-1s07h phages "
+                              "stomata-cells x-ray-rheumatology",
+    "Documents and screens": "doclaynet activity-diagrams-qdobr document-parts signatures-xc8up "
+                             "paper-parts tweeter-posts tweeter-profile number-ops digits-t2eg6",
+    "Industry and electronics": "4-fold-defect asbestos cable-damage cables-nl42k cell-towers "
+                                "corrosion-bi3q3 gauge-u2lwv printed-circuit-board "
+                                "secondary-chains wall-damage circuit-elements circuit-voltages "
+                                "radio-signal",
+    "Games and video": "apex-videogame csgo-videogame farcry6-videogame "
+                       "halo-infinite-angel-videogame team-fight-tactics avatar-recognition-nuexe "
+                       "robomasters-285km",
+}
+
+
+def category(key: str) -> str:
+    name = key[len("rf100-"):] if key.startswith("rf100-") else key
+    return next((c for c, names in CATEGORIES.items() if name in names.split()), "Other")

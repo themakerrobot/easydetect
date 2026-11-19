@@ -146,8 +146,14 @@ def _by_dataset(index: dict) -> dict:
     return grouped
 
 
+HEADER = "| | dataset | classes | mAP50-95, 320 px | mAP50-95, 640 px | dataset licence |"
+
+
 def front_readme(index: dict, repo: str = REPO) -> str:
-    rows = []
+    sys.path.insert(0, str(HERE))
+    from hub_datasets import CATEGORIES, category
+
+    sections = {}
     for dataset, models in _by_dataset(index).items():
         first = next(iter(models.values()))
         thumb = f"https://huggingface.co/{repo}/resolve/main/{dataset}/thumb.jpg"
@@ -156,8 +162,16 @@ def front_readme(index: dict, repo: str = REPO) -> str:
             m = next((m for m in models.values() if m["imgsz"] == size), None)
             cells.append("—" if m is None else f"{m['map50_95']:.3f}" + (
                 f" (8-bit {m['map50_95_int8']:.3f})" if m.get("map50_95_int8") else ""))
-        rows.append(f"| <img src=\"{thumb}\" width=\"160\"> | [{first['title']}]({dataset}/) | "
-                    f"{len(first['classes'])} | {cells[0]} | {cells[1]} | {first['license']} |")
+        sections.setdefault(category(dataset), []).append(
+            f"| <img src=\"{thumb}\" width=\"160\"> | [{first['title']}]({dataset}/) | "
+            f"{len(first['classes'])} | {cells[0]} | {cells[1]} | {first['license']} |")
+    order = [c for c in [*CATEGORIES, "Other"] if c in sections]
+    contents = " · ".join(f"[{c}](#{c.lower().replace(',', '').replace(' ', '-')}) "
+                          f"({len(sections[c])})" for c in order)
+    tables = []
+    for c in order:
+        tables += [f"## {c}", "", HEADER, "| --- | --- | --- | --- | --- | --- |",
+                   *sections[c], ""]
     example = next(iter(sorted(index)), "construction-ppe/ed-s-640")
     return "\n".join([
         "---", "license: apache-2.0", "library_name: easydetect",
@@ -175,8 +189,7 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "model(\"photo.jpg\")[0].show()", "```", "",
         "ed-s. mAP50-95 on each dataset's own val split, COCO's way; in brackets",
         "the 8-bit file (for a Raspberry Pi or Pibo).", "",
-        "| | dataset | classes | mAP50-95, 320 px | mAP50-95, 640 px | dataset licence |",
-        "| --- | --- | --- | --- | --- | --- |", *rows, "",
+        f"{len(_by_dataset(index))} datasets: {contents}", "", *tables,
         "The weights are Apache-2.0. Each dataset's licence and attribution are in its",
         "folder's README; keep them when you use a model trained on it.", ""])
 
@@ -189,7 +202,11 @@ def dataset_readme(dataset: str, index: dict) -> str:
             f"{m['map50_95_int8']:.3f} |" if m.get("map50_95_int8") else
             f"| `{k.split('/', 1)[1]}` | {m['imgsz']} | {m['map50_95']:.3f} | — |"
             for k, m in sorted(models.items())]
-    lines = [f"# {first['title']}", "", "![sample](thumb.jpg)", "",
+    sys.path.insert(0, str(HERE))
+    from hub_datasets import category
+
+    lines = [f"# {first['title']}", "", f"Category: {category(dataset)}", "",
+             "![sample](thumb.jpg)", "",
              f"Source: {first['source']}  ",
              f"Licence: {first['license']}", ""]
     if first.get("attribution"):
@@ -224,7 +241,7 @@ def main() -> int:
     import torch
 
     sys.path.insert(0, str(HERE))
-    from hub_datasets import lookup
+    from hub_datasets import category, lookup
 
     facts = lookup(args.dataset)
     for field in ("title", "license", "source"):
@@ -239,7 +256,7 @@ def main() -> int:
     folder = stage / key
     score_data = str(Path(args.score_data).expanduser()) if args.score_data else None
     info = build(weights, str(Path(args.data).expanduser()), folder, size, args.limit, score_data)
-    info.update(facts)
+    info.update(facts, category=category(args.dataset))
     (folder / "model.json").write_text(json.dumps(info, ensure_ascii=False, indent=2))
     print(json.dumps({k: v for k, v in info.items() if k != "classes"}, ensure_ascii=False))
 

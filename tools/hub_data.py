@@ -331,8 +331,12 @@ def taco(folder: Path, workers: int = 8) -> Path:
         cv2.imwrite(str(tmp), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
         tmp.rename(out)
 
+    total = len(ann["images"])
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-        list(pool.map(get, ann["images"]))
+        for i, _ in enumerate(pool.map(get, ann["images"]), 1):
+            if i % 50 == 0 or i == total:
+                have = sum(1 for _ in src.rglob("*.jpg")) if src.exists() else 0
+                print(f"taco: {i}/{total} pictures tried, {have} here", flush=True)
     cats = sorted(ann["categories"], key=lambda c: c["id"])
     index = {c["id"]: i for i, c in enumerate(cats)}
     ids = sorted(im["id"] for im in ann["images"])

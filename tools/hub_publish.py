@@ -173,8 +173,9 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "```", "", "```python", "from easydetect import Detector", "",
         f"model = Detector(\"hub/{example}/{example.split('/')[1]}.onnx\")",
         "model(\"photo.jpg\")[0].show()", "```", "",
-        "ed-s, mAP50-95 on each dataset's own val split, COCO's way.", "",
-        "| | dataset | classes | 320 px | 640 px | dataset licence |",
+        "ed-s. mAP50-95 on each dataset's own val split, COCO's way; in brackets",
+        "the 8-bit file (for a Raspberry Pi or Pibo).", "",
+        "| | dataset | classes | mAP50-95, 320 px | mAP50-95, 640 px | dataset licence |",
         "| --- | --- | --- | --- | --- | --- |", *rows, "",
         "The weights are Apache-2.0. Each dataset's licence and attribution are in its",
         "folder's README; keep them when you use a model trained on it.", ""])

@@ -139,6 +139,8 @@ class Detector:
             folder = downloads.hub_parts(self.model_name)[1]
             hub_variant = folder.split("-")[1] if folder.startswith("ed-") else None
             self.model_name = str(downloads.download_hub(self.model_name))
+        elif downloads.is_model_url(self.model_name):     # https://.../ed-s-640.onnx
+            self.model_name = str(downloads.model_url_to_path(self.model_name))
         path = Path(self.model_name)
         suffix = path.suffix.lower()
         if suffix == ".pt":

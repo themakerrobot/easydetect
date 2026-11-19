@@ -96,3 +96,27 @@ def test_the_hub_list_is_kept_for_when_there_is_no_network(tmp_path, monkeypatch
                         lambda *a, **k: (_ for _ in ()).throw(DownloadError("offline")))
     assert downloads.hub_index() == index
     assert main(["hub", "search=nothing-like-it"]) == 1
+
+
+def test_a_model_address_is_fetched_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("EASYDETECT_HOME", str(tmp_path))
+    fetched = []
+
+    def fake(url, dest, progress=True):
+        fetched.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x")
+        return dest
+
+    monkeypatch.setattr(downloads, "download", fake)
+    page = "https://huggingface.co/someone/models/blob/main/x/best.onnx"
+    path = downloads.model_url_to_path(page)
+    assert path.name == "best.onnx" and path.parent.parent == tmp_path / "url"
+    assert fetched == ["https://huggingface.co/someone/models/resolve/main/x/best.onnx"]
+
+    fetched.clear()      # a hub model's folder is that hub model
+    hub = "https://huggingface.co/leeyunjai/easydetect-hub/tree/main/taco/ed-s-640"
+    assert downloads.model_url_to_path(hub) == downloads.download_hub("hub:taco/ed-s-640")
+
+    with pytest.raises(ModelNotFoundError, match=r"\.onnx, \.xml or \.pt"):
+        downloads.model_url_to_path("https://example.org/model.zip")

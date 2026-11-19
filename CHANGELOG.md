@@ -9,6 +9,9 @@
   for the checkpoint. `easydetect hub [search=...]` lists them with their
   scores; the list is kept for when there is no network. `$EASYDETECT_HUB_URL`
   points at another copy.
+- A model by its web address: `Detector("https://.../best.onnx")` (or `.xml`,
+  `.pt`, or the file's Hugging Face page) downloads it once into
+  `~/.easydetect/url`; an easydetect-hub folder's address is its hub model.
 - Tools that make the hub: `tools/hub_data.py` (each dataset downloaded and
   laid out, resuming after a power cut), `tools/hub_datasets.py` (licence,
   credit, paper and category of each), `tools/hub_publish.py` (export, 8-bit

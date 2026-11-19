@@ -105,9 +105,48 @@ def _hub_names(base: str, dest: Path, stem: str) -> None:
     try:
         download(f"{base}/{names.name}", names, progress=False)
     except DownloadError:
-        classes = json.loads(read_url_bytes(f"{base}/model.json")).get("classes", {})
+        try:
+            classes = json.loads(read_url_bytes(f"{base}/model.json")).get("classes", {})
+        except (DownloadError, ValueError):
+            return                            # the IR's own names, or class_<i>
         names.write_text(json.dumps({int(k): v for k, v in classes.items()},
                                     ensure_ascii=False), encoding="utf-8")
+
+
+def is_model_url(name: str | Path) -> bool:
+    return str(name).strip().lower().startswith(("http://", "https://"))
+
+
+def model_url_to_path(url: str) -> Path:
+    """A model given by its web address, downloaded once into
+    ``~/.easydetect/url``: a file (``.onnx``, ``.xml`` with its ``.bin``,
+    ``.pt``), its Hugging Face page (``/blob/`` is read as ``/resolve/``), or
+    an easydetect-hub model folder (``.../easydetect-hub/tree/main/taco/ed-s-640``)."""
+    import hashlib
+    from urllib.parse import urlparse
+
+    url = str(url).strip()
+    hub_page = DEFAULT_HUB_URL.rsplit("/resolve/", 1)[0]
+    for marker in ("/tree/main/", "/resolve/main/", "/blob/main/"):
+        prefix = hub_page + marker
+        rest = url[len(prefix):].strip("/") if url.startswith(prefix) else ""
+        if rest.count("/") == 1 and not Path(rest).suffix:       # a hub model's folder
+            return download_hub(HUB_PREFIX + rest)
+    url = url.replace("/blob/", "/resolve/", 1)
+    filename = Path(urlparse(url).path).name
+    if Path(filename).suffix.lower() not in (".onnx", ".xml", ".pt"):
+        raise ModelNotFoundError(f"{url}: a model address ends in .onnx, .xml or .pt")
+    base = url[: -len(filename)]
+    dest = cache_dir() / "url" / hashlib.sha1(base.encode()).hexdigest()[:16]
+    try:
+        path = download(url, dest / filename)
+        if filename.lower().endswith(".xml"):
+            stem = filename[: -len(".xml")]
+            download(f"{base}{stem}.bin", dest / f"{stem}.bin")
+            _hub_names(base.rstrip("/"), dest, stem)
+    except DownloadError as exc:
+        raise ModelNotFoundError(f"could not fetch the model at {url}: {exc}") from exc
+    return path
 
 
 def hub_index() -> dict:

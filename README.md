@@ -150,6 +150,8 @@ model = Detector("hub:taco/ed-s-640.pt")       # the checkpoint, to fine-tune
 ```
 
 `easydetect hub` lists them with their scores (`easydetect hub search=plant`).
+A model's web address works too (a file, its Hugging Face page, or a hub
+model's folder), as do relative and absolute paths.
 
 ## Speed
 

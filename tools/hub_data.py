@@ -453,6 +453,11 @@ def is_ready(key: str, root: Path) -> bool:
     return (root / key / ".ready").exists()
 
 
+def prefetch_running(root: Path) -> bool:
+    """A prefetch is under way: what it has not laid out yet, it will."""
+    return is_busy("prefetch", root)
+
+
 def is_busy(key: str, root: Path) -> bool:
     """Another process (a prefetch) is downloading or laying it out now."""
     import fcntl
@@ -512,7 +517,7 @@ def prefetch(keys: list[str], root: Path, coco: Path) -> int:
     import fcntl
 
     (root / ".locks").mkdir(parents=True, exist_ok=True)
-    handle = open(root / ".locks" / "prefetch.lock", "w")
+    handle = open(_lock_path("prefetch", root), "w")
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

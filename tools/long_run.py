@@ -641,13 +641,14 @@ def step_lab_form(root: Path, args) -> None:
 
 
 def _data_on_its_way(what: list[str], args) -> bool:
-    """A hub step whose dataset another process is downloading right now."""
+    """A hub step whose dataset is not laid out yet while a prefetch runs (it
+    will get to it), or that another process is laying out right now."""
     if what[0] != "hub" or what[1] in ("construction-ppe", "openimages"):
         return False
-    from hub_data import is_busy, is_ready
+    from hub_data import is_busy, is_ready, prefetch_running
 
     root = Path(args.hub_root).expanduser()
-    return not is_ready(what[1], root) and is_busy(what[1], root)
+    return not is_ready(what[1], root) and (prefetch_running(root) or is_busy(what[1], root))
 
 
 def _hub_data(args, key: str) -> tuple[Path, Path | None]:
@@ -1012,6 +1013,7 @@ def main():
                          stdout=prefetch_log.open("a"), stderr=subprocess.STDOUT,
                          start_new_session=True)
         print(f"downloading the datasets ahead: {prefetch_log}", flush=True)
+        time.sleep(15)                  # it holds its lock before a step looks
     def one_pass() -> bool:
         """Every step not done yet, once; True when one was put off because
         its data is still downloading (it is then tried again)."""

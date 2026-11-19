@@ -435,9 +435,38 @@ MAKERS = {"bccd": bccd, "plantdoc": plantdoc, "gwhd": gwhd, "taco": taco,
           "doclaynet": doclaynet, "caltech-camera-traps": caltech_camera_traps}
 
 
-#: the order long_run.py trains them in, so a prefetch gets the next one first
-ORDER = ["bccd", "taco", "plantdoc", "gwhd", *(f"rf100-{n}" for n in RF100_SETS),
-         "doclaynet", "caltech-camera-traps", "lvis"]
+#: what a prefetch fetches, in two lanes at once: the quick ones (training
+#: never waits long for the next) and the big downloads, which take hours
+QUICK = ["bccd", "taco", "plantdoc", *(f"rf100-{n}" for n in RF100_SETS)]
+BIG = ["gwhd", "doclaynet", "caltech-camera-traps", "lvis"]
+ORDER = QUICK + BIG
+
+
+def _lock_path(key: str, root: Path) -> Path:
+    return root / ".locks" / f"{key}.lock"
+
+
+def is_ready(key: str, root: Path) -> bool:
+    """Laid out already: training can start on it at once."""
+    if key.startswith("rf100-"):
+        return (root / "rf100" / key[len("rf100-"):] / "facts.json").exists()
+    return (root / key / ".ready").exists()
+
+
+def is_busy(key: str, root: Path) -> bool:
+    """Another process (a prefetch) is downloading or laying it out now."""
+    import fcntl
+
+    path = _lock_path(key, root)
+    if not path.exists():
+        return False
+    with open(path) as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    return False
 
 
 @contextlib.contextmanager
@@ -464,7 +493,7 @@ def _locked(path: Path, what: str):
 
 def prepare(key: str, root: Path, coco: Path) -> tuple[Path, Path | None]:
     """(data.yaml to train on, data.yaml to score on when not the same)."""
-    with _locked(root / ".locks" / f"{key}.lock", key):
+    with _locked(_lock_path(key, root), key):
         if key.startswith("rf100-"):
             return rf100(key[len("rf100-"):], root)
         folder = root / key
@@ -489,11 +518,19 @@ def prefetch(keys: list[str], root: Path, coco: Path) -> int:
     except BlockingIOError:
         print("a prefetch is running already", flush=True)
         return 0
-    for key in keys:
-        try:
-            print(f"{key}: {prepare(key, root, coco)[0]}", flush=True)
-        except Exception as exc:  # noqa: BLE001  (its training step tries again)
-            print(f"{key}: not ready ({exc}); its training step will try again", flush=True)
+    import concurrent.futures
+
+    def lane(names: list[str]) -> None:
+        for key in names:
+            try:
+                print(f"{key}: {prepare(key, root, coco)[0]}", flush=True)
+            except Exception as exc:  # noqa: BLE001  (its training step tries again)
+                print(f"{key}: not ready ({exc}); its training step will try again",
+                      flush=True)
+
+    lanes = [[k for k in keys if k not in BIG], [k for k in keys if k in BIG]]
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        list(pool.map(lane, lanes))
     return 0
 
 

@@ -640,6 +640,16 @@ def step_lab_form(root: Path, args) -> None:
     _ort_form(kit, "ed-n-320", plain, coco_yaml, 320)
 
 
+def _data_on_its_way(what: list[str], args) -> bool:
+    """A hub step whose dataset another process is downloading right now."""
+    if what[0] != "hub" or what[1] in ("construction-ppe", "openimages"):
+        return False
+    from hub_data import is_busy, is_ready
+
+    root = Path(args.hub_root).expanduser()
+    return not is_ready(what[1], root) and is_busy(what[1], root)
+
+
 def _hub_data(args, key: str) -> tuple[Path, Path | None]:
     """(data.yaml to train on, data.yaml to score on when not the same)"""
     if key == "openimages":
@@ -1002,13 +1012,19 @@ def main():
                          stdout=prefetch_log.open("a"), stderr=subprocess.STDOUT,
                          start_new_session=True)
         print(f"downloading the datasets ahead: {prefetch_log}", flush=True)
-    for rnd in range(2):                            # a second pass for what failed
+    def one_pass() -> bool:
+        """Every step not done yet, once; True when one was put off because
+        its data is still downloading (it is then tried again)."""
+        deferred = False
         for name, what, needs in steps:
             done, failed = state / f"{name}.done", state / f"{name}.failed"
             if done.exists():
                 continue
             if any(not (state / f"{n}.done").exists() for n in needs):
                 print(f"{name}: waits for {', '.join(needs)}", flush=True)
+                continue
+            if _data_on_its_way(what, args):         # train what is here meanwhile
+                deferred = True
                 continue
             for attempt in range(1, args.tries + 1):
                 print(f"{time.strftime('%m-%d %H:%M')} {name} (try {attempt}), "
@@ -1022,6 +1038,13 @@ def main():
                 failed.touch()
                 print(f"{name}: failed {args.tries} times; going on", flush=True)
             report(root)
+        return deferred
+
+    for rnd in range(2):                            # a second pass for what failed
+        while one_pass():
+            print(f"{time.strftime('%m-%d %H:%M')} the rest is still downloading; "
+                  "looking again in 5 minutes", flush=True)
+            time.sleep(300)
         if all((state / f"{n}.done").exists() for n, _, _ in steps):
             break
         if rnd == 0:

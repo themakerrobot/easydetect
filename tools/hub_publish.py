@@ -208,12 +208,12 @@ def front_readme(index: dict, repo: str = REPO) -> str:
             f"{len(first['classes'])} | {cells[0]} | {cells[1]} | "
             f"{short_license(first['license'])} |")
     order = [c for c in [*CATEGORIES, "Other"] if c in sections]
-    contents = " · ".join(f"[{c}](#{c.lower().replace(',', '').replace(' ', '-')}) "
-                          f"({len(sections[c])})" for c in order)
-    tables = []
+    contents = " · ".join(f"{c} ({len(sections[c])})" for c in order)
+    # one table, a row naming each category: every row then has the same widths
+    tables = [HEADER, "| --- | --- | --- | --- | --- | --- |"]
     for c in order:
-        tables += [f"## {c}", "", HEADER, "| --- | --- | --- | --- | --- | --- |",
-                   *sections[c], ""]
+        tables += [f"| | **{c}** | | | | |", *sections[c]]
+    tables.append("")
     example = next(iter(sorted(index)), "construction-ppe/ed-s-640")
     return "\n".join([
         "---", "license: apache-2.0", "library_name: easydetect",

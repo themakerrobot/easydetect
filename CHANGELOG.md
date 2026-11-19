@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.16
+
+- easydetect hub: `Detector("hub:<dataset>/<model>")` runs a model trained on a
+  public dataset from huggingface.co/leeyunjai/easydetect-hub, downloaded once
+  into `~/.easydetect/hub`, no PyTorch needed: `.onnx` by default, `.xml` for
+  OpenVINO (its class names come with it), `-int8` for the 8-bit file, `.pt`
+  for the checkpoint. `easydetect hub [search=...]` lists them with their
+  scores; the list is kept for when there is no network. `$EASYDETECT_HUB_URL`
+  points at another copy.
+- Tools that make the hub: `tools/hub_data.py` (each dataset downloaded and
+  laid out, resuming after a power cut), `tools/hub_datasets.py` (licence,
+  credit, paper and category of each), `tools/hub_publish.py` (export, 8-bit
+  file, score, thumbnail and upload) and long_run.py's `hub-*` steps;
+  `tools/rescore_official.py` scores older records the official way.
+- `pi_kit.score` leaves a class unknown in a picture (Open Images, LVIS)
+  neither right nor wrong.
+
 ## 0.7.15
 
 - Quantization-aware training (`easydetect.qat`): BatchNorms folded, every

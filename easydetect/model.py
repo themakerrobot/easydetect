@@ -134,6 +134,11 @@ class Detector:
         self.ir_path: Path | None = None
         self.tracker = None
 
+        hub_variant = None
+        if downloads.is_hub_name(self.model_name):        # hub:taco/ed-s-640
+            folder = downloads.hub_parts(self.model_name)[1]
+            hub_variant = folder.split("-")[1] if folder.startswith("ed-") else None
+            self.model_name = str(downloads.download_hub(self.model_name))
         path = Path(self.model_name)
         suffix = path.suffix.lower()
         if suffix == ".pt":
@@ -150,6 +155,8 @@ class Detector:
             self.variant = self.model_name.rsplit("-", 1)[-1]
         else:
             raise ModelNotFoundError(downloads._unknown_name_message(self.model_name))
+        if hub_variant and self.ir_path is not None:
+            self.variant = hub_variant
 
     # ------------------------------------------------------------------ predict
 

@@ -21,6 +21,11 @@ from .errors import DownloadError, ModelNotFoundError
 #: Where the released weights live. Layout: ``<base>/<name>/<file>``.
 DEFAULT_ASSETS_URL = "https://huggingface.co/leeyunjai/easydetect/resolve/main"
 
+#: easydetect-hub: models trained on public datasets, ``<base>/<dataset>/<model>/<file>``;
+#: ``$EASYDETECT_HUB_URL`` points at another copy.
+DEFAULT_HUB_URL = "https://huggingface.co/leeyunjai/easydetect-hub/resolve/main"
+HUB_PREFIX = "hub:"
+
 #: Names the mirror knows, with the spellings users type mapped onto them.
 MODEL_NAMES = ("ed-n", "ed-s", "ed-m", "ed-l", "ed-x")
 
@@ -42,6 +47,85 @@ def is_model_name(name: str) -> bool:
 
 def assets_url() -> str:
     return os.environ.get("EASYDETECT_ASSETS_URL", DEFAULT_ASSETS_URL).rstrip("/")
+
+
+def hub_url() -> str:
+    return os.environ.get("EASYDETECT_HUB_URL", DEFAULT_HUB_URL).rstrip("/")
+
+
+def is_hub_name(name: str | Path) -> bool:
+    return str(name).strip().lower().startswith(HUB_PREFIX)
+
+
+def hub_parts(name: str) -> tuple[str, str, str]:
+    """``hub:taco/ed-s-640`` -> ``("taco", "ed-s-640", "ed-s-640.onnx")``:
+    the dataset, the model's folder and the file. ``-int8`` names the 8-bit
+    ONNX (``hub:bccd/ed-s-320-int8``); ``.xml`` the OpenVINO IR, ``.pt`` the
+    checkpoint to fine-tune from (needs PyTorch); anything else the ONNX."""
+    spec = str(name).strip()[len(HUB_PREFIX):].strip().strip("/")
+    dataset, _, model = spec.partition("/")
+    suffix = ""
+    for ext in (".onnx", ".xml", ".pt"):
+        if model.lower().endswith(ext):
+            model, suffix = model[: -len(ext)], ext
+    int8 = model.endswith("-int8")
+    folder = model[: -len("-int8")] if int8 else model
+    if not dataset or not folder or "/" in folder or (int8 and suffix not in ("", ".onnx")):
+        raise ModelNotFoundError(
+            f"{name!r}: a hub model is named hub:<dataset>/<model>, e.g. hub:taco/ed-s-640, "
+            "hub:taco/ed-s-640.xml, hub:bccd/ed-s-320-int8. The list: easydetect hub")
+    return dataset, folder, f"{model}{suffix or '.onnx'}"
+
+
+def download_hub(name: str) -> Path:
+    """The local copy of a hub model (downloaded once into ``~/.easydetect/hub``);
+    an ``.xml`` comes with its ``.bin``."""
+    dataset, folder, filename = hub_parts(name)
+    base, dest = f"{hub_url()}/{dataset}/{folder}", cache_dir() / "hub" / dataset / folder
+    try:
+        path = download(f"{base}/{filename}", dest / filename)
+        if filename.endswith(".xml"):
+            stem = filename[: -len(".xml")]
+            download(f"{base}/{stem}.bin", dest / f"{stem}.bin")
+            _hub_names(base, dest, stem)
+    except DownloadError as exc:
+        raise ModelNotFoundError(
+            f"{name!r} is not on easydetect-hub ({exc}). See what is: easydetect hub") from exc
+    return path
+
+
+def _hub_names(base: str, dest: Path, stem: str) -> None:
+    """``<stem>.names.json`` beside an IR (an IR holds no class names): the
+    hub's own, or else written from the model's model.json."""
+    import json
+
+    names = dest / f"{stem}.names.json"
+    if names.exists():
+        return
+    try:
+        download(f"{base}/{names.name}", names, progress=False)
+    except DownloadError:
+        classes = json.loads(read_url_bytes(f"{base}/model.json")).get("classes", {})
+        names.write_text(json.dumps({int(k): v for k, v in classes.items()},
+                                    ensure_ascii=False), encoding="utf-8")
+
+
+def hub_index() -> dict:
+    """``{"<dataset>/<model>": {...}}``: every model easydetect-hub holds, with
+    its classes, size, score and dataset licence. The last copy read is kept
+    for when there is no network."""
+    import json
+
+    cached = cache_dir() / "hub" / "index.json"
+    try:
+        data = read_url_bytes(f"{hub_url()}/index.json")
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(data)
+    except DownloadError:
+        if not cached.exists():
+            raise
+        data = cached.read_bytes()
+    return json.loads(data)
 
 
 def cache_dir() -> Path:
@@ -260,5 +344,6 @@ def download_pose(size: str = "s") -> Path:
 def _unknown_name_message(name: str) -> str:
     return (
         f"unknown model '{name}'. Known names: {', '.join(MODEL_NAMES)}. "
-        f"You can also pass a path to your own .pt / .xml / .onnx."
+        f"You can also pass a path to your own .pt / .xml / .onnx, or a model trained on "
+        f"a public dataset: hub:taco/ed-s-640 (the list: easydetect hub)."
     )

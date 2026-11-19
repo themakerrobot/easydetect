@@ -133,6 +133,24 @@ python run.py                       # http://<this machine>:8080
 
 COCO numbers are the original authors' for these checkpoints (640 px, val2017).
 
+### Trained on public datasets: easydetect hub
+
+[easydetect hub](https://huggingface.co/leeyunjai/easydetect-hub) holds ed-s
+trained on over a hundred public datasets whose terms allow commercial use
+(trash, plants, blood cells, safety gear, documents, games, aerial and
+underwater pictures, Open Images, LVIS...), each at 320 px (with an 8-bit file
+for a Raspberry Pi) and 640 px. Name one and it downloads once, no PyTorch
+needed:
+
+```python
+model = Detector("hub:taco/ed-s-640")          # ONNX
+model = Detector("hub:taco/ed-s-640.xml")      # OpenVINO IR, for an Intel NPU
+model = Detector("hub:bccd/ed-s-320-int8")     # 8 bits, for a Raspberry Pi
+model = Detector("hub:taco/ed-s-640.pt")       # the checkpoint, to fine-tune
+```
+
+`easydetect hub` lists them with their scores (`easydetect hub search=plant`).
+
 ## Speed
 
 `ed-s` at 640 on one desktop — a Core Ultra 5 250K Plus with an RTX 5090 —
@@ -240,7 +258,7 @@ most 300 training pictures each, three seeds, scored on each test split:
 
 ### Small inputs and small computers
 
-On a Raspberry Pi the input shrinks to 320 or 416 px, and there the 640 px
+On a Raspberry Pi the input shrinks to 320 px, and there the 640 px
 COCO weights lose most of what they know. `tools/long_run.py` fine-tunes them
 on COCO at the smaller size (with 100 decoder queries, which the Pi runs
 faster) and scores everything here on all 5,000 val2017 pictures with one
@@ -250,30 +268,28 @@ YOLO is Ultralytics' own export at each size. mAP50-95:
 | input | ed-n, 640 px weights | ed-n, fine-tuned at that size | ed-s, 640 px weights | ed-s, fine-tuned at that size | YOLO11n | YOLO26n | YOLO11s | YOLO26s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 320 | 0.100 | **0.322** | 0.239 | **0.381** | 0.283 | 0.297 | 0.365 | **0.381** |
-| 416 | 0.270 | **0.361** | 0.389 | 0.415 | 0.328 | 0.341 | 0.408 | **0.421** |
 | 640 | **0.416** | 0.410 | **0.472** | 0.465 | 0.381 | 0.397 | 0.453 | 0.471 |
 
 Raspberry Pi 4B, 4 threads, `easydetect benchmark` (OpenVINO; a fine-tuned
 model runs as fast as the original of the same size and queries):
 
-| | 320 | 320, 100 queries | 416 | 416, 100 queries | 640 |
-| --- | --- | --- | --- | --- | --- |
-| ed-n | 190 ms | **122 ms** | 252 ms | 183 ms | 479 ms |
-| ed-s | 508 ms | 347 ms | 697 ms | 536 ms | 1,323 ms |
+| | 320 | 320, 100 queries | 640 |
+| --- | --- | --- | --- |
+| ed-n | 190 ms | **122 ms** | 479 ms |
+| ed-s | 508 ms | 347 ms | 1,323 ms |
 
 * **Fine-tune at the size you will run.** ed-n at 320: 0.100 → 0.322;
   ed-s at 320: 0.239 → 0.381. At 640 the original weights stay better.
 * **Against YOLO at the same size:** ed-n is ahead of both YOLO n models at
-  every size; ed-s matches YOLO26s at 320 and is within a point at 416.
+  every size; ed-s matches YOLO26s at 320.
 * **100 queries cost almost nothing** in accuracy (0.323 → 0.322 at 320) and
   save a third of the time on the Pi. Through ONNX Runtime, as the Pibo
   robot runs it, YOLO11s at 320 takes 300 ms on the same Pi and ed-s at 320
   with 100 queries 407 ms; Pibo runs ed-s for its accuracy.
-* The fine-tuned 320 and 416 columns were trained with 100 queries; 640
+* The fine-tuned 320 column was trained with 100 queries; 640
   with all 300 (it did not beat the original either way).
 * `ed-n-320.pt` and `ed-s-320.pt` are on the mirror: a run at 320 px with at
-  most 100 queries (`train(imgsz=320, queries=100)`) starts from them. The 416
-  ones are not; `tools/long_run.py` makes them (about a day on one RTX 5090).
+  most 100 queries (`train(imgsz=320, queries=100)`) starts from them.
 * Our evaluator puts ed-n at 640 at 0.416 where its authors report 42.8: one
   class a box and 100 boxes a picture count fewer boxes than COCO's own tool.
 
@@ -366,10 +382,15 @@ Runtime이 함께 들어가고 PyTorch는 없습니다. `pip install "easydetect
 `Detector("ed-s", backend="onnxruntime")`로 ONNX Runtime(모든 CPU, 라즈베리파이
 포함)을 쓸 수 있습니다. 두 엔진의 결과는 같습니다.
 
+공개 데이터셋 100여 개로 학습한 모델이 [easydetect hub](https://huggingface.co/leeyunjai/easydetect-hub)에
+있습니다(쓰레기, 식물, 혈액세포, 안전장비, 문서, 게임, 항공·수중 사진, Open Images,
+LVIS 등, 상업적 사용이 허용된 데이터셋만). `Detector("hub:taco/ed-s-640")`처럼 이름만
+쓰면 한 번 내려받아 PyTorch 없이 돌고, `easydetect hub`로 목록과 점수를 봅니다.
+
 라벨링부터 학습·추론까지 브라우저로 하려면 [easydetect lab](https://github.com/themakerrobot/easydetect-lab). 가중치 캐시는
 `~/.easydetect/`, 사내 미러는 `EASYDETECT_ASSETS_URL` 환경변수로 지정합니다.
 
-라즈베리파이처럼 작은 기기에서는 입력을 320~416으로 줄이는데, 640으로 학습된
+라즈베리파이처럼 작은 기기에서는 입력을 320으로 줄이는데, 640으로 학습된
 COCO 가중치는 이 크기에서 성능이 크게 떨어집니다(ed-n 320: 0.100). 그 크기로
 COCO를 다시 학습하면 0.322로 올라 같은 크기의 YOLO11n·YOLO26n보다 높고, 라즈베리파이
 4B에서 쿼리 100개로 122밀리초입니다. 사진이 적은 데이터는 에폭을 늘릴수록 좋아져서

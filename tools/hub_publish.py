@@ -135,12 +135,14 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
     xml = Path(model.export(format="openvino", imgsz=size, out_dir=work, verbose=False))
     for part in (xml, xml.with_suffix(".bin")):
         shutil.move(str(part), folder / f"{name}{part.suffix}")
+    # an IR holds no class names: OpenVINO reads them beside it
+    shutil.move(str(xml.with_suffix(".names.json")), folder / f"{name}.names.json")
 
     conf, _ = pick(onnx, data, limit)
     embed_metadata(onnx, {"easydetect.conf": f"{conf:.2f}"})
     score_data = score_data or data
     scores = {"onnx": score(onnx, score_data, limit, backend="onnxruntime")}
-    files = [f"{name}.pt", f"{name}.onnx", f"{name}.xml", f"{name}.bin"]
+    files = [f"{name}.pt", f"{name}.onnx", f"{name}.xml", f"{name}.bin", f"{name}.names.json"]
     if size <= 320:
         calib = DetDataset(data, "train", size, augment=False).files
         calib = calib[:: max(1, len(calib) // 100)][:100]
@@ -217,7 +219,6 @@ def front_readme(index: dict, repo: str = REPO) -> str:
     big = [k for k in sorted(index) if k.endswith("-640")]
     example = next((k for k in big if k.startswith("taco/")), (big or sorted(index))[0])
     small = next((k for k in sorted(index) if k.endswith("-320")), example)
-    name, small_name = example.split("/")[1], small.split("/")[1]
     datasets, models = len(_by_dataset(index)), len(index)
     return "\n".join([
         "---", "license: apache-2.0", "library_name: easydetect",
@@ -236,35 +237,38 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "  whose terms allow commercial use.",
         "- **Your own data next.** Every model comes with the checkpoint to fine-tune from.", "",
         "## Quick start (no PyTorch)", "",
-        "```bash", "pip install easydetect huggingface_hub",
-        f"hf download {repo} --include '{example}/*' --local-dir hub", "```", "",
+        "```bash", "pip install -U easydetect        # 0.7.16 or later", "```", "",
         "```python", "from easydetect import Detector", "",
-        f"model = Detector(\"hub/{example}/{name}.onnx\")   # class names and threshold inside",
+        f"model = Detector(\"hub:{example}\")     # downloads once; names and threshold inside",
         "result = model(\"photo.jpg\")[0]",
         "result.show()                # or result.save(\"out.jpg\")",
         "print(result.summary())      # [{'name': ..., 'confidence': ..., 'box': {...}}, ...]",
         "```", "",
         "Or from the command line, on a picture, a folder, a video or a webcam (`source=0`):", "",
         "```bash",
-        f"easydetect predict model=hub/{example}/{name}.onnx source=photo.jpg", "```", "",
+        f"easydetect predict model=hub:{example} source=photo.jpg",
+        "easydetect hub search=plant      # what is here, with scores", "```", "",
         "`pip install easydetect` brings numpy, OpenCV, ONNX Runtime and OpenVINO, nothing",
         "more. Only fine-tuning needs PyTorch.", "",
         "## On an Intel NPU or a Raspberry Pi", "",
         "```python",
-        "# OpenVINO on an Intel CPU, GPU or NPU",
-        f"Detector(\"hub/{example}/{name}.xml\", device=\"NPU\")",
-        "# 8 bits through ONNX Runtime, for a Raspberry Pi",
-        f"Detector(\"hub/{small}/{small_name}-int8.onnx\", backend=\"onnxruntime\")",
+        f"Detector(\"hub:{example}.xml\", device=\"NPU\")                 # OpenVINO",
+        f"Detector(\"hub:{small}-int8\", backend=\"onnxruntime\")       # 8 bits",
         "```", "",
         "## Fine-tune on your own pictures", "",
-        "```bash", "pip install \"easydetect[train]\"      # adds PyTorch", "```", "",
+        "```bash", "pip install -U \"easydetect[train]\"      # adds PyTorch", "```", "",
         "```python",
-        f"model = Detector(\"hub/{example}/{name}.pt\")",
+        f"model = Detector(\"hub:{example}.pt\")",
         "model.train(data=\"my_data.yaml\", epochs=50, imgsz=640)   # YOLO-format folders",
         "```", "",
         "Or without code, in the browser:",
         "[easydetect lab](https://github.com/themakerrobot/easydetect-lab) (label, train,",
         "test and export, offline).", "",
+        "## Without easydetect", "",
+        "Each `.onnx` runs in plain ONNX Runtime (input: RGB, 0-1, stretched to its size;",
+        "outputs: `boxes` as centre and size, 0-1, and `scores` per class).", "",
+        "```bash",
+        f"hf download {repo} --include '{example}/*' --local-dir hub", "```", "",
         "## What is in each folder", "",
         "| file | for |", "| --- | --- |",
         "| `ed-s-<size>.onnx` | ONNX Runtime, any CPU; class names and threshold inside |",

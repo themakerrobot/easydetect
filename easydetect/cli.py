@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-MODES = ("predict", "track", "train", "val", "export", "serve", "benchmark")
+MODES = ("predict", "track", "train", "val", "export", "serve", "benchmark", "hub")
 
 HELP = """easydetect — real-time object detection (ed), Apache-2.0
 
@@ -28,9 +28,10 @@ Modes:
   export    write an OpenVINO IR (or ONNX) next to the checkpoint
   serve     answer POST /predict with detections as JSON (an HTTP server)
   benchmark time models on this machine (OpenVINO and ONNX Runtime; no PyTorch needed)
+  hub       list the models trained on public datasets (model=hub:<dataset>/<model>)
 
 Common keys:
-  model=ed-n|s|m|l|x|best.pt|model.xml   source=bus.jpg|dir|video.mp4|0|url
+  model=ed-n|s|m|l|x|best.pt|model.xml|hub:taco/ed-s-640   source=bus.jpg|dir|video.mp4|0|url
   data=data.yaml  epochs=100  imgsz=640  batch=8  conf=0.5  iou=0.7|none  device=0|cpu|AUTO
   contain=0.8  task=segment|pose  project=runs  name=predict  save=true  show=false
   pose_model=s|m|l|my.onnx  pose_flip=false
@@ -43,6 +44,8 @@ Examples:
   easydetect export  model=best.pt format=openvino half=true
   easydetect serve   model=best.onnx host=0.0.0.0 port=8000
   easydetect benchmark model=pi-kit/ runs=50 threads=4
+  easydetect hub     search=plant
+  easydetect predict model=hub:taco/ed-s-640 source=0
 """
 
 
@@ -89,6 +92,32 @@ def _take(overrides: dict[str, Any], key: str, default: Any = None) -> Any:
     return overrides.pop(key, default)
 
 
+def list_hub(search: Any = None) -> int:
+    """What easydetect-hub holds, one line a model; ``search`` keeps the lines
+    whose dataset, title or category holds it."""
+    from . import downloads
+
+    try:
+        index = downloads.hub_index()
+    except Exception as exc:  # noqa: BLE001  (no network and nothing cached)
+        print(f"could not read easydetect-hub: {exc}", file=sys.stderr)
+        return 1
+    word = str(search).lower() if search else ""
+    rows = [(key, m) for key, m in sorted(index.items())
+            if word in f"{key} {m.get('title', '')} {m.get('category', '')}".lower()]
+    if not rows:
+        print(f"nothing on easydetect-hub matches {search!r}")
+        return 1
+    width = max(len(key) for key, _ in rows) + len("hub:")
+    for key, m in rows:
+        int8 = f"  8-bit {m['map50_95_int8']:.3f}" if m.get("map50_95_int8") else ""
+        print(f"{'hub:' + key:<{width}}  mAP50-95 {m['map50_95']:.3f}{int8:<14}  "
+              f"{len(m.get('classes', {}))} classes  {m.get('title', '')}")
+    print(f"\n{len(rows)} models. Use one: easydetect predict model=hub:{rows[0][0]} "
+          "source=photo.jpg  (add -int8 for the 8-bit file, .xml for OpenVINO)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help"):
@@ -120,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
                   backend=overrides.get("backend"), device=str(overrides.get("device", "CPU")),
                   threads=overrides.get("threads"))
         return 0
+
+    if mode == "hub":
+        return list_hub(overrides.get("search"))
 
     if mode == "serve":
         from .serve import serve

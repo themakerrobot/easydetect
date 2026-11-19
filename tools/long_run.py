@@ -257,10 +257,22 @@ LAB_FORM = [("lab-form-n320", ["lab-form"], ["coco-data"])]
 #: easydetect-hub: ed-s at 320 (100 queries, from the COCO 320 start) and 640 on
 #: each dataset, then published with its licence (tools/hub_publish.py). Open
 #: Images at 320 is the oi-s320 run already made.
-HUB_DATASETS = {"construction-ppe": (100, 20, []), "openimages": (10, 3, ["oi-data"])}
+#: Smallest first, so most of the hub is up early; a dataset whose download
+#: or training fails is tried again at the end and the rest go on. Every step
+#: resumes (downloads, unpacking, training from last.pt), so after a power cut
+#: the same command carries on: python tools/long_run.py --only 'hub-*'
+sys.path.insert(0, str(HERE))
+from hub_data import RF100_SETS  # noqa: E402
+
+HUB_ORDER = ["bccd", "construction-ppe", "taco", "plantdoc", "gwhd",
+             *(f"rf100-{_n}" for _n in RF100_SETS),
+             "doclaynet", "caltech-camera-traps", "lvis", "openimages"]
+#: epochs and patience where the picture count does not decide them
+HUB_FIXED = {"openimages": (10, 3), "lvis": (24, 6)}
 HUB = [(f"hub-{_k}-{_size}", ["hub", _k, str(_size)],
-        _needs + (["oi-s320"] if (_k, _size) == ("openimages", 320) else []))
-       for _k, (_e, _p, _needs) in HUB_DATASETS.items() for _size in (320, 640)]
+        {"openimages": ["oi-data"] + (["oi-s320"] if _size == 320 else []),
+         "lvis": ["coco-data"]}.get(_k, []))
+       for _k in HUB_ORDER for _size in (320, 640)]
 
 #: run only when named (--only): set aside for later, not part of a plain run
 ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD + LAB_FORM + HUB
@@ -633,14 +645,22 @@ def _hub_data(args, key: str) -> tuple[Path, Path | None]:
     if key == "openimages":
         return Path(args.openimages).expanduser() / "data.yaml", None
     if key == "construction-ppe":
-        sys.path.insert(0, str(HERE))
         from bench_finetune import fetch
 
         return fetch(key, Path(args.bench_root).expanduser()), None
-    if key.startswith("rf100-"):
-        folder = Path(args.bench_root).expanduser().parent / "rf100" / key[len("rf100-"):]
-        return folder / "train.yaml", folder / "score.yaml"
-    raise SystemExit(f"{key}: no data for it here")
+    from hub_data import prepare
+
+    return prepare(key, Path(args.hub_root).expanduser(), Path(args.coco).expanduser())
+
+
+def _hub_schedule(key: str, train: Path) -> tuple[int, int]:
+    """(epochs, patience): long for a small dataset, shorter as it grows."""
+    if key in HUB_FIXED:
+        return HUB_FIXED[key]
+    from easydetect.data.dataset import DetDataset
+
+    n = len(DetDataset(str(train), "train", 64, augment=False))
+    return (100, 20) if n < 5000 else (50, 10) if n < 20000 else (30, 6)
 
 
 def step_hub(root: Path, args, key: str, size: str) -> None:
@@ -651,7 +671,7 @@ def step_hub(root: Path, args, key: str, size: str) -> None:
     train, scored = _hub_data(args, key)
     best = root / "oi" / "ed-sq-320-oi" / "weights" / "best.pt"
     if (key, size) != ("openimages", 320) or not best.exists():
-        epochs, patience, _ = HUB_DATASETS.get(key, (100, 20, []))
+        epochs, patience = _hub_schedule(key, train)
         project, name = root / "hub", f"{key}-s{size}"
         run = project / name
         resume = (run / "weights" / "last.pt").exists()
@@ -807,7 +827,7 @@ def run_step(root: Path, name: str, what: list[str], args) -> bool:
     log.parent.mkdir(parents=True, exist_ok=True)
     cmd = [PY, "-u", str(Path(__file__).resolve()), "--root", str(root), "--coco", args.coco,
            "--bench-root", args.bench_root, "--openimages", args.openimages,
-           "--workers", str(args.workers),
+           "--hub-root", args.hub_root, "--workers", str(args.workers),
            "--coco-epochs", str(args.coco_epochs), "--internal", *what]
     with log.open("a") as out:
         out.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} try\n")
@@ -889,6 +909,8 @@ def main():
     parser.add_argument("--coco", default="~/datasets/coco")
     parser.add_argument("--bench-root", default="~/datasets/bench")
     parser.add_argument("--openimages", default="~/datasets/openimages")
+    parser.add_argument("--hub-root", default="~/datasets/hub",
+                        help="where tools/hub_data.py lays out easydetect-hub's datasets")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--coco-epochs", type=int, default=COCO_EPOCHS)
     parser.add_argument("--stall", type=int, default=3 * 3600,
@@ -963,8 +985,12 @@ def main():
 
     state = root / "state"
     state.mkdir(exist_ok=True)
-    steps = ([s for s in known_steps() if s[0] in args.only] if args.only else plan())
-    unknown = sorted(set(args.only or ()) - {s[0] for s in known_steps()})
+    def wanted(name: str, only) -> bool:      # 'hub-*' names every hub step
+        return any(name == o or (o.endswith("*") and name.startswith(o[:-1])) for o in only)
+
+    steps = ([s for s in known_steps() if wanted(s[0], args.only)] if args.only else plan())
+    unknown = sorted(o for o in args.only or ()
+                     if not any(wanted(s[0], [o]) for s in known_steps()))
     if unknown:
         raise SystemExit(f"no such step: {', '.join(unknown)}")
     for rnd in range(2):                            # a second pass for what failed

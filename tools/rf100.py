@@ -108,11 +108,16 @@ def prepare(name: str, root: Path, caps: dict[str, int]) -> tuple[Path, Path, di
 
     names = _category_names(name)
     tree = json.loads(_get(f"{HUB}/{name}/tree/main/data"))
+    import pyarrow as pa
+
     tables = {}
     for split in ("train", "validation", "test"):
-        path = next(f["path"] for f in tree if f["path"].split("/")[-1].startswith(split + "-"))
-        print(f"{name}: downloading {path}", flush=True)
-        tables[split] = pq.read_table(io.BytesIO(_get(FILES.format(name=name, path=path))))
+        parts = []
+        for path in sorted(f["path"] for f in tree
+                           if f["path"].split("/")[-1].startswith(split + "-")):
+            print(f"{name}: downloading {path}", flush=True)
+            parts.append(pq.read_table(io.BytesIO(_get(FILES.format(name=name, path=path)))))
+        tables[split] = pa.concat_tables(parts)
 
     rows = {split: table.to_pylist() for split, table in tables.items()}
     used = sorted({c for split in rows.values() for r in split for c in r["objects"]["category"]})

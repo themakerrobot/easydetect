@@ -36,6 +36,8 @@ DATASETS = {
         "attribution": "LVIS v1 annotations, CC BY 4.0; pictures from COCO (Flickr terms of use).",
         "citation": "A. Gupta, P. Dollár, R. Girshick. LVIS: A Dataset for Large Vocabulary "
                     "Instance Segmentation. CVPR 2019. arXiv:1908.03195.",
+        "note": "Scored COCO's way, not with LVIS's federated AP: a class LVIS marks as "
+                "not exhaustively boxed in a picture is neither right nor wrong there.",
     },
     "taco": {
         "title": "TACO (Trash Annotations in Context)",
@@ -64,7 +66,7 @@ DATASETS = {
                     "Plant Phenomics 2021. arXiv:2105.07660.",
     },
     "caltech-camera-traps": {
-        "title": "Caltech Camera Traps",
+        "title": "Caltech Camera Traps (CCT-20)",
         "license": "CDLA-Permissive-1.0",
         "source": "https://lila.science/datasets/caltech-camera-traps",
         "attribution": "Caltech Camera Traps (LILA BC), CDLA-Permissive-1.0.",

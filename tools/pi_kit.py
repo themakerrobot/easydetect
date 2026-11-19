@@ -2,7 +2,7 @@
 # Apache-2.0
 """Export the models worth trying on a small CPU (a Raspberry Pi), with their accuracy.
 
-    python tools/pi_kit.py --models ed-n ed-s --sizes 320 416 640 \\
+    python tools/pi_kit.py --models ed-n ed-s --sizes 320 640 \\
         --data data.yaml --out pi-kit
     # copy pi-kit/ to the Pi, then there:
     easydetect benchmark model=pi-kit/ threads=4
@@ -151,7 +151,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--models", nargs="+", default=["ed-n", "ed-s"],
                         help="model names (ed-n …) or your best.pt files")
-    parser.add_argument("--sizes", nargs="+", type=int, default=[320, 416, 640])
+    parser.add_argument("--sizes", nargs="+", type=int, default=[320, 640])
     parser.add_argument("--queries", nargs="*", type=int, default=[100],
                         help="also export with these many decoder queries (of 300)")
     parser.add_argument("--data", help="data.yaml: calibrates the 8-bit models and scores all")

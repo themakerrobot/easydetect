@@ -4,13 +4,13 @@
 
     python tools/long_run.py                 # everything; again after a crash or reboot
     python tools/long_run.py --status        # what is done, what failed
-    python tools/long_run.py --only coco-n416 bench-n320
+    python tools/long_run.py --only coco-n320 bench-n320
 
 Steps (each in a process of its own, its output in ``<root>/logs/<step>.log``):
 
 * ``coco-data``     COCO 2017 downloaded (resuming), unzipped, converted
 * ``bench-*``       the fine-tuning benchmarks against YOLO26 (tools/bench_finetune.py)
-* ``coco-<v><s>``   the COCO checkpoints fine-tuned at 320, 416 and 640 px
+* ``coco-<v><s>``   the COCO checkpoints fine-tuned at 320 and 640 px
                     (ed-n and ed-s), so a small input does not lose most
                     of what the 640 px weights know
 * ``rf100-seed<n>`` (on demand: --only) the 수업용 training on 26 RF100 sets against
@@ -50,7 +50,7 @@ COCO_URLS = {
         "http://images.cocodataset.org/annotations/annotations_trainval2017.zip",
 }
 COCO_TRAIN_PICTURES = 118287
-SIZES = (320, 416, 640)
+SIZES = (320, 640)
 VARIANTS = {"n": 32, "s": 16}          # batch on a 32 GB GPU
 COCO_EPOCHS, COCO_PATIENCE = 60, 12
 
@@ -180,7 +180,7 @@ DISTILL = [("coco-n320-kd", ["coco-distill", "kd"], ["coco-n320-q100", "coco-s32
            ("speed-s320", ["speed-s"], ["coco-s320-q100"])]
 
 #: also trained with 100 decoder queries from the start (what the Pi runs fastest)
-QUERY_RUNS = [("n", 320), ("n", 416), ("s", 320), ("s", 416)]
+QUERY_RUNS = [("n", 320), ("s", 320)]
 
 
 def plan() -> list[tuple[str, list[str], list[str]]]:
@@ -250,8 +250,12 @@ PIBO_KD += [("qatp-coco-s320-q100", ["qat", "ed-sq-320", "320", "0.9999"],
             ("qatp-ed-s640", ["qat", "ed-s", "640", "0.9999"], ["coco-data"]),
             ("qatp-ort-ed-s640", ["qat-ort", "ed-s", "640"], ["qatp-ed-s640"])]
 
+#: ed-n 320 as easydetect lab sends a classroom model to Pibo (pi-kit-lab):
+#: float and ONNX Runtime's 8-bit form, for timing on the Pi
+LAB_FORM = [("lab-form-n320", ["lab-form"], ["coco-data"])]
+
 #: run only when named (--only): set aside for later, not part of a plain run
-ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD
+ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD + LAB_FORM
 
 
 def known_steps() -> list[tuple[str, list[str], list[str]]]:
@@ -601,6 +605,21 @@ def step_qat_ort(root: Path, args, run: str, size: str) -> None:
     _ort_form(kit, name, plain, coco_yaml, size)
 
 
+def step_lab_form(root: Path, args) -> None:
+    """ed-n 320 with 100 queries, the classroom start, as a float .onnx and in
+    the 8-bit form easydetect lab sends to Pibo (convolutions only, stem float)."""
+    from easydetect import Detector
+
+    coco_yaml = str(Path(args.coco).expanduser() / "data.yaml")
+    kit = root / "pi-kit-lab"
+    best = root / "coco" / "ed-nq-320" / "weights" / "best.pt"
+    weights = str(best) if best.exists() else "ed-n-320"
+    plain = Path(Detector(weights, verbose=False).export(
+        format="onnx", imgsz=320, out_dir=kit / "ed-n-320", verbose=False))
+    _keep_score(kit, "ed-n-320", plain, coco_yaml)
+    _ort_form(kit, "ed-n-320", plain, coco_yaml, 320)
+
+
 def step_oi_data(root: Path, args) -> None:
     """Open Images' boxes and pictures, as tools/openimages2yolo.py makes them."""
     _run([PY, "-u", str(HERE / "openimages2yolo.py"), "--out", args.openimages])
@@ -856,6 +875,8 @@ def main():
             step_qat(root, args, *rest)
         elif kind == "qat-ort":
             step_qat_ort(root, args, *rest)
+        elif kind == "lab-form":
+            step_lab_form(root, args)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

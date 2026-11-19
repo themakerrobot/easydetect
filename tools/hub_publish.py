@@ -202,18 +202,18 @@ def front_readme(index: dict, repo: str = REPO) -> str:
             m = next((m for m in models.values() if m["imgsz"] == size), None)
             cells.append("—" if m is None else f"{m['map50_95']:.3f}" + (
                 f" ({m['map50_95_int8']:.3f})" if m.get("map50_95_int8") else ""))
-        sections.setdefault(category(dataset), []).append(
+        group = category(dataset)
+        sections.setdefault(group, []).append(
             f"| <img src=\"{thumb}\" width=\"120\" height=\"90\"> | "
-            f"[{short_title(first['title'])}]({dataset}/) | "
+            f"[{short_title(first['title'])}]({dataset}/)<br><sub>{group}</sub> | "
             f"{len(first['classes'])} | {cells[0]} | {cells[1]} | "
             f"{short_license(first['license'])} |")
     order = [c for c in [*CATEGORIES, "Other"] if c in sections]
     contents = " · ".join(f"{c} ({len(sections[c])})" for c in order)
-    # one table, a row naming each category: every row then has the same widths
-    tables = [HEADER, "| --- | --- | --- | --- | --- | --- |"]
-    for c in order:
-        tables += [f"| | **{c}** | | | | |", *sections[c]]
-    tables.append("")
+    # one table (every row the same widths), grouped by category, each row
+    # naming its own under the dataset
+    tables = [HEADER, "| --- | --- | --- | --- | --- | --- |",
+              *(row for c in order for row in sections[c]), ""]
     example = next(iter(sorted(index)), "construction-ppe/ed-s-640")
     return "\n".join([
         "---", "license: apache-2.0", "library_name: easydetect",

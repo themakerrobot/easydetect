@@ -47,8 +47,29 @@ def slim(src: Path, dst: Path) -> dict:
     return ckpt
 
 
+THUMB = (320, 240)
+
+
+def fit(image, center: tuple[float, float] | None = None):
+    """``image`` cut to 4:3 around ``center`` (its middle by default) and
+    scaled to THUMB, so every dataset's thumbnail has the same size."""
+    import cv2
+
+    h, w = image.shape[:2]
+    cx, cy = center or (w / 2, h / 2)
+    if w * 3 > h * 4:                                   # too wide: cut the sides
+        cw = int(round(h * 4 / 3))
+        x0 = int(min(max(cx - cw / 2, 0), w - cw))
+        image = image[:, x0:x0 + cw]
+    else:                                               # too tall: cut top and bottom
+        ch = int(round(w * 3 / 4))
+        y0 = int(min(max(cy - ch / 2, 0), h - ch))
+        image = image[y0:y0 + ch]
+    return cv2.resize(image, THUMB, interpolation=cv2.INTER_AREA)
+
+
 def thumbnail(onnx: Path, data: str, out: Path, look: int = 200) -> Path:
-    """One val picture with the model's boxes on it, its longer side 640 px.
+    """One val picture with the model's boxes on it, 4:3 around the boxes.
     Of the first ``look``, one with 3-8 boxes found where they are largest (the
     clearest to look at); failing that, the one with the most, up to 20. Black
     bands baked into the picture are cut off."""
@@ -74,11 +95,16 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200) -> Path:
     image = best.plot(conf=False, line_width=2)
     lit = best.orig_img.max(axis=2) > 12
     rows, cols = np.flatnonzero(lit.any(axis=1)), np.flatnonzero(lit.any(axis=0))
+    top, left = 0, 0
     if len(rows) and len(cols):
         image = image[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
-    scale = 640 / max(image.shape[:2])
-    if scale < 1:
-        image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        top, left = int(rows[0]), int(cols[0])
+    center = None
+    if len(best.boxes):
+        xyxy = best.boxes.xyxy
+        center = ((xyxy[:, 0].min() + xyxy[:, 2].max()) / 2 - left,
+                  (xyxy[:, 1].min() + xyxy[:, 3].max()) / 2 - top)
+    image = fit(image, center)
     out.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(out), image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     return out
@@ -163,7 +189,8 @@ def front_readme(index: dict, repo: str = REPO) -> str:
             cells.append("—" if m is None else f"{m['map50_95']:.3f}" + (
                 f" (8-bit {m['map50_95_int8']:.3f})" if m.get("map50_95_int8") else ""))
         sections.setdefault(category(dataset), []).append(
-            f"| <img src=\"{thumb}\" width=\"160\"> | [{first['title']}]({dataset}/) | "
+            f"| <img src=\"{thumb}\" width=\"120\" height=\"90\"> | "
+            f"[{first['title']}]({dataset}/) | "
             f"{len(first['classes'])} | {cells[0]} | {cells[1]} | {first['license']} |")
     order = [c for c in [*CATEGORIES, "Other"] if c in sections]
     contents = " · ".join(f"[{c}](#{c.lower().replace(',', '').replace(' ', '-')}) "
@@ -220,11 +247,36 @@ def dataset_readme(dataset: str, index: dict) -> str:
                       ""])
 
 
+def refresh_thumbs(repo: str, stage: Path, dry_run: bool) -> int:
+    """Every dataset's thumb.jpg on the hub cut to THUMB, and the front page
+    rebuilt, in one commit."""
+    import cv2
+    from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download
+
+    index = json.loads(Path(hf_hub_download(repo, "index.json")).read_text())
+    ops = []
+    for dataset in _by_dataset(index):
+        thumb = Path(hf_hub_download(repo, f"{dataset}/thumb.jpg", force_download=True))
+        out = stage / dataset / "thumb.jpg"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(out), fit(cv2.imread(str(thumb))), [cv2.IMWRITE_JPEG_QUALITY, 85])
+        ops.append(CommitOperationAdd(f"{dataset}/thumb.jpg", str(out)))
+        print(f"{dataset}: {THUMB[0]}x{THUMB[1]}", flush=True)
+    (stage / "README.md").write_text(front_readme(index, repo))
+    ops.append(CommitOperationAdd("README.md", str(stage / "README.md")))
+    if not dry_run:
+        HfApi().create_commit(repo, ops, commit_message="thumbnails: one size")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--weights", required=True, help="best.pt of the training")
-    parser.add_argument("--data", required=True, help="its data.yaml (val split scored)")
-    parser.add_argument("--dataset", required=True, help="folder name in the repo, e.g. voc")
+    parser.add_argument("--weights", help="best.pt of the training")
+    parser.add_argument("--data", help="its data.yaml (val split scored)")
+    parser.add_argument("--dataset", help="folder name in the repo, e.g. voc")
+    parser.add_argument("--refresh-thumbs", action="store_true",
+                        help="only cut every published thumbnail to the same size and "
+                             "rebuild the front page")
     parser.add_argument("--score-data", help="data.yaml whose val split scores it "
                         "(default --data; RF100: its score.yaml, the test split)")
     parser.add_argument("--title", help="instead of hub_datasets.py's")
@@ -237,6 +289,10 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="build, do not upload")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
+    if args.refresh_thumbs:
+        return refresh_thumbs(args.repo, Path(args.stage).expanduser(), args.dry_run)
+    if not (args.weights and args.data and args.dataset):
+        parser.error("--weights, --data and --dataset are needed")
 
     import torch
 

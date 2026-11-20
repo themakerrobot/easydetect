@@ -1044,8 +1044,9 @@ def main():
     parser.add_argument("--tries", type=int, default=3)
     parser.add_argument("--pause", type=int, default=120, help="seconds between tries")
     parser.add_argument("--only", nargs="*", help="these steps only")
-    parser.add_argument("--parallel", type=int, default=2,
-                        help="small hub datasets trained at once on the GPU (others run alone)")
+    parser.add_argument("--parallel", type=int, default=1,
+                        help="hub datasets trained at once on the GPU (default one; 2 lets small "
+                             "ones share it)")
     parser.add_argument("--status", action="store_true")
     parser.add_argument("--wait-lock", action="store_true",
                         help="queue behind whatever holds <root>/.lock (another long_run, or "

@@ -4,7 +4,7 @@
 
 **Easy real-time object detection you can actually ship.**
 Train in PyTorch, run anywhere with OpenVINO — CPU, GPU or NPU — and label,
-train and test in a browser. Apache-2.0 from the code to the model you export.
+train and test in a browser. Apache-2.0 code and weights.
 
 [![PyPI](https://img.shields.io/pypi/v/easydetect?color=2b7489)](https://pypi.org/project/easydetect/)
 [![Python](https://img.shields.io/pypi/pyversions/easydetect)](https://pypi.org/project/easydetect/)
@@ -19,9 +19,11 @@ train and test in a browser. Apache-2.0 from the code to the model you export.
 
 * **Three lines to a detector.** `Detector("ed-s")`, point it at a picture,
   read the boxes. The same object trains, validates and exports.
-* **One licence, all the way down.** Apache-2.0 code, Apache-2.0 COCO weights,
-  Apache-2.0 exports — nothing to clear with legal before it goes into a
-  product or a classroom.
+* **A permissive licence.** Apache-2.0 code, Apache-2.0 COCO weights (from
+  D-FINE's), Apache-2.0 exports: no copyleft that makes a product publish its
+  source. The data a model learned from keeps its own terms: COCO's annotations
+  are CC BY 4.0 (keep the credit) and its pictures are under Flickr's terms, so
+  check those before commercial use.
 * **Accurate for its size.** The ed detectors are real-time DETRs: ed-s
   scores 48.5 COCO mAP with 10M parameters.
 * **Runs on the machine you have.** OpenVINO runs it on a CPU, an Intel GPU or
@@ -139,9 +141,10 @@ COCO numbers are the original authors' for these checkpoints (640 px, val2017).
 trained on over a hundred public datasets (trash, plants, blood cells, safety
 gear, documents, games, aerial and underwater pictures, COCO, Open Images,
 LVIS...), each at 320 px (with an 8-bit file for a Raspberry Pi) and 640 px.
-The weights are Apache-2.0; each dataset keeps its own licence, shown with its
-models, to check before commercial use. Name one and it downloads once, no PyTorch
-needed:
+The weights are Apache-2.0, built from Apache-2.0 models; the training data's
+terms still apply. Each dataset's licence and credit are shown with its models:
+keep the credit, and check them before commercial use. Name one and it downloads
+once, no PyTorch needed:
 
 ```python
 model = Detector("hub:taco/ed-s-640")          # ONNX
@@ -205,7 +208,9 @@ Read it plainly:
   0.810).
 * **The licence.** Ultralytics YOLO is AGPL-3.0: a product that ships it, or
   serves it over a network, must publish its source or buy a commercial
-  licence. Everything here — code and weights — is Apache-2.0.
+  licence. The code and weights here are Apache-2.0, with no such condition;
+  what remains is the training data's own terms (COCO: CC BY 4.0 annotations,
+  pictures under Flickr's terms).
 * **Where YOLO fits better:** pose and segmentation trained end to end, more
   tasks (oriented boxes, classification, depth), and a far larger ecosystem.
 
@@ -376,8 +381,10 @@ model.train(data="data.yaml", epochs=50)   # 내 데이터로 학습
 model.export(format="openvino")            # 배포용 IR + labels.txt
 ```
 
-세 줄이면 물체 검출이 됩니다. 모델은 ed(실시간 DETR)이고, 코드와 가중치가
-모두 Apache-2.0이라 상용 제품이나 교육 현장에 그대로 쓸 수 있습니다.
+세 줄이면 물체 검출이 됩니다. 모델은 ed(실시간 DETR)이고, 코드와 가중치는
+모두 Apache-2.0이라 AGPL처럼 소스를 공개해야 하는 조건이 없습니다. 다만 학습에 쓴
+데이터의 조건은 따로 있습니다(COCO: 정답은 CC BY 4.0, 사진은 Flickr 약관). 출처를
+표기하고, 상업적으로 쓰기 전에 그 조건을 확인하세요.
 
 설치는 두 가지입니다. `pip install easydetect`는 추론용으로 OpenVINO와 ONNX
 Runtime이 함께 들어가고 PyTorch는 없습니다. `pip install "easydetect[train]"`은
@@ -387,8 +394,8 @@ Runtime이 함께 들어가고 PyTorch는 없습니다. `pip install "easydetect
 
 공개 데이터셋 100여 개로 학습한 모델이 [easydetect hub](https://huggingface.co/leeyunjai/easydetect-hub)에
 있습니다(쓰레기, 식물, 혈액세포, 안전장비, 문서, 게임, 항공·수중 사진, COCO, Open Images,
-LVIS 등). 가중치는 Apache-2.0이고 데이터셋 라이선스는 각자 따로라, 상업적으로 쓰기 전에
-해당 데이터셋의 조건을 확인하세요. `Detector("hub:taco/ed-s-640")`처럼 이름만
+LVIS 등). 가중치는 Apache-2.0이고, 학습에 쓴 데이터셋의 조건(출처 표기 등)은 그대로
+따릅니다. 표기를 지키고, 상업적으로 쓰기 전에 데이터셋과 사진의 조건을 확인하세요. `Detector("hub:taco/ed-s-640")`처럼 이름만
 쓰면 한 번 내려받아 PyTorch 없이 돌고, `easydetect hub`로 목록과 점수를 봅니다.
 
 라벨링부터 학습·추론까지 브라우저로 하려면 [easydetect lab](https://github.com/themakerrobot/easydetect-lab). 가중치 캐시는
@@ -420,3 +427,6 @@ and loss, and adds its own training loop, inference stack and tooling — see
 ## License
 
 Apache-2.0 — see [LICENSE](https://github.com/themakerrobot/easydetect/blob/main/LICENSE) and [NOTICE](https://github.com/themakerrobot/easydetect/blob/main/NOTICE).
+The weights are Apache-2.0 too; the data they learned from keeps its own terms
+(COCO: CC BY 4.0 annotations, pictures under Flickr's terms; each easydetect hub
+dataset's are on its page).

@@ -318,7 +318,7 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "  the table and on its page; keep the credit, and check them before commercial use.",
         "- **Your own data next.** Every model comes with the checkpoint to fine-tune from.", "",
         "## Quick start (no PyTorch)", "",
-        "```bash", "pip install -U easydetect        # 0.7.16 or later", "```", "",
+        "```bash", "pip install -U easydetect        # 0.7.17 or later", "```", "",
         f"Download a model's folder (its page, or `hf download {repo} --include "
         f"'{example}/*' --local-dir hub`), then:", "",
         "```python", "from easydetect import Detector", "",

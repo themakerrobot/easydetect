@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.7.17
+
+- easydetect hub's files are named after their dataset too
+  (`taco/ed-s-640/taco-ed-s-640.onnx`), so models of several datasets can sit
+  in one folder; `hub:` names are unchanged, and a model published before is
+  still found under its old file name.
+- Mask and keypoint models on the hub: `hub:<dataset>/ed-s-640-seg` and
+  `-pose` are the dataset's detector with a mask decoder or keypoint network
+  beside it, fetched with it; the task follows from the name. A network
+  beside a model is found as `<model>.mask_decoder.onnx` / `<model>.pose.onnx`
+  (or plain `mask_decoder.onnx` / `pose.onnx`, as training leaves it).
+  `easydetect hub` shows each model's task and score.
+- Crowded datasets (hundreds or thousands of boxes a picture) train in the
+  memory of sparse ones: the loss pairs boxes without a (boxes x boxes)
+  matrix, a big batch is matched a picture at a time, and a picture lends at
+  most `num_denoising` of its boxes to denoising.
+- Tools: `tools/hub_tasks.py` (mask data, decoder training, mask mAP and OKS
+  AP, COCO's way), `hub_publish.py --task segment|pose`,
+  `tools/hub_dataset_names.py`; long_run.py trains one model at a time by
+  default and runs a dataset's mask and keypoint models right after its
+  detector.
+- README: the licence said plainly: Apache-2.0 code and COCO weights, free for
+  products; easydetect hub's models carry their datasets' terms.
+
 ## 0.7.16
 
 - easydetect hub: `Detector("hub:<dataset>/<model>")` runs a model trained on a

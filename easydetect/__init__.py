@@ -24,7 +24,7 @@ needs numpy/opencv/openvino/pyyaml; training adds
 
 from __future__ import annotations
 
-__version__ = "0.7.16"
+__version__ = "0.7.17"
 
 from .errors import DownloadError, EasyDetectError, ModelNotFoundError, TorchRequiredError
 from .metrics import BoxMetrics, DetMetrics

@@ -99,7 +99,7 @@ const T = {
     classesAll: "Classes", onHF: "Files on Hugging Face", px: "px", noTorch: "no PyTorch", close: "Close",
     fOnnx: "ONNX", fOnnxS: "any CPU", fInt8: "ONNX 8-bit", fInt8S: "Raspberry Pi", fOv: "OpenVINO", fOvS: "Intel CPU · GPU · NPU", fPt: "PyTorch", fPtS: "to fine-tune",
     rf: "Roboflow 100", cWebcam: "straight from a webcam", cList: "what is here, with scores",
-    cFile: "a file you downloaded: its path", cHub: "by name: downloads once",
+    cFile: "a file you downloaded: its path", cHub: "online, a hub name works too (downloads once)",
     tAll: "All tasks", detect: "Detection", segment: "Segmentation", pose: "Keypoints",
     mDetect: "mAP50-95", mSegment: "mask mAP50-95", mPose: "OKS AP", boxScore: "box mAP50-95",
     fHead: "with {0} beside it, one folder", cBeside: "{0} next to it, in the same folder",
@@ -123,7 +123,7 @@ const T = {
     classesAll: "클래스", onHF: "Hugging Face에서 파일 보기", px: "px", noTorch: "PyTorch 없이", close: "닫기",
     fOnnx: "ONNX", fOnnxS: "모든 CPU", fInt8: "ONNX 8비트", fInt8S: "라즈베리파이", fOv: "OpenVINO", fOvS: "인텔 CPU · GPU · NPU", fPt: "PyTorch", fPtS: "이어서 학습",
     rf: "Roboflow 100", cWebcam: "웹캠으로 바로", cList: "목록과 점수",
-    cFile: "받아 둔 파일이면 그 경로", cHub: "이름으로: 한 번만 받아요",
+    cFile: "받아 둔 파일이면 그 경로", cHub: "인터넷이 되면 hub 이름으로도 돼요 (한 번만 받아요)",
     tAll: "모든 타입", detect: "감지", segment: "세그멘테이션", pose: "포즈",
     mDetect: "mAP50-95", mSegment: "마스크 mAP50-95", mPose: "OKS AP", boxScore: "상자 mAP50-95",
     fHead: "{0}와 함께 받아요. 한 폴더에 두세요", cBeside: "{0}가 같은 폴더에 있어야 해요",
@@ -194,16 +194,21 @@ document.addEventListener("click", (e) => {
   if (tb) { box.dataset.on = tb.dataset.i; term(box.id, tabs); return; }
   if (e.target.closest(".copy")) copy(tabs[Number(box.dataset.on || 0)][1]);
 });
+/* the downloaded file first (on-device, offline), the hub name as a comment */
+const fileFirst = (file, hub, beside = "") => `# ${t("cFile")}${beside}\n${file}\n# ${t("cHub")}\n# ${hub}`;
 function pythonCode(hub, file, task = "detect") {
   const arg = task === "detect" ? "" : `, task="${task}"`;
   const beside = HEAD[task] ? `\n# ${t("cBeside").replace("{0}", HEAD[task])}` : "";
-  return `from easydetect import Detector\n\n# ${t("cHub")}\nmodel = Detector("${hub}")\n# ${t("cFile")}${beside}\n# model = Detector("${file}"${arg})\n\nresult = model("photo.jpg")[0]\nresult.show()`;
+  return `from easydetect import Detector\n\n` + fileFirst(`model = Detector("${file}"${arg})`, `model = Detector("${hub}")`, beside)
+    + `\n\nresult = model("photo.jpg")[0]\nresult.show()`;
 }
 function heroTerm() {
   term("hero-term", [
     [t("python"), `# pip install -U easydetect  (${t("noTorch")})\n` + pythonCode("hub:taco/ed-s-640", "ed-s-640.onnx")],
-    [t("cli"), `pip install -U easydetect\n\n# ${t("cWebcam")}\neasydetect predict model=hub:taco/ed-s-640 source=0\n\n# ${t("cList")}\neasydetect hub search=plant`],
-    [t("pi"), `pip install easydetect\n\nfrom easydetect import Detector\nmodel = Detector("hub:coco/ed-s-320-int8", backend="onnxruntime")\nmodel("photo.jpg")[0].save("out.jpg")`],
+    [t("cli"), `pip install -U easydetect\n\n# ${t("cWebcam")}\n` + fileFirst("easydetect predict model=ed-s-640.onnx source=0", "easydetect predict model=hub:taco/ed-s-640 source=0")
+      + `\n\n# ${t("cList")}\neasydetect hub search=plant`],
+    [t("pi"), `pip install easydetect\n\nfrom easydetect import Detector\n` + fileFirst(`model = Detector("ed-s-320-int8.onnx", backend="onnxruntime")`, `model = Detector("hub:coco/ed-s-320-int8", backend="onnxruntime")`)
+      + `\nmodel("photo.jpg")[0].save("out.jpg")`],
   ]);
 }
 
@@ -335,7 +340,7 @@ function drawDetail() {
   const src = /^https?:\/\//.test(m.source || "") ? m.source : "";
   const i8 = v.score_int8 != null;
   const task = v.task; const arg = task === "detect" ? "" : `, task="${task}"`;
-  const fileNote = `# ${t("cFile")}` + (HEAD[task] ? ` (${HEAD[task]})` : "");
+  const besideNote = HEAD[task] ? ` (${HEAD[task]})` : "";
   const sizes = d.variants.filter((x) => x.task === task);
   $("detail").innerHTML = `<div class="dl">
     <div class="ph"><div class="grow"><h2>${esc(d.name)}</h2>
@@ -373,10 +378,12 @@ function drawDetail() {
   const n = v.name;
   term("dterm", [
     [t("python"), `# pip install -U easydetect\n` + pythonCode(hub, `${n}.onnx`, task)],
-    [t("cli"), `easydetect predict model=${hub} source=photo.jpg\n# ${t("cWebcam")}\neasydetect predict model=${hub} source=0\n${fileNote}\neasydetect predict model=${n}.onnx${arg ? ` task=${task}` : ""} source=photo.jpg`],
-    ...(i8 ? [[t("pi"), `Detector("${hub}-int8", backend="onnxruntime")\n${fileNote}\nDetector("${n}-int8.onnx"${arg}, backend="onnxruntime")`]] : []),
-    [t("npu"), `Detector("${hub}.xml", device="NPU")\n${fileNote} (.bin, .names.json)\nDetector("${n}.xml"${arg}, device="NPU")`],
-    [t("tune"), `pip install -U "easydetect[train]"\n\nmodel = Detector("${hub}.pt")\n${fileNote}\n# model = Detector("${n}.pt")\nmodel.train(data="my_data.yaml", epochs=50, imgsz=${v.imgsz})`],
+    [t("cli"), fileFirst(`easydetect predict model=${n}.onnx${arg ? ` task=${task}` : ""} source=photo.jpg`, `easydetect predict model=${hub} source=photo.jpg`, besideNote)
+      + `\n\n# ${t("cWebcam")}\neasydetect predict model=${n}.onnx${arg ? ` task=${task}` : ""} source=0`],
+    ...(i8 ? [[t("pi"), fileFirst(`Detector("${n}-int8.onnx"${arg}, backend="onnxruntime")`, `Detector("${hub}-int8", backend="onnxruntime")`, besideNote)]] : []),
+    [t("npu"), fileFirst(`Detector("${n}.xml"${arg}, device="NPU")`, `Detector("${hub}.xml", device="NPU")`, ` (.bin, .names.json${HEAD[task] ? ", " + HEAD[task] : ""})`)],
+    [t("tune"), `pip install -U "easydetect[train]"\n\n` + fileFirst(`model = Detector("${n}.pt")`, `model = Detector("${hub}.pt")`)
+      + `\nmodel.train(data="my_data.yaml", epochs=50, imgsz=${v.imgsz})`],
     [t("folder"), `hf download ${REPO} --include "${v.key}/*" --local-dir hub`],
   ]);
 }

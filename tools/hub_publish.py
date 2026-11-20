@@ -12,6 +12,9 @@ The dataset's name, licence, official page, credit and paper come from
 Writes ``<stage>/<dataset>/ed-<v>-<size>/`` and uploads it to the same path in
 the repo:
 
+Files are named ``<dataset>-ed-<v>-<size>.*`` (``taco-ed-s-640.onnx``), so
+models of several datasets can share a folder:
+
 * ``ed-<v>-<size>.pt``    the checkpoint without its optimizer, to fine-tune from
 * ``ed-<v>-<size>.onnx``  ONNX Runtime, class names and the F1-best threshold inside
 * ``ed-<v>-<size>.xml/.bin``  OpenVINO IR (Intel CPU, GPU, NPU)
@@ -148,7 +151,8 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
 
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir(parents=True)
-    name = folder.name
+    # files named after the dataset too, so several datasets' sit in one folder
+    name = f"{folder.parent.name}-{folder.name}"
     ckpt = slim(weights, folder / f"{name}.pt")
     model = Detector(str(folder / f"{name}.pt"), verbose=False)
 
@@ -186,7 +190,7 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
     if task != "detect":
         from hub_tasks import score_pose, score_seg
 
-        beside = folder / TASKS[task][1]
+        beside = folder / f"{name}.{TASKS[task][1]}"   # what easydetect looks for beside it
         shutil.copyfile(head, beside)
         files.append(beside.name)
         runs = [("onnx", onnx)] + ([("int8", folder / f"{name}-int8.onnx")] if size <= 320 else [])
@@ -285,8 +289,8 @@ def front_readme(index: dict, repo: str = REPO) -> str:
                   "(`ed-s-<size>-seg`, `ed-s-<size>-pose`). Download the folder and use the",
                   "file, its network beside it, with `task=`:", "",
                   "```python",
-                  'Detector("ed-s-640-seg.onnx", task="segment")   # mask_decoder.onnx beside it',
-                  'Detector("ed-s-640-pose.onnx", task="pose")     # pose.onnx beside it',
+                  'Detector("coco-ed-s-640-seg.onnx", task="segment")  # .mask_decoder.onnx',
+                  'Detector("coco-ed-s-640-pose.onnx", task="pose")    # .pose.onnx beside',
                   "# online, a hub name works too (easydetect 0.7.17 or later fetches both)",
                   '# Detector("hub:coco/ed-s-640-seg")',
                   "```", "",
@@ -319,7 +323,7 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         f"'{example}/*' --local-dir hub`), then:", "",
         "```python", "from easydetect import Detector", "",
         "# the file you downloaded: names and threshold inside",
-        f"model = Detector(\"{example.split('/')[-1]}.onnx\")",
+        f"model = Detector(\"{example.replace('/', '-')}.onnx\")",
         "# online, a hub name works too (downloads once)",
         f"# model = Detector(\"hub:{example}\")",
         "result = model(\"photo.jpg\")[0]",
@@ -328,22 +332,22 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "```", "",
         "Or from the command line, on a picture, a folder, a video or a webcam (`source=0`):", "",
         "```bash",
-        f"easydetect predict model={example.split('/')[-1]}.onnx source=photo.jpg",
+        f"easydetect predict model={example.replace('/', '-')}.onnx source=photo.jpg",
         f"# easydetect predict model=hub:{example} source=photo.jpg     # online",
         "easydetect hub search=plant      # what is here, with scores", "```", "",
         "`pip install easydetect` brings numpy, OpenCV, ONNX Runtime and OpenVINO, nothing",
         "more. Only fine-tuning needs PyTorch.", "",
         "## On an Intel NPU or a Raspberry Pi", "",
         "```python",
-        f"Detector(\"{example.split('/')[-1]}.xml\", device=\"NPU\")  # OpenVINO, .bin beside",
-        f"Detector(\"{small.split('/')[-1]}-int8.onnx\", backend=\"onnxruntime\")  # 8 bits",
+        f"Detector(\"{example.replace('/', '-')}.xml\", device=\"NPU\")  # OpenVINO, .bin beside",
+        f"Detector(\"{small.replace('/', '-')}-int8.onnx\", backend=\"onnxruntime\")  # 8 bits",
         f"# online: Detector(\"hub:{example}.xml\", device=\"NPU\"), "
         f"Detector(\"hub:{small}-int8\", ...)",
         "```", "",
         "## Fine-tune on your own pictures", "",
         "```bash", "pip install -U \"easydetect[train]\"      # adds PyTorch", "```", "",
         "```python",
-        f"model = Detector(\"{example.split('/')[-1]}.pt\")",
+        f"model = Detector(\"{example.replace('/', '-')}.pt\")",
         f"# model = Detector(\"hub:{example}.pt\")     # online",
         "model.train(data=\"my_data.yaml\", epochs=50, imgsz=640)   # YOLO-format folders",
         "```", "",
@@ -357,10 +361,12 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         f"hf download {repo} --include '{example}/*' --local-dir hub", "```", "",
         "## What is in each folder", "",
         "| file | for |", "| --- | --- |",
-        "| `ed-s-<size>.onnx` | ONNX Runtime, any CPU; class names and threshold inside |",
-        "| `ed-s-<size>.xml` + `.bin` | OpenVINO: Intel CPU, GPU, NPU |",
-        "| `ed-s-320-int8.onnx` | 8 bits for a Raspberry Pi (320 px only) |",
-        "| `ed-s-<size>.pt` | the checkpoint to fine-tune from (needs PyTorch) |",
+        "| `<dataset>-ed-s-<size>.onnx` | ONNX Runtime, any CPU; names and threshold inside |",
+        "| `<dataset>-ed-s-<size>.xml` + `.bin` | OpenVINO: Intel CPU, GPU, NPU |",
+        "| `<dataset>-ed-s-320-int8.onnx` | 8 bits for a Raspberry Pi (320 px only) |",
+        "| `<dataset>-ed-s-<size>.pt` | the checkpoint to fine-tune from (needs PyTorch) |",
+        "| `<model>.mask_decoder.onnx`, `<model>.pose.onnx` | -seg / -pose: the network beside "
+        "the detector |",
         "| `model.json` | classes, size, score, dataset licence |", "",
         "## Models", "",
         "ed-s. mAP50-95 on each dataset's own val split, COCO's way; in brackets",

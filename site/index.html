@@ -196,18 +196,18 @@ document.addEventListener("click", (e) => {
 });
 /* the downloaded file first (on-device, offline), the hub name as a comment */
 const fileFirst = (file, hub, beside = "") => `# ${t("cFile")}${beside}\n${file}\n# ${t("cHub")}\n# ${hub}`;
-function pythonCode(hub, file, task = "detect") {
+function pythonCode(hub, file, task = "detect", head = HEAD[task]) {
   const arg = task === "detect" ? "" : `, task="${task}"`;
-  const beside = HEAD[task] ? `\n# ${t("cBeside").replace("{0}", HEAD[task])}` : "";
+  const beside = head ? `\n# ${t("cBeside").replace("{0}", head)}` : "";
   return `from easydetect import Detector\n\n` + fileFirst(`model = Detector("${file}"${arg})`, `model = Detector("${hub}")`, beside)
     + `\n\nresult = model("photo.jpg")[0]\nresult.show()`;
 }
 function heroTerm() {
   term("hero-term", [
-    [t("python"), `# pip install -U easydetect  (${t("noTorch")})\n` + pythonCode("hub:taco/ed-s-640", "ed-s-640.onnx")],
-    [t("cli"), `pip install -U easydetect\n\n# ${t("cWebcam")}\n` + fileFirst("easydetect predict model=ed-s-640.onnx source=0", "easydetect predict model=hub:taco/ed-s-640 source=0")
+    [t("python"), `# pip install -U easydetect  (${t("noTorch")})\n` + pythonCode("hub:taco/ed-s-640", "taco-ed-s-640.onnx")],
+    [t("cli"), `pip install -U easydetect\n\n# ${t("cWebcam")}\n` + fileFirst("easydetect predict model=taco-ed-s-640.onnx source=0", "easydetect predict model=hub:taco/ed-s-640 source=0")
       + `\n\n# ${t("cList")}\neasydetect hub search=plant`],
-    [t("pi"), `pip install easydetect\n\nfrom easydetect import Detector\n` + fileFirst(`model = Detector("ed-s-320-int8.onnx", backend="onnxruntime")`, `model = Detector("hub:coco/ed-s-320-int8", backend="onnxruntime")`)
+    [t("pi"), `pip install easydetect\n\nfrom easydetect import Detector\n` + fileFirst(`model = Detector("coco-ed-s-320-int8.onnx", backend="onnxruntime")`, `model = Detector("hub:coco/ed-s-320-int8", backend="onnxruntime")`)
       + `\nmodel("photo.jpg")[0].save("out.jpg")`],
   ]);
 }
@@ -315,6 +315,17 @@ function openDetail(id, size, task) {
   if (!$("detail").open) $("detail").showModal();
   sizesOf(v.key).then((s) => { if (current && current.v === v) { current.sizes = s; drawFiles(); } });
 }
+/* a model's files are named after its dataset (taco-ed-s-640.onnx) so several
+   share a folder; models published before that keep the folder's name */
+function stemOf(d, v) {
+  const named = `${d.id}-${v.name}`;
+  return !(v.files || []).length || v.files.some((f) => f.startsWith(named)) ? named : v.name;
+}
+function headOf(d, v) {
+  const head = HEAD[v.task]; if (!head) return null;
+  const own = `${stemOf(d, v)}.${head}`;
+  return !(v.files || []).length || v.files.includes(own) ? own : head;
+}
 function fileCard(kind, files, label, sub, main) {
   const { v, sizes } = current;
   const total = files.reduce((n, f) => n + (sizes[f] || 0), 0);
@@ -322,11 +333,11 @@ function fileCard(kind, files, label, sub, main) {
     <span class="ic">${esc(kind)}</span><span><b>${esc(label)}</b><small>${esc(sub)}${total ? " · " + fmtSize(total) : ""}</small></span></a>`;
 }
 function drawFiles() {
-  const { v } = current; const n = v.name;
+  const { d, v } = current; const n = stemOf(d, v);
   const have = new Set(v.files || []); const has = (f) => !have.size || have.has(f);
   const box = $("files"); if (!box) return;
   // a mask or keypoint model is its detector and the network beside it: both come
-  const head = HEAD[v.task] ? [HEAD[v.task]] : [];
+  const head = headOf(d, v) ? [headOf(d, v)] : [];
   const sub = (s) => head.length ? `${s} · ${t("fHead").replace("{0}", head[0])}` : s;
   box.innerHTML = [
     has(`${n}.onnx`) ? fileCard("ONNX", [`${n}.onnx`, ...head], t("fOnnx"), sub(t("fOnnxS")), true) : "",
@@ -340,7 +351,8 @@ function drawDetail() {
   const src = /^https?:\/\//.test(m.source || "") ? m.source : "";
   const i8 = v.score_int8 != null;
   const task = v.task; const arg = task === "detect" ? "" : `, task="${task}"`;
-  const besideNote = HEAD[task] ? ` (${HEAD[task]})` : "";
+  const headName = headOf(d, v);
+  const besideNote = headName ? ` (${headName})` : "";
   const sizes = d.variants.filter((x) => x.task === task);
   $("detail").innerHTML = `<div class="dl">
     <div class="ph"><div class="grow"><h2>${esc(d.name)}</h2>
@@ -375,13 +387,13 @@ function drawDetail() {
         ${!d.tasks.includes("segment") ? `<p class="hint">${esc(t("anyMask"))}</p>` : ""}</div>
     </div></div></div>`;
   drawFiles();
-  const n = v.name;
+  const n = stemOf(d, v);
   term("dterm", [
-    [t("python"), `# pip install -U easydetect\n` + pythonCode(hub, `${n}.onnx`, task)],
+    [t("python"), `# pip install -U easydetect\n` + pythonCode(hub, `${n}.onnx`, task, headName)],
     [t("cli"), fileFirst(`easydetect predict model=${n}.onnx${arg ? ` task=${task}` : ""} source=photo.jpg`, `easydetect predict model=${hub} source=photo.jpg`, besideNote)
       + `\n\n# ${t("cWebcam")}\neasydetect predict model=${n}.onnx${arg ? ` task=${task}` : ""} source=0`],
     ...(i8 ? [[t("pi"), fileFirst(`Detector("${n}-int8.onnx"${arg}, backend="onnxruntime")`, `Detector("${hub}-int8", backend="onnxruntime")`, besideNote)]] : []),
-    [t("npu"), fileFirst(`Detector("${n}.xml"${arg}, device="NPU")`, `Detector("${hub}.xml", device="NPU")`, ` (.bin, .names.json${HEAD[task] ? ", " + HEAD[task] : ""})`)],
+    [t("npu"), fileFirst(`Detector("${n}.xml"${arg}, device="NPU")`, `Detector("${hub}.xml", device="NPU")`, ` (.bin, .names.json${headName ? ", " + headName : ""})`)],
     [t("tune"), `pip install -U "easydetect[train]"\n\n` + fileFirst(`model = Detector("${n}.pt")`, `model = Detector("${hub}.pt")`)
       + `\nmodel.train(data="my_data.yaml", epochs=50, imgsz=${v.imgsz})`],
     [t("folder"), `hf download ${REPO} --include "${v.key}/*" --local-dir hub`],

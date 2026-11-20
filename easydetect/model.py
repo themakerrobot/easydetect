@@ -266,9 +266,7 @@ class Detector:
             backend = self.predictor.backend if self.predictor is not None else self.backend
             decoder = self.seg_model
             if decoder is None:
-                beside = Path(self.model_name).parent / "mask_decoder.onnx"
-                if Path(self.model_name).is_file() and beside.is_file():
-                    decoder = beside
+                decoder = downloads.beside(self.model_name, "mask_decoder.onnx")
             self.segmenter = default_segmenter(device=device or self.device, backend=backend,
                                                decoder=decoder)
         return self.segmenter
@@ -282,9 +280,8 @@ class Detector:
 
             model = self.pose_model
             if model is None:
-                beside = Path(self.model_name).parent / "pose.onnx"
-                model = str(beside) if Path(self.model_name).is_file() and beside.is_file() \
-                    else "s"
+                found = downloads.beside(self.model_name, "pose.onnx")
+                model = str(found) if found else "s"
             model = str(model)
             if model in SIZES:
                 self.pose = default_estimator(device=device or self.device, backend=backend,

@@ -68,9 +68,25 @@ def hub_task(folder: str) -> tuple[str, str | None]:
     return next((v for k, v in HUB_TASKS.items() if folder.endswith(k)), ("detect", None))
 
 
+def beside(model: str | Path, head: str) -> Path | None:
+    """The network a model keeps beside it (``mask_decoder.onnx``,
+    ``pose.onnx``): ``<stem>.<head>`` first, the way easydetect hub names it so
+    several models share a folder (an 8-bit file shares its float one's), then
+    plain ``<head>``, the way training leaves it beside ``best.pt``."""
+    path = Path(model)
+    if not path.is_file():
+        return None
+    stem = path.stem
+    for name in (f"{stem}.{head}", f"{stem.removesuffix('-int8')}.{head}", head):
+        if (path.parent / name).is_file():
+            return path.parent / name
+    return None
+
+
 def hub_parts(name: str) -> tuple[str, str, str]:
-    """``hub:taco/ed-s-640`` -> ``("taco", "ed-s-640", "ed-s-640.onnx")``:
-    the dataset, the model's folder and the file. ``-int8`` names the 8-bit
+    """``hub:taco/ed-s-640`` -> ``("taco", "ed-s-640", "taco-ed-s-640.onnx")``:
+    the dataset, the model's folder and the file, named after both so files
+    from several datasets can sit in one folder. ``-int8`` names the 8-bit
     ONNX (``hub:bccd/ed-s-320-int8``); ``.xml`` the OpenVINO IR, ``.pt`` the
     checkpoint to fine-tune from (needs PyTorch); anything else the ONNX."""
     spec = str(name).strip()[len(HUB_PREFIX):].strip().strip("/")
@@ -85,7 +101,7 @@ def hub_parts(name: str) -> tuple[str, str, str]:
         raise ModelNotFoundError(
             f"{name!r}: a hub model is named hub:<dataset>/<model>, e.g. hub:taco/ed-s-640, "
             "hub:taco/ed-s-640.xml, hub:bccd/ed-s-320-int8. The list: easydetect hub")
-    return dataset, folder, f"{model}{suffix or '.onnx'}"
+    return dataset, folder, f"{dataset}-{model}{suffix or '.onnx'}"
 
 
 def download_hub(name: str) -> Path:
@@ -95,14 +111,23 @@ def download_hub(name: str) -> Path:
     dataset, folder, filename = hub_parts(name)
     base, dest = f"{hub_url()}/{dataset}/{folder}", cache_dir() / "hub" / dataset / folder
     try:
-        path = download(f"{base}/{filename}", dest / filename)
+        try:
+            path = download(f"{base}/{filename}", dest / filename)
+        except DownloadError:
+            # published before files were named after their dataset
+            filename = filename[len(dataset) + 1:]
+            path = download(f"{base}/{filename}", dest / filename)
+        stem = Path(filename).stem
         if filename.endswith(".xml"):
-            stem = filename[: -len(".xml")]
             download(f"{base}/{stem}.bin", dest / f"{stem}.bin")
             _hub_names(base, dest, stem)
         head = hub_task(folder)[1]
         if head:
-            download(f"{base}/{head}", dest / head)
+            own = f"{stem.removesuffix('-int8')}.{head}"
+            try:
+                download(f"{base}/{own}", dest / own)
+            except DownloadError:
+                download(f"{base}/{head}", dest / head)
     except DownloadError as exc:
         raise ModelNotFoundError(
             f"{name!r} is not on easydetect-hub ({exc}). See what is: easydetect hub") from exc

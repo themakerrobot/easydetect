@@ -12,12 +12,13 @@ from easydetect.errors import DownloadError, ModelNotFoundError
 
 
 @pytest.mark.parametrize("name, parts", [
-    ("hub:taco/ed-s-640", ("taco", "ed-s-640", "ed-s-640.onnx")),
-    ("hub:taco/ed-s-640.onnx", ("taco", "ed-s-640", "ed-s-640.onnx")),
-    ("hub:taco/ed-s-640.xml", ("taco", "ed-s-640", "ed-s-640.xml")),
-    ("hub:taco/ed-s-640.pt", ("taco", "ed-s-640", "ed-s-640.pt")),
-    ("hub:bccd/ed-s-320-int8", ("bccd", "ed-s-320", "ed-s-320-int8.onnx")),
-    (" HUB:rf100-marbles/ed-s-320/ ", ("rf100-marbles", "ed-s-320", "ed-s-320.onnx")),
+    ("hub:taco/ed-s-640", ("taco", "ed-s-640", "taco-ed-s-640.onnx")),
+    ("hub:taco/ed-s-640.onnx", ("taco", "ed-s-640", "taco-ed-s-640.onnx")),
+    ("hub:taco/ed-s-640.xml", ("taco", "ed-s-640", "taco-ed-s-640.xml")),
+    ("hub:taco/ed-s-640.pt", ("taco", "ed-s-640", "taco-ed-s-640.pt")),
+    ("hub:bccd/ed-s-320-int8", ("bccd", "ed-s-320", "bccd-ed-s-320-int8.onnx")),
+    (" HUB:rf100-marbles/ed-s-320/ ", ("rf100-marbles", "ed-s-320",
+                                       "rf100-marbles-ed-s-320.onnx")),
 ])
 def test_a_hub_name_says_which_file(name, parts):
     assert downloads.is_hub_name(name)
@@ -44,13 +45,13 @@ def test_a_hub_model_is_fetched_once_into_the_cache(tmp_path, monkeypatch):
 
     monkeypatch.setattr(downloads, "download", fake)
     path = downloads.download_hub("hub:bccd/ed-s-320-int8")
-    assert path == tmp_path / "hub" / "bccd" / "ed-s-320" / "ed-s-320-int8.onnx"
-    assert fetched == ["https://example.org/hub/bccd/ed-s-320/ed-s-320-int8.onnx"]
+    assert path == tmp_path / "hub" / "bccd" / "ed-s-320" / "bccd-ed-s-320-int8.onnx"
+    assert fetched == ["https://example.org/hub/bccd/ed-s-320/bccd-ed-s-320-int8.onnx"]
 
     fetched.clear()
     xml = downloads.download_hub("hub:bccd/ed-s-640.xml")
-    assert xml.name == "ed-s-640.xml"
-    assert fetched == [f"https://example.org/hub/bccd/ed-s-640/ed-s-640.{ext}"
+    assert xml.name == "bccd-ed-s-640.xml"
+    assert fetched == [f"https://example.org/hub/bccd/ed-s-640/bccd-ed-s-640.{ext}"
                        for ext in ("xml", "bin", "names.json")]
 
 
@@ -135,11 +136,33 @@ def test_a_mask_or_keypoint_model_comes_with_its_network(tmp_path, monkeypatch):
 
     monkeypatch.setattr(downloads, "download", fake)
     assert downloads.hub_parts("hub:coco/ed-s-320-seg-int8") == \
-        ("coco", "ed-s-320-seg", "ed-s-320-seg-int8.onnx")
+        ("coco", "ed-s-320-seg", "coco-ed-s-320-seg-int8.onnx")
     path = downloads.download_hub("hub:coco/ed-s-320-seg-int8")
-    assert (path.parent / "mask_decoder.onnx").exists()
-    assert fetched[-1] == "https://example.org/hub/coco/ed-s-320-seg/mask_decoder.onnx"
+    head = path.parent / "coco-ed-s-320-seg.mask_decoder.onnx"
+    assert head.exists() and downloads.beside(path, "mask_decoder.onnx") == head
+    assert fetched[-1] == ("https://example.org/hub/coco/ed-s-320-seg/"
+                           "coco-ed-s-320-seg.mask_decoder.onnx")
     downloads.download_hub("hub:coco/ed-s-640-pose")
-    assert fetched[-1] == "https://example.org/hub/coco/ed-s-640-pose/pose.onnx"
+    assert fetched[-1] == "https://example.org/hub/coco/ed-s-640-pose/coco-ed-s-640-pose.pose.onnx"
     assert downloads.hub_task("ed-s-640-pose") == ("pose", "pose.onnx")
     assert downloads.hub_task("ed-s-640") == ("detect", None)
+
+
+def test_a_model_published_before_dataset_names_is_still_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("EASYDETECT_HOME", str(tmp_path))
+    monkeypatch.setenv("EASYDETECT_HUB_URL", "https://example.org/hub")
+    fetched = []
+
+    def fake(url, dest, progress=True):
+        fetched.append(url)
+        if "/taco-" in url or "/coco-" in url or ".mask_decoder" in url:
+            raise DownloadError("HTTP 404")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x")
+        return dest
+
+    monkeypatch.setattr(downloads, "download", fake)
+    assert downloads.download_hub("hub:taco/ed-s-640").name == "ed-s-640.onnx"
+    path = downloads.download_hub("hub:coco/ed-s-640-seg")
+    assert path.name == "ed-s-640-seg.onnx" and fetched[-1].endswith("/mask_decoder.onnx")
+    assert downloads.beside(path, "mask_decoder.onnx") == path.parent / "mask_decoder.onnx"

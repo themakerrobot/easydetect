@@ -101,7 +101,7 @@
     background: var(--panel); padding: 0 14px; box-shadow: var(--shadow-s); min-width: 0; }
   .search input { padding-left: 42px; }
   .search input:focus, .row1 select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
-  .chips { display: flex; gap: 6px; padding: 10px 2px 2px; overflow-x: auto; scrollbar-width: thin; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 2px 2px; }
   .chip { flex: none; height: 34px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel);
     font-size: 13.5px; font-weight: 550; color: var(--sub); display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
   .chip:hover { color: var(--text); border-color: var(--line2); }
@@ -202,6 +202,9 @@
     .nav nav a.hide-s { display: none; }
     .row1 { grid-template-columns: 1fr 120px; }
     #grid { grid-template-columns: 1fr; }
+    .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+      mask-image: linear-gradient(90deg, #000 88%, transparent); }
+    .chips::-webkit-scrollbar { display: none; }
     .hero h1 { font-size: 34px; }
     .eyebrow { font-size: 12px; }
     .facts-row { gap: 20px; }

@@ -2,8 +2,10 @@
 """What easydetect-hub says about each dataset it carries: name, licence,
 official page, the credit its licence asks for, and the paper to cite.
 
-Only datasets whose terms allow commercial use and sharing trained models are
-listed. Each licence was read on the dataset's official page (Nov 2026).
+Public datasets whose licences allow sharing models trained on them; each
+keeps its own terms (some pictures stay under third-party terms, such as
+Flickr's), shown beside its models. Each licence was read on the dataset's
+official page (Nov 2026).
 """
 
 from __future__ import annotations

@@ -458,6 +458,17 @@ def prefetch_running(root: Path) -> bool:
     return is_busy("prefetch", root)
 
 
+def boxes_per_picture(key: str, root: Path) -> float:
+    """Mean boxes a training picture (0 before it is laid out). Pictures with
+    hundreds of boxes (cells, circuit parts) need far more GPU memory."""
+    folder = root / "rf100" / key[len("rf100-"):] if key.startswith("rf100-") else root / key
+    labels = list((folder / "labels" / "train").glob("*.txt"))
+    if not labels:
+        return 0.0
+    return sum(sum(1 for line in f.read_text().splitlines() if line.strip())
+               for f in labels) / len(labels)
+
+
 def is_busy(key: str, root: Path) -> bool:
     """Another process (a prefetch) is downloading or laying it out now."""
     import fcntl

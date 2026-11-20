@@ -646,9 +646,26 @@ def step_lab_form(root: Path, args) -> None:
 HUB_HEAVY = ("doclaynet", "caltech-camera-traps", "lvis", "openimages")
 
 
-def _light(what: list[str]) -> bool:
-    """A step that may train beside another: a hub dataset that is not big."""
-    return what[0] == "hub" and what[1] not in HUB_HEAVY
+#: boxes a picture above which a dataset trains alone and with a smaller batch
+HUB_DENSE = 40
+_density: dict = {}
+
+
+def _dense(key: str, args) -> bool:
+    if key in ("construction-ppe", "openimages", "coco"):
+        return False
+    if key not in _density:
+        from hub_data import boxes_per_picture
+
+        _density[key] = boxes_per_picture(key, Path(args.hub_root).expanduser())
+    return _density[key] > HUB_DENSE
+
+
+def _light(what: list[str], args=None) -> bool:
+    """A step that may train beside another: a hub dataset neither big nor
+    crowded with boxes."""
+    return (what[0] == "hub" and what[1] not in HUB_HEAVY
+            and not (args is not None and _dense(what[1], args)))
 
 
 def _data_on_its_way(what: list[str], args) -> bool:
@@ -713,8 +730,10 @@ def step_hub(root: Path, args, key: str, size: str) -> None:
             shutil.rmtree(run)
         queries = 100 if size <= 320 else None
         start = downloads.download_sized_checkpoint("ed-s", size, queries) or "ed-s"
+        # hundreds of boxes a picture: half the batch, or the GPU runs out
+        batch = VARIANTS["s"] // 2 if _dense(key, args) else VARIANTS["s"]
         best = Path(Detector(str(start)).train(
-            data=str(train), epochs=epochs, imgsz=size, batch=VARIANTS["s"],
+            data=str(train), epochs=epochs, imgsz=size, batch=batch,
             workers=args.workers, project=str(project), name=name, resume=resume,
             patience=patience, queries=queries))
         # still improving when the schedule ran out (the best in its last tenth,
@@ -728,7 +747,7 @@ def step_hub(root: Path, args, key: str, size: str) -> None:
             print(f"{name}: best at epoch {last_best} of {epochs}, still improving; "
                   f"on to {more}", flush=True)
             best = Path(Detector(str(start)).train(
-                data=str(train), epochs=more, imgsz=size, batch=VARIANTS["s"],
+                data=str(train), epochs=more, imgsz=size, batch=batch,
                 workers=args.workers, project=str(project), name=name, resume=True,
                 patience=patience, queries=queries))
     _run([PY, "-u", str(HERE / "hub_publish.py"), "--weights", str(best), "--data", str(train),
@@ -881,7 +900,8 @@ def run_step(root: Path, name: str, what: list[str], args) -> bool:
         out.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} try\n")
         out.flush()
         proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT,
-                                env=dict(os.environ, PYTHONUNBUFFERED="1"),
+                                env=dict(os.environ, PYTHONUNBUFFERED="1",
+                                         PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"),
                                 start_new_session=True)  # its own group: stopped as one
         while proc.poll() is None:
             time.sleep(30)
@@ -1095,7 +1115,7 @@ def main():
                 if _data_on_its_way(what, args):     # train what is here meanwhile
                     deferred = True
                     continue
-                if not _light(what):                 # alone on the GPU
+                if not _light(what, args):           # alone on the GPU
                     concurrent.futures.wait(active)
                     active.clear()
                     attempt(name, what)

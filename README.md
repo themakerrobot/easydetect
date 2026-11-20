@@ -136,10 +136,11 @@ COCO numbers are the original authors' for these checkpoints (640 px, val2017).
 ### Trained on public datasets: easydetect hub
 
 [easydetect hub](https://huggingface.co/leeyunjai/easydetect-hub) holds ed-s
-trained on over a hundred public datasets whose terms allow commercial use
-(trash, plants, blood cells, safety gear, documents, games, aerial and
-underwater pictures, Open Images, LVIS...), each at 320 px (with an 8-bit file
-for a Raspberry Pi) and 640 px. Name one and it downloads once, no PyTorch
+trained on over a hundred public datasets (trash, plants, blood cells, safety
+gear, documents, games, aerial and underwater pictures, COCO, Open Images,
+LVIS...), each at 320 px (with an 8-bit file for a Raspberry Pi) and 640 px.
+The weights are Apache-2.0; each dataset keeps its own licence, shown with its
+models, to check before commercial use. Name one and it downloads once, no PyTorch
 needed:
 
 ```python
@@ -385,8 +386,9 @@ Runtime이 함께 들어가고 PyTorch는 없습니다. `pip install "easydetect
 포함)을 쓸 수 있습니다. 두 엔진의 결과는 같습니다.
 
 공개 데이터셋 100여 개로 학습한 모델이 [easydetect hub](https://huggingface.co/leeyunjai/easydetect-hub)에
-있습니다(쓰레기, 식물, 혈액세포, 안전장비, 문서, 게임, 항공·수중 사진, Open Images,
-LVIS 등, 상업적 사용이 허용된 데이터셋만). `Detector("hub:taco/ed-s-640")`처럼 이름만
+있습니다(쓰레기, 식물, 혈액세포, 안전장비, 문서, 게임, 항공·수중 사진, COCO, Open Images,
+LVIS 등). 가중치는 Apache-2.0이고 데이터셋 라이선스는 각자 따로라, 상업적으로 쓰기 전에
+해당 데이터셋의 조건을 확인하세요. `Detector("hub:taco/ed-s-640")`처럼 이름만
 쓰면 한 번 내려받아 PyTorch 없이 돌고, `easydetect hub`로 목록과 점수를 봅니다.
 
 라벨링부터 학습·추론까지 브라우저로 하려면 [easydetect lab](https://github.com/themakerrobot/easydetect-lab). 가중치 캐시는

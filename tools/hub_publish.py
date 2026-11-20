@@ -239,8 +239,8 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "  OpenVINO on an Intel CPU, GPU or NPU.",
         "- **Small and fast.** ed-s (10M parameters), a real-time DETR: no NMS to tune.",
         "  320 px for small devices, with an 8-bit file for a Raspberry Pi; 640 px for accuracy.",
-        "- **Free for your product.** The weights are Apache-2.0, trained only on datasets",
-        "  whose terms allow commercial use.",
+        "- **Apache-2.0 weights.** Each dataset keeps its own licence (in the table and on",
+        "  its page): check it before commercial use, and keep the credit it asks for.",
         "- **Your own data next.** Every model comes with the checkpoint to fine-tune from.", "",
         "## Quick start (no PyTorch)", "",
         "```bash", "pip install -U easydetect        # 0.7.16 or later", "```", "",
@@ -319,6 +319,16 @@ def dataset_readme(dataset: str, index: dict) -> str:
                       ""])
 
 
+def _fill_categories(index: dict) -> None:
+    """Every entry with its category (the web page groups by it), including
+    entries published before categories were recorded."""
+    sys.path.insert(0, str(HERE))
+    from hub_datasets import category
+
+    for key, entry in index.items():
+        entry["category"] = category(key.split("/", 1)[0])
+
+
 @contextlib.contextmanager
 def _publishing(stage: Path):
     """One process at a time on the hub's list and front page."""
@@ -351,6 +361,9 @@ def _refresh_thumbs(repo, stage, dry_run, CommitOperationAdd, HfApi, hf_hub_down
         cv2.imwrite(str(out), fit(cv2.imread(str(thumb))), [cv2.IMWRITE_JPEG_QUALITY, 85])
         ops.append(CommitOperationAdd(f"{dataset}/thumb.jpg", str(out)))
         print(f"{dataset}: {THUMB[0]}x{THUMB[1]}", flush=True)
+    _fill_categories(index)
+    (stage / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2))
+    ops.append(CommitOperationAdd("index.json", str(stage / "index.json")))
     (stage / "README.md").write_text(front_readme(index, repo))
     ops.append(CommitOperationAdd("README.md", str(stage / "README.md")))
     if not dry_run:
@@ -425,6 +438,7 @@ def main() -> int:
         except EntryNotFoundError:
             index = {}
         index[key] = info
+        _fill_categories(index)
         (stage / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2))
         (stage / "README.md").write_text(front_readme(index, args.repo))
         shutil.copyfile(folder / "sample.jpg", stage / args.dataset / "thumb.jpg")

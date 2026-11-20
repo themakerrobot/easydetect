@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>easydetect hub · object detectors for public datasets</title>
+<meta name="description" content="Ready-to-run object detectors for over a hundred public datasets. No PyTorch, no GPU: pip install easydetect and name a model.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+  :root {
+    --bg: #f7f8fa; --panel: #ffffff; --line: #e6e8ec; --line2: #d9dde3; --text: #14171c; --sub: #5f6773; --mute: #8a929e;
+    --accent: #3b5bfd; --accent2: #7b5cff; --accent-weak: #eef1ff; --hover: #f2f4f7; --ok: #138a5b; --warn: #b54708;
+    --code-bg: #0f1218; --code-fg: #e7eaf0; --code-mute: #7d8696;
+    --shadow-s: 0 1px 2px rgba(16,24,40,.05); --shadow-m: 0 8px 24px rgba(16,24,40,.08); --shadow-l: 0 24px 64px rgba(16,24,40,.22);
+    --r: 14px;
+    --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0f13; --panel: #15181e; --line: #232831; --line2: #2d333d; --text: #eceef2; --sub: #a3abb7; --mute: #7a8390;
+      --accent: #7c92ff; --accent2: #a68bff; --accent-weak: #1c2340; --hover: #1b1f27; --ok: #42c58a; --warn: #f0a04b;
+      --code-bg: #0a0c10; --shadow-m: 0 8px 24px rgba(0,0,0,.35); --shadow-l: 0 24px 64px rgba(0,0,0,.6);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--font); -webkit-font-smoothing: antialiased;
+    word-break: keep-all; overflow-wrap: anywhere; }
+  h1, h2, h3, .lead { text-wrap: balance; }
+  a { color: inherit; text-decoration: none; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+  /* nav */
+  .nav { position: sticky; top: 0; z-index: 20; backdrop-filter: saturate(1.4) blur(14px);
+    background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line); }
+  .nav .wrap { display: flex; align-items: center; gap: 18px; height: 60px; }
+  .logo { display: flex; align-items: center; gap: 9px; font-weight: 750; font-size: 16px; letter-spacing: -.01em; }
+  .mark { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent2));
+    position: relative; box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 35%, transparent); }
+  .mark::after { content: ""; position: absolute; inset: 7px; border: 2px solid #fff; border-radius: 3px; }
+  .logo em { font-style: normal; color: var(--sub); font-weight: 500; }
+  .nav nav { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .nav nav a, .lang { height: 34px; padding: 0 11px; display: inline-flex; align-items: center; border-radius: 9px;
+    color: var(--sub); font-size: 14px; font-weight: 500; border: 0; background: none; }
+  .nav nav a:hover, .lang:hover { background: var(--hover); color: var(--text); }
+  .lang { border: 1px solid var(--line); margin-left: 6px; }
+
+  /* hero */
+  .hero { position: relative; overflow: hidden; }
+  .hero::before { content: ""; position: absolute; inset: -40% -10% auto -10%; height: 520px; pointer-events: none;
+    background: radial-gradient(600px 260px at 18% 40%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
+                radial-gradient(520px 240px at 82% 20%, color-mix(in srgb, var(--accent2) 14%, transparent), transparent 70%); }
+  .hero .wrap { position: relative; display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; padding-top: 64px; padding-bottom: 56px; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--line); font-size: 13px; color: var(--sub); box-shadow: var(--shadow-s); }
+  .eyebrow b { background: var(--accent-weak); color: var(--accent); padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+  .hero h1 { margin: 18px 0 14px; font-size: clamp(32px, 4.4vw, 52px); line-height: 1.12; letter-spacing: -.03em; font-weight: 800; }
+  .hero h1 .grad { background: linear-gradient(120deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.lead { margin: 0; font-size: 17px; color: var(--sub); max-width: 540px; }
+  .cta { display: flex; gap: 10px; margin-top: 26px; flex-wrap: wrap; }
+  .btn { height: 44px; padding: 0 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 11px;
+    font-weight: 650; font-size: 15px; border: 1px solid var(--line2); background: var(--panel); box-shadow: var(--shadow-s); }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .btn.primary:hover { opacity: .9; }
+  .facts-row { display: flex; gap: 26px; margin-top: 34px; flex-wrap: wrap; }
+  .facts-row div { display: flex; flex-direction: column; }
+  .facts-row b { font-size: 26px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .facts-row span { font-size: 13px; color: var(--mute); }
+
+  /* code window */
+  .term { background: var(--code-bg); border-radius: 16px; box-shadow: var(--shadow-l); overflow: hidden; border: 1px solid #ffffff12; }
+  .term .bar { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 14px; height: 44px; border-bottom: 1px solid #ffffff12; }
+  .dots { display: flex; gap: 6px; margin-right: 8px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; background: #3a404b; }
+  .ctabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+  .ctab { height: 30px; padding: 0 11px; border-radius: 8px; border: 0; background: none; color: var(--code-mute);
+    font-size: 13px; font-weight: 550; white-space: nowrap; }
+  .ctab:hover { color: var(--code-fg); }
+  .ctab.on { background: #ffffff14; color: #fff; }
+  .term .cp { margin-left: auto; flex: none; height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid #ffffff1f;
+    background: none; color: var(--code-fg); font-size: 12.5px; }
+  .term .cp:hover { background: #ffffff12; }
+  .term pre { margin: 0; padding: 18px 20px 20px; color: var(--code-fg); font: 13.5px/1.75 var(--mono); overflow-x: auto; min-height: 150px; }
+  .term .c { color: var(--code-mute); } .term .k { color: #c792ea; } .term .s { color: #a5e3a1; } .term .f { color: #82aaff; }
+
+  /* browse */
+  .browse { padding-top: 8px; scroll-margin-top: 60px; }
+  .browse h2 { font-size: 26px; letter-spacing: -.02em; margin: 0 0 4px; font-weight: 800; }
+  .browse .sub { color: var(--sub); margin: 0 0 18px; font-size: 14.5px; }
+  .toolbar { position: sticky; top: 60px; z-index: 10; background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(10px); padding: 12px 0 10px; margin: 0 -2px; }
+  .row1 { display: grid; grid-template-columns: 1fr 180px; gap: 10px; padding: 0 2px; }
+  .search { position: relative; }
+  .search svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--mute); }
+  .search input, .row1 select { height: 46px; width: 100%; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel); padding: 0 14px; box-shadow: var(--shadow-s); min-width: 0; }
+  .search input { padding-left: 42px; }
+  .search input:focus, .row1 select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+  .chips { display: flex; gap: 6px; padding: 10px 2px 2px; overflow-x: auto; scrollbar-width: thin; }
+  .chip { flex: none; height: 34px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel);
+    font-size: 13.5px; font-weight: 550; color: var(--sub); display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .chip:hover { color: var(--text); border-color: var(--line2); }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; }
+  .chip small { color: var(--mute); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .chip.on small { color: color-mix(in srgb, var(--bg) 70%, transparent); }
+
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 16px; padding: 14px 0 20px; }
+  .card { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow-s);
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s; }
+  .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-m); border-color: var(--line2); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .thumb { position: relative; aspect-ratio: 4 / 3; background: var(--hover); overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .3s ease; }
+  .card:hover .thumb img { transform: scale(1.03); }
+  .pill { position: absolute; top: 10px; left: 10px; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 8px;
+    border-radius: 999px; font-size: 11.5px; font-weight: 600; background: rgba(15,18,24,.72); color: #fff; backdrop-filter: blur(6px); }
+  .pill i { width: 7px; height: 7px; border-radius: 50%; }
+  .pill.r { left: auto; right: 10px; background: rgba(255,255,255,.88); color: #14171c; }
+  .card .body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  .card h3 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -.01em; line-height: 1.3; }
+  .card .cls { margin-top: 3px; font-size: 13px; color: var(--mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scores { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
+  .sc { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px 9px; }
+  .sc .l { font-size: 11.5px; color: var(--mute); display: flex; justify-content: space-between; }
+  .sc .v { font-size: 19px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.25; }
+  .sc .bar { height: 4px; border-radius: 4px; background: var(--hover); margin-top: 6px; overflow: hidden; }
+  .sc .bar span { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .sc.none .v { color: var(--mute); }
+  .meta-line { display: flex; justify-content: space-between; font-size: 12px; color: var(--mute); }
+  .empty { grid-column: 1 / -1; padding: 60px 16px; text-align: center; color: var(--sub); }
+  .empty.err { color: var(--warn); }
+  .skel { border-radius: var(--r); background: linear-gradient(90deg, var(--panel), var(--hover), var(--panel)); background-size: 200% 100%;
+    animation: sh 1.2s infinite; height: 340px; border: 1px solid var(--line); }
+  @keyframes sh { to { background-position: -200% 0; } }
+
+  footer { border-top: 1px solid var(--line); margin-top: 48px; padding: 28px 0 40px; color: var(--mute); font-size: 13px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  footer a:hover { color: var(--text); }
+
+  /* detail */
+  dialog { border: 0; padding: 0; width: min(980px, 96vw); max-height: 92vh; border-radius: 20px; background: var(--panel);
+    color: var(--text); box-shadow: var(--shadow-l); overflow: hidden; }
+  dialog::backdrop { background: rgba(8,10,14,.5); backdrop-filter: blur(3px); }
+  dialog[open] { animation: pop .18s ease; }
+  @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+  .dl { display: grid; grid-template-columns: 360px 1fr; max-height: 92vh; }
+  .dl .left { background: var(--bg); border-right: 1px solid var(--line); overflow-y: auto; }
+  .dl .left img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: var(--hover); }
+  .info { padding: 18px 20px 22px; display: flex; flex-direction: column; gap: 14px; font-size: 13px; color: var(--sub); }
+  .info h5 { margin: 0 0 3px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); font-weight: 650; }
+  .info a { color: var(--accent); word-break: break-all; }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; max-height: 150px; overflow-y: auto; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--sub); }
+  .dl .right { padding: 22px 24px 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  .dhead { display: flex; gap: 12px; align-items: flex-start; }
+  .dhead h2 { margin: 0; font-size: 24px; letter-spacing: -.02em; font-weight: 800; line-height: 1.2; }
+  .dhead .k { margin-top: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--mute); }
+  .dhead code { font-family: var(--mono); font-size: 12px; background: var(--hover); padding: 2px 6px; border-radius: 6px; }
+  .x { margin-left: auto; flex: none; width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel);
+    color: var(--sub); font-size: 16px; }
+  .x:hover { background: var(--hover); color: var(--text); }
+  .seg { display: inline-flex; padding: 3px; border-radius: 11px; background: var(--hover); gap: 2px; align-self: flex-start; }
+  .seg button { height: 32px; padding: 0 14px; border-radius: 8px; border: 0; background: none; font-size: 13.5px; font-weight: 600; color: var(--sub); }
+  .seg button.on { background: var(--panel); color: var(--text); box-shadow: var(--shadow-s); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px; }
+  .kpi .l { font-size: 12px; color: var(--mute); }
+  .kpi .v { font-size: 22px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .kpi .v small { font-size: 12px; color: var(--mute); font-weight: 500; margin-left: 4px; }
+  .sect h4 { margin: 0 0 8px; font-size: 13px; color: var(--sub); font-weight: 650; }
+  .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  .file { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); }
+  .file:hover { border-color: var(--accent); background: var(--accent-weak); }
+  .file .ic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font: 700 10.5px/1 var(--mono); flex: none;
+    background: var(--hover); color: var(--sub); }
+  .file b { display: block; font-size: 14px; font-weight: 650; }
+  .file small { display: block; font-size: 11.5px; color: var(--mute); }
+  .file.main .ic { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
+  .dl .term pre { min-height: 0; font-size: 13px; }
+  #toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 8px); background: var(--text); color: var(--bg);
+    padding: 10px 16px; border-radius: 10px; font-size: 13.5px; font-weight: 600; opacity: 0; pointer-events: none;
+    transition: all .16s; z-index: 50; box-shadow: var(--shadow-m); }
+  #toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 900px) {
+    .hero .wrap { grid-template-columns: 1fr; gap: 32px; padding-top: 40px; }
+    .dl { display: flex; flex-direction: column; overflow-y: auto; }
+    .dl .left { order: 2; border-right: 0; border-top: 1px solid var(--line); overflow: visible; }
+    .dl .left img { display: none; }
+    .dl .right { order: 1; overflow: visible; }
+    .dhead { position: sticky; top: -22px; background: var(--panel); padding: 12px 0 8px; margin-top: -12px; z-index: 2; }
+  }
+  @media (max-width: 640px) {
+    .wrap { padding: 0 16px; }
+    .nav nav a.hide-s { display: none; }
+    .row1 { grid-template-columns: 1fr 120px; }
+    #grid { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 34px; }
+    .eyebrow { font-size: 12px; }
+    .facts-row { gap: 20px; }
+    dialog { width: 100vw; max-width: 100vw; max-height: 100dvh; height: 100dvh; margin: 0; border-radius: 0; }
+    .kpis { grid-template-columns: repeat(3, 1fr); }
+    .kpi .v { font-size: 19px; }
+    .dl { max-height: 100vh; }
+  }
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="#"><span class="mark"></span>easydetect <em>hub</em></a>
+    <nav>
+      <a href="#models" data-t="navModels">Models</a>
+      <a class="hide-s" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener">GitHub</a>
+      <a class="hide-s" href="https://huggingface.co/leeyunjai/easydetect-hub" target="_blank" rel="noopener">Hugging Face</a>
+      <a class="hide-s" href="https://github.com/themakerrobot/easydetect-lab" target="_blank" rel="noopener">Lab</a>
+      <button type="button" class="lang" id="lang">한국어</button>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow"><b>Apache-2.0</b><span data-t="eyebrow">Weights · each dataset keeps its own licence</span></span>
+      <h1 data-t-html="title">Object detectors for <span class="grad">public datasets</span>, ready to run.</h1>
+      <p class="lead" data-t="lead">No PyTorch, no GPU. Install easydetect, name a model, and it downloads once and runs on any CPU, an Intel NPU or a Raspberry Pi.</p>
+      <div class="cta">
+        <a class="btn primary" href="#models" data-t="ctaBrowse">Browse models</a>
+        <a class="btn" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener" data-t="ctaDocs">Docs on GitHub</a>
+      </div>
+      <div class="facts-row" id="facts">
+        <div><b>—</b><span data-t="datasets">datasets</span></div>
+        <div><b>—</b><span data-t="models">models</span></div>
+        <div><b>0</b><span data-t="torch">PyTorch needed</span></div>
+      </div>
+    </div>
+    <div class="term" id="hero-term"></div>
+  </div>
+</section>
+
+<main class="wrap browse" id="models">
+  <h2 data-t="browseTitle">Browse models</h2>
+  <p class="sub" data-t="browseSub">ed-s at 320 px (with an 8-bit file for small devices) and 640 px. Scores are mAP50-95 on each dataset's own val split.</p>
+  <div class="toolbar">
+    <div class="row1">
+      <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" id="q" aria-label="search"></label>
+      <select id="sort" aria-label="sort"></select>
+    </div>
+    <div class="chips" id="chips"></div>
+  </div>
+  <div id="grid"><div class="skel"></div></div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span data-t="foot">Trained on public datasets. The weights are Apache-2.0; each dataset has its own licence (CC BY 4.0, MIT, CDLA…), so check it before commercial use and keep its credit.</span>
+    <span><a href="https://huggingface.co/leeyunjai/easydetect-hub" target="_blank" rel="noopener">Hugging Face</a> ·
+      <a href="https://pypi.org/project/easydetect/" target="_blank" rel="noopener">PyPI</a> ·
+      <a href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener">GitHub</a></span>
+  </div>
+</footer>
+
+<dialog id="detail" aria-label="model"></dialog>
+<div id="toast" role="status"></div>
+
+<script>
+const REPO = "leeyunjai/easydetect-hub";
+const HF = "https://huggingface.co";
+const RAW = `${HF}/${REPO}/resolve/main`;
+const $ = (id) => document.getElementById(id);
+
+const CATEGORIES = [
+  ["General objects", "#3b5bfd"], ["Everyday objects", "#f59e0b"], ["People, safety and traffic", "#ef4444"],
+  ["Animals and environment", "#16a34a"], ["Agriculture and plants", "#65a30d"], ["Underwater", "#0891b2"],
+  ["Aerial and earth", "#0ea5e9"], ["Medical and microscopy", "#db2777"], ["Documents and screens", "#7c3aed"],
+  ["Industry and electronics", "#64748b"], ["Games and video", "#e11d48"], ["Other", "#9ca3af"]];
+const COLOR = Object.fromEntries(CATEGORIES);
+const ORDER = CATEGORIES.map((c) => c[0]);
+const CAT_KO = {
+  "General objects": "일반 물체", "Everyday objects": "생활 물건", "People, safety and traffic": "사람 · 안전 · 교통",
+  "Animals and environment": "동물 · 환경", "Agriculture and plants": "농업 · 식물", "Underwater": "수중",
+  "Aerial and earth": "항공 · 지형", "Medical and microscopy": "의료 · 현미경", "Documents and screens": "문서 · 화면",
+  "Industry and electronics": "산업 · 전자", "Games and video": "게임 · 영상", "Other": "기타" };
+
+const T = {
+  en: {
+    navModels: "Models", eyebrow: "Weights · each dataset keeps its own licence",
+    title: 'Object detectors for <span class="grad">public datasets</span>, ready to run.',
+    lead: "No PyTorch, no GPU. Install easydetect, name a model, and it downloads once and runs on any CPU, an Intel NPU or a Raspberry Pi.",
+    ctaBrowse: "Browse models", ctaDocs: "Docs on GitHub", datasets: "datasets", models: "models", torch: "PyTorch needed",
+    browseTitle: "Browse models", browseSub: "ed-s at 320 px (with an 8-bit file for small devices) and 640 px. Scores are mAP50-95 on each dataset's own val split.",
+    search: "Search by dataset, class or category — try “helmet”, “cell”, “fish”", all: "All",
+    sortName: "Category", sortScore: "Best score", sortClasses: "Most classes", classes: "classes",
+    none: "No model matches. Try another word.", err: "Could not read the list from Hugging Face.", open: "Open it there",
+    foot: "Trained on public datasets. The weights are Apache-2.0; each dataset has its own licence (CC BY 4.0, MIT, CDLA…), so check it before commercial use and keep its credit.",
+    install: "Install", python: "Python", cli: "Command line", pi: "Raspberry Pi", npu: "Intel NPU", tune: "Fine-tune", folder: "Download all",
+    copy: "Copy", copied: "Copied to clipboard", score: "mAP50-95", int8: "8-bit", conf: "Threshold", queries: "Queries",
+    download: "Download", useIt: "Use it", licNote: "Check this licence before commercial use, and keep the credit below.", licence: "Licence", source: "Source", credit: "Credit", cite: "Cite", note: "Note",
+    classesAll: "Classes", onHF: "View files on Hugging Face", px: "px", noTorch: "no PyTorch",
+    fOnnx: "ONNX", fOnnxS: "any CPU", fInt8: "ONNX 8-bit", fInt8S: "Raspberry Pi", fOv: "OpenVINO", fOvS: "Intel CPU · GPU · NPU", fPt: "PyTorch", fPtS: "to fine-tune",
+    rf: "Roboflow 100",
+  },
+  ko: {
+    navModels: "모델", eyebrow: "가중치 · 데이터셋 라이선스는 각자 따로",
+    title: '<span class="grad">공개 데이터셋</span>으로 학습한, 바로 쓰는 물체 인식 모델',
+    lead: "PyTorch도 GPU도 필요 없습니다. easydetect를 설치하고 모델 이름만 쓰면 한 번 내려받아 어떤 CPU, 인텔 NPU, 라즈베리파이에서도 돌아갑니다.",
+    ctaBrowse: "모델 둘러보기", ctaDocs: "GitHub 문서", datasets: "데이터셋", models: "모델", torch: "PyTorch 필요",
+    browseTitle: "모델 둘러보기", browseSub: "ed-s 320 px(작은 기기용 8비트 파일 포함)와 640 px. 점수는 각 데이터셋 val의 mAP50-95입니다.",
+    search: "데이터셋 · 클래스 · 카테고리 검색 — “helmet”, “cell”, “fish”처럼", all: "전체",
+    sortName: "카테고리순", sortScore: "점수순", sortClasses: "클래스 많은 순", classes: "클래스",
+    none: "맞는 모델이 없습니다. 다른 단어로 찾아보세요.", err: "Hugging Face에서 목록을 읽지 못했습니다.", open: "거기서 보기",
+    foot: "공개 데이터셋으로 학습했습니다. 가중치는 Apache-2.0이고, 데이터셋마다 라이선스(CC BY 4.0, MIT, CDLA 등)가 따로 있으니 상업적으로 쓰기 전에 해당 데이터셋의 조건을 확인하고 표기를 지켜 주세요.",
+    install: "설치", python: "파이썬", cli: "명령줄", pi: "라즈베리파이", npu: "인텔 NPU", tune: "이어서 학습", folder: "폴더 받기",
+    copy: "복사", copied: "복사했습니다", score: "mAP50-95", int8: "8비트", conf: "확신 기준", queries: "쿼리",
+    download: "내려받기", useIt: "사용법", licNote: "상업적으로 쓰기 전에 이 라이선스를 확인하고, 아래 표기를 지켜 주세요.", licence: "라이선스", source: "출처", credit: "표기", cite: "인용", note: "참고",
+    classesAll: "클래스", onHF: "Hugging Face에서 파일 보기", px: "px", noTorch: "PyTorch 없이",
+    fOnnx: "ONNX", fOnnxS: "모든 CPU", fInt8: "ONNX 8비트", fInt8S: "라즈베리파이", fOv: "OpenVINO", fOvS: "인텔 CPU · GPU · NPU", fPt: "PyTorch", fPtS: "이어서 학습",
+    rf: "Roboflow 100",
+  },
+};
+let lang = (() => { try { return localStorage.getItem("hub.lang"); } catch { return null; } })()
+  || ((navigator.language || "").toLowerCase().startsWith("ko") ? "ko" : "en");
+const t = (k) => (T[lang] && T[lang][k]) ?? T.en[k] ?? k;
+const catName = (c) => (lang === "ko" ? CAT_KO[c] || c : c);
+const S = { datasets: [], q: "", cat: "", sort: "name" };
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const f3 = (v) => (typeof v === "number" ? v.toFixed(3) : "—");
+function prettyName(id, title) {
+  if (id.startsWith("rf100-")) {                     // rf100-chess-pieces-mjzgj -> Chess pieces
+    let n = id.slice(6).replace(/-(?=[a-z0-9]{5}$)(?=.*\d)[a-z0-9]{5}$/, "");
+    n = n.replace(/-/g, " ").replace(/\bx ray\b/i, "X-ray").replace(/\bmri\b/i, "MRI").replace(/\bpcb\b/i, "PCB");
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  }
+  return title.split(" (")[0].replace(" Dataset", "");
+}
+function shortLicence(text) {
+  const s = String(text || "").trim(); const head = s.split(/ \(|;/)[0].trim();
+  return head === s ? head : head + " *";
+}
+function fmtSize(n) {
+  if (!n) return ""; const u = ["B", "KB", "MB", "GB"]; let i = 0;
+  while (n >= 1000 && i < 3) { n /= 1000; i++; }
+  return (n >= 100 || !i ? n.toFixed(0) : n.toFixed(1)) + " " + u[i];
+}
+let toastTimer;
+function toast(s) { const e = $("toast"); e.textContent = s; e.classList.add("on");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => e.classList.remove("on"), 1600); }
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const a = document.createElement("textarea"); a.value = text; document.body.append(a); a.select();
+    try { document.execCommand("copy"); } catch {} a.remove(); }
+  toast(t("copied"));
+}
+
+/* ---------- code window with tabs ---------- */
+function highlight(code) {
+  return esc(code)
+    .replace(/(^|\n)(#[^\n]*)/g, '$1<span class="c">$2</span>')
+    .replace(/(&quot;[^&]*?&quot;)/g, '<span class="s">$1</span>')
+    .replace(/\b(from|import|pip|install|easydetect predict|hf download)\b/g, '<span class="k">$1</span>')
+    .replace(/\b(Detector|show|train)\b/g, '<span class="f">$1</span>');
+}
+function term(id, tabs) {
+  const box = $(id) || document.querySelector(id);
+  box.dataset.tabs = JSON.stringify(tabs);
+  const on = Math.min(Number(box.dataset.on || 0), tabs.length - 1);
+  box.innerHTML = `<div class="bar"><span class="dots"><i></i><i></i><i></i></span><div class="ctabs">${tabs.map((tb, i) =>
+    `<button type="button" class="ctab${i === on ? " on" : ""}" data-i="${i}">${esc(tb[0])}</button>`).join("")}</div>
+    <button type="button" class="cp">${esc(t("copy"))}</button></div><pre>${highlight(tabs[on][1])}</pre>`;
+  box.dataset.on = on;
+}
+document.addEventListener("click", (e) => {
+  const box = e.target.closest(".term"); if (!box) return;
+  const tabs = JSON.parse(box.dataset.tabs || "[]");
+  const tb = e.target.closest(".ctab");
+  if (tb) { box.dataset.on = tb.dataset.i; term(box.id, tabs); return; }
+  if (e.target.closest(".cp")) copy(tabs[Number(box.dataset.on || 0)][1]);
+});
+function heroTerm() {
+  term("hero-term", [
+    [t("python"), `# pip install -U easydetect      (${t("noTorch")})\nfrom easydetect import Detector\n\nmodel = Detector("hub:taco/ed-s-640")\nresult = model("photo.jpg")[0]\nresult.show()`],
+    [t("cli"), `pip install -U easydetect\n\n# ${lang === "ko" ? "웹캠으로 바로" : "straight from a webcam"}\neasydetect predict model=hub:taco/ed-s-640 source=0\n\n# ${lang === "ko" ? "목록과 점수" : "what is here, with scores"}\neasydetect hub search=plant`],
+    [t("pi"), `pip install easydetect\n\nfrom easydetect import Detector\nmodel = Detector("hub:coco/ed-s-320-int8", backend="onnxruntime")\nmodel("photo.jpg")[0].save("out.jpg")`],
+  ]);
+}
+
+/* ---------- data ---------- */
+async function load() {
+  $("grid").innerHTML = '<div class="skel"></div>'.repeat(8);
+  try {
+    const res = await fetch(`${RAW}/index.json`, { cache: "no-cache" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const by = new Map();
+    for (const [key, m] of Object.entries(await res.json())) {
+      const [id, variant] = key.split("/");
+      if (!by.has(id)) by.set(id, { id, variants: [], meta: m });
+      by.get(id).variants.push({ key, name: variant, ...m });
+    }
+    S.datasets = [...by.values()].map((d) => {
+      d.variants.sort((a, b) => (a.imgsz || 0) - (b.imgsz || 0));
+      d.title = d.meta.title || d.id; d.name = prettyName(d.id, d.title); d.rf = d.id.startsWith("rf100-");
+      d.category = d.meta.category || "Other";
+      d.classes = Object.values(d.meta.classes || {}).map(String);
+      d.v320 = d.variants.find((v) => v.imgsz === 320); d.v640 = d.variants.find((v) => v.imgsz === 640);
+      d.best = Math.max(...d.variants.map((v) => v.map50_95 || 0));
+      return d;
+    });
+    renderAll();
+    const want = decodeURIComponent(location.hash.slice(1));
+    if (want && want !== "models") openDetail(want);
+  } catch (e) {
+    $("grid").innerHTML = `<div class="empty err">${esc(t("err"))} (${esc(e.message)}) ·
+      <a style="color:var(--accent)" href="${HF}/${REPO}" target="_blank" rel="noopener">${esc(t("open"))}</a></div>`;
+  }
+}
+function hay(d) { return [d.id, d.name, d.title, d.category, catName(d.category), ...d.classes].join(" ").toLowerCase(); }
+
+/* ---------- list ---------- */
+function renderAll() { renderFacts(); renderChips(); renderGrid(); }
+function renderFacts() {
+  const models = S.datasets.reduce((n, d) => n + d.variants.length, 0);
+  $("facts").innerHTML = `<div><b>${S.datasets.length}</b><span>${esc(t("datasets"))}</span></div>
+    <div><b>${models}</b><span>${esc(t("models"))}</span></div><div><b>0</b><span>${esc(t("torch"))}</span></div>`;
+}
+function renderChips() {
+  const count = new Map();
+  for (const d of S.datasets) count.set(d.category, (count.get(d.category) || 0) + 1);
+  $("chips").innerHTML = [`<button type="button" class="chip${S.cat ? "" : " on"}" data-cat="">${esc(t("all"))}<small>${S.datasets.length}</small></button>`,
+    ...ORDER.filter((c) => count.has(c)).map((c) => `<button type="button" class="chip${S.cat === c ? " on" : ""}" data-cat="${esc(c)}">
+      <i style="background:${COLOR[c]}"></i>${esc(catName(c))}<small>${count.get(c)}</small></button>`)].join("");
+}
+function sc(v, size) {
+  if (!v) return `<div class="sc none"><div class="l"><span>${size} ${t("px")}</span></div><div class="v">—</div><div class="bar"></div></div>`;
+  const i8 = typeof v.map50_95_int8 === "number" ? `<span>${esc(t("int8"))} ${f3(v.map50_95_int8)}</span>` : "";
+  return `<div class="sc"><div class="l"><span>${size} ${t("px")}</span>${i8}</div><div class="v">${f3(v.map50_95)}</div>
+    <div class="bar"><span style="width:${Math.round((v.map50_95 || 0) * 100)}%"></span></div></div>`;
+}
+function renderGrid() {
+  const words = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const list = S.datasets.filter((d) => (!S.cat || d.category === S.cat) && (!words.length || words.every((w) => hay(d).includes(w))));
+  list.sort(S.sort === "score" ? (a, b) => b.best - a.best
+          : S.sort === "classes" ? (a, b) => b.classes.length - a.classes.length
+          : (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category) || a.rf - b.rf || a.name.localeCompare(b.name));
+  $("grid").innerHTML = list.length ? list.map((d) => `
+    <button type="button" class="card" data-id="${esc(d.id)}" aria-label="${esc(d.name)}">
+      <div class="thumb"><img loading="lazy" alt="" src="${RAW}/${encodeURIComponent(d.id)}/thumb.jpg" onerror="this.remove()">
+        <span class="pill"><i style="background:${COLOR[d.category] || "#9ca3af"}"></i>${esc(catName(d.category))}</span>
+        ${d.rf ? `<span class="pill r">RF100</span>` : ""}</div>
+      <div class="body">
+        <div><h3>${esc(d.name)}</h3><div class="cls">${d.classes.length} ${esc(t("classes"))} · ${esc(d.classes.slice(0, 6).join(", "))}</div></div>
+        <div class="scores">${sc(d.v320, 320)}${sc(d.v640, 640)}</div>
+        <div class="meta-line"><span>${esc(shortLicence(d.meta.license))}</span><span>ed-s</span></div>
+      </div>
+    </button>`).join("") : `<div class="empty">${esc(t("none"))}</div>`;
+}
+
+/* ---------- detail ---------- */
+let current = null;
+async function sizesOf(key) {
+  try {
+    const r = await fetch(`${HF}/api/models/${REPO}/tree/main/${key.split("/").map(encodeURIComponent).join("/")}`);
+    if (!r.ok) return {};
+    return Object.fromEntries((await r.json()).map((e) => [e.path.split("/").pop(), (e.lfs && e.lfs.size) || e.size || 0]));
+  } catch { return {}; }
+}
+function openDetail(id, size) {
+  const d = S.datasets.find((x) => x.id === id); if (!d) return;
+  const v = (size && d.variants.find((x) => x.imgsz === size)) || d.v640 || d.variants.at(-1);
+  current = { d, v, sizes: {} };
+  history.replaceState(null, "", "#" + encodeURIComponent(id));
+  drawDetail();
+  if (!$("detail").open) $("detail").showModal();
+  sizesOf(v.key).then((s) => { if (current && current.v === v) { current.sizes = s; drawFiles(); } });
+}
+function fileCard(kind, files, label, sub, main) {
+  const { v, sizes } = current;
+  const total = files.reduce((n, f) => n + (sizes[f] || 0), 0);
+  const more = files.slice(1).map((f) => `${RAW}/${v.key}/${f}?download=true`).join(" ");
+  return `<a class="file${main ? " main" : ""}" href="${RAW}/${v.key}/${files[0]}?download=true" data-more="${esc(more)}" download>
+    <span class="ic">${esc(kind)}</span><span><b>${esc(label)}</b><small>${esc(sub)}${total ? " · " + fmtSize(total) : ""}</small></span></a>`;
+}
+function drawFiles() {
+  const { v } = current; const n = v.name;
+  const have = new Set(v.files || []); const has = (f) => !have.size || have.has(f);
+  const box = document.getElementById("files"); if (!box) return;
+  box.innerHTML = [
+    has(`${n}.onnx`) ? fileCard("ONNX", [`${n}.onnx`], t("fOnnx"), t("fOnnxS"), true) : "",
+    has(`${n}-int8.onnx`) && v.map50_95_int8 != null ? fileCard("INT8", [`${n}-int8.onnx`], t("fInt8"), t("fInt8S")) : "",
+    has(`${n}.xml`) ? fileCard("OV", [`${n}.xml`, `${n}.bin`, ...(has(`${n}.names.json`) ? [`${n}.names.json`] : [])], t("fOv"), t("fOvS")) : "",
+    has(`${n}.pt`) ? fileCard("PT", [`${n}.pt`], t("fPt"), t("fPtS")) : "",
+  ].join("");
+}
+function drawDetail() {
+  const { d, v } = current; const m = d.meta; const hub = `hub:${d.id}/${v.name}`;
+  const src = /^https?:\/\//.test(m.source || "") ? m.source : "";
+  const i8 = v.map50_95_int8 != null;
+  $("detail").innerHTML = `<div class="dl">
+    <aside class="left">
+      <img alt="" src="${RAW}/${encodeURIComponent(d.id)}/thumb.jpg" onerror="this.style.visibility='hidden'">
+      <div class="info">
+        <div><h5>${esc(t("licence"))}</h5>${esc(m.license || "")}<div style="margin-top:4px;font-size:12px;color:var(--mute)">${esc(t("licNote"))}</div></div>
+        ${src ? `<div><h5>${esc(t("source"))}</h5><a href="${esc(src)}" target="_blank" rel="noopener">${esc(src.replace(/^https?:\/\//, ""))}</a></div>` : ""}
+        ${m.attribution ? `<div><h5>${esc(t("credit"))}</h5>${esc(m.attribution)}</div>` : ""}
+        ${m.citation ? `<div><h5>${esc(t("cite"))}</h5>${esc(m.citation)}</div>` : ""}
+        ${m.note ? `<div><h5>${esc(t("note"))}</h5>${esc(m.note)}</div>` : ""}
+        <div><h5>${esc(t("classesAll"))} · ${d.classes.length}</h5><div class="tags">${d.classes.map((c) => `<span class="tag">${esc(c)}</span>`).join("")}</div></div>
+        <div><a href="${HF}/${REPO}/tree/main/${esc(v.key)}" target="_blank" rel="noopener">${esc(t("onHF"))} ↗</a></div>
+      </div>
+    </aside>
+    <div class="right">
+      <div class="dhead"><div><h2>${esc(d.name)}</h2>
+        <div class="k"><span style="display:inline-flex;align-items:center;gap:6px"><i style="width:8px;height:8px;border-radius:50%;background:${COLOR[d.category]}"></i>${esc(catName(d.category))}</span>
+        ${d.rf ? `<span>· ${esc(t("rf"))}</span>` : ""}<code>${esc(hub)}</code></div></div>
+        <button type="button" class="x" id="close" aria-label="close">✕</button></div>
+      ${d.variants.length > 1 ? `<div class="seg">${d.variants.map((x) => `<button type="button" data-size="${x.imgsz}" class="${x === v ? "on" : ""}">${x.imgsz} ${t("px")}</button>`).join("")}</div>` : ""}
+      <div class="kpis">
+        <div class="kpi"><div class="l">${esc(t("score"))}</div><div class="v">${f3(v.map50_95)}</div></div>
+        ${i8 ? `<div class="kpi"><div class="l">${esc(t("int8"))}</div><div class="v">${f3(v.map50_95_int8)}</div></div>` : ""}
+        ${typeof v.conf === "number" ? `<div class="kpi"><div class="l">${esc(t("conf"))}</div><div class="v">${v.conf}</div></div>` : ""}
+        <div class="kpi"><div class="l">${esc(t("classesAll"))}</div><div class="v">${d.classes.length}</div></div>
+      </div>
+      <div class="sect"><h4>${esc(t("download"))}</h4><div class="files" id="files"></div></div>
+      <div class="sect"><h4>${esc(t("useIt"))}</h4><div class="term" id="dterm"></div></div>
+    </div></div>`;
+  drawFiles();
+  term("dterm", [
+    [t("python"), `from easydetect import Detector      # pip install -U easydetect\n\nmodel = Detector("${hub}")\nresult = model("photo.jpg")[0]\nresult.show()`],
+    [t("cli"), `easydetect predict model=${hub} source=photo.jpg\neasydetect predict model=${hub} source=0      # webcam`],
+    ...(i8 ? [[t("pi"), `Detector("${hub}-int8", backend="onnxruntime")`]] : []),
+    [t("npu"), `Detector("${hub}.xml", device="NPU")`],
+    [t("tune"), `pip install -U "easydetect[train]"\n\nmodel = Detector("${hub}.pt")\nmodel.train(data="my_data.yaml", epochs=50, imgsz=${v.imgsz})`],
+    [t("folder"), `hf download ${REPO} --include "${v.key}/*" --local-dir hub`],
+  ]);
+}
+
+/* ---------- events ---------- */
+function applyLang() {
+  document.documentElement.lang = lang;
+  $("lang").textContent = lang === "ko" ? "English" : "한국어";
+  document.querySelectorAll("[data-t]").forEach((e) => { e.textContent = t(e.dataset.t); });
+  document.querySelectorAll("[data-t-html]").forEach((e) => { e.innerHTML = t(e.dataset.tHtml); });
+  $("q").placeholder = t("search");
+  $("sort").innerHTML = `<option value="name">${esc(t("sortName"))}</option><option value="score">${esc(t("sortScore"))}</option><option value="classes">${esc(t("sortClasses"))}</option>`;
+  $("sort").value = S.sort;
+  heroTerm();
+  if (S.datasets.length) { renderAll(); if ($("detail").open && current) drawDetail(); }
+}
+$("lang").addEventListener("click", () => { lang = lang === "ko" ? "en" : "ko"; try { localStorage.setItem("hub.lang", lang); } catch {} applyLang(); });
+let qt; $("q").addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { S.q = $("q").value; renderGrid(); }, 90); });
+$("sort").addEventListener("change", () => { S.sort = $("sort").value; renderGrid(); });
+$("chips").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (!b) return; S.cat = b.dataset.cat; renderChips(); renderGrid(); });
+$("grid").addEventListener("click", (e) => { const c = e.target.closest(".card"); if (c) openDetail(c.dataset.id); });
+$("detail").addEventListener("click", (e) => {
+  if (e.target === $("detail") || e.target.closest("#close")) return $("detail").close();
+  const s = e.target.closest("[data-size]"); if (s) return openDetail(current.d.id, Number(s.dataset.size));
+  const a = e.target.closest("a[data-more]");
+  if (a && a.dataset.more) a.dataset.more.split(" ").forEach((u, i) => setTimeout(() => {   // OpenVINO: .bin and names with the .xml
+    const x = document.createElement("a"); x.href = u; x.download = ""; document.body.append(x); x.click(); x.remove(); }, 700 * (i + 1)));
+});
+$("detail").addEventListener("close", () => { current = null; history.replaceState(null, "", location.pathname + location.search); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && document.activeElement !== $("q") && !$("detail").open) { e.preventDefault(); $("q").focus(); }
+});
+applyLang();
+load();
+</script>
+</body>
+</html>

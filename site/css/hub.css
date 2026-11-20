@@ -8,6 +8,7 @@
   --serif:var(--sans);
   --mono:ui-monospace,'SF Mono','Cascadia Mono',Consolas,'DejaVu Sans Mono',Menlo,'Pretendard Variable',monospace;
   --toast-bg:#233642; --toast-ink:#fff;
+  --wmax:1440px;
   color-scheme:light;
 }
 /* a page that scrolls, not an app that fills the window */
@@ -23,14 +24,16 @@ code,pre{font-family:var(--mono);word-break:normal}
 #toast,.toast{background:var(--toast-bg);color:var(--toast-ink)}
 
 /* ── header ── */
-header{background:var(--panel);position:sticky;top:8px;z-index:20}
+/* header, content and footer share one width, so a wide screen keeps their edges in line */
+header{background:var(--panel);position:sticky;top:8px;z-index:20;
+  width:calc(100% - 24px);max-width:calc(var(--wmax) - 24px);margin:8px auto 0}
 header h1 svg{width:26px;height:26px;color:var(--acc);flex-shrink:0}
 header h1 a{color:inherit;text-decoration:none;display:flex;align-items:center;gap:9px}
 header nav{display:flex;align-self:stretch;align-items:flex-end;gap:2px}
 header nav .navlink{height:100%;padding-top:0;padding-bottom:0;align-items:center}
 .navlink .ext{font-size:10px;color:var(--ink3)}
 
-.page{max-width:1240px;margin:0 auto;padding:12px}
+.page{max-width:var(--wmax);margin:0 auto;padding:12px}
 
 /* ── intro: what this is, and the three lines to run one ── */
 .intro{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -89,7 +92,7 @@ header nav .navlink{height:100%;padding-top:0;padding-bottom:0;align-items:cente
 .empty.err{color:var(--warn)}
 .skel{height:320px;border:1px solid var(--line-soft);border-radius:12px;background:var(--panel2)}
 
-footer{max-width:1240px;margin:0 auto;padding:6px 14px 30px;display:flex;justify-content:space-between;
+footer{max-width:var(--wmax);margin:0 auto;padding:6px 24px 30px;display:flex;justify-content:space-between;
   gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink3);line-height:1.7}
 
 /* ── detail ── */
@@ -136,6 +139,7 @@ dialog::backdrop{background:rgba(26,25,22,.45)}
   body{font-size:15px}
   header nav .navlink.ext-link{display:none}
   .page{padding:8px}
+  header{width:calc(100% - 16px)}
   .intro h2{font-size:20px}
   .tools{grid-template-columns:1fr 120px}
   .tools .inp{font-size:16px}

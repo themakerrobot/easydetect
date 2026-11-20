@@ -281,7 +281,7 @@ HUB = [(f"hub-{_k}-{_size}", ["hub", _k, str(_size)],
 #: keypoint network, each published in a folder of its own (-seg, -pose).
 #: Only datasets that outline objects or place keypoints have them.
 from hub_tasks import POSE as HUB_POSE  # noqa: E402
-from hub_tasks import SEG as HUB_SEG
+from hub_tasks import SEG as HUB_SEG  # noqa: E402
 
 HUB_TASKS = [
     *((f"hub-seg-data-{_k}", ["hub-seg-data", _k], [f"hub-{_k}-640"]) for _k in HUB_SEG),

@@ -362,9 +362,10 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "[easydetect lab](https://github.com/themakerrobot/easydetect-lab), in the browser:",
         "upload pictures, a video or a zip; draw boxes (or let it label them); train (about",
         "15 minutes on a laptop CPU for a class); export to ONNX or OpenVINO. It works",
-        "without the internet ([offline bundle for Windows](https://github.com/themakerrobot/"
-        "easydetect-lab/releases/latest)). A model trained on your own pictures is yours to",
-        "use, products included; a model from here can be its starting point (upload its `.pt`).",
+        "without the internet ([offline bundles](https://github.com/themakerrobot/"
+        "easydetect-lab/releases/latest) for Windows and Ubuntu). A model trained on your",
+        "own pictures is yours to use, products included; a model from here can be its",
+        "starting point (upload its `.pt`).",
         "",
         "## Without easydetect", "",
         "Each `.onnx` runs in plain ONNX Runtime (input: RGB, 0-1, stretched to its size;",

@@ -646,7 +646,7 @@ def step_lab_form(root: Path, args) -> None:
 HUB_HEAVY = ("doclaynet", "caltech-camera-traps", "lvis", "openimages")
 
 
-#: boxes a picture above which a dataset trains alone and with a smaller batch
+#: boxes a picture above which a dataset trains alone (it needs far more memory)
 HUB_DENSE = 40
 _density: dict = {}
 
@@ -730,8 +730,7 @@ def step_hub(root: Path, args, key: str, size: str) -> None:
             shutil.rmtree(run)
         queries = 100 if size <= 320 else None
         start = downloads.download_sized_checkpoint("ed-s", size, queries) or "ed-s"
-        # hundreds of boxes a picture: half the batch, or the GPU runs out
-        batch = VARIANTS["s"] // 2 if _dense(key, args) else VARIANTS["s"]
+        batch = VARIANTS["s"]
         best = Path(Detector(str(start)).train(
             data=str(train), epochs=epochs, imgsz=size, batch=batch,
             workers=args.workers, project=str(project), name=name, resume=resume,

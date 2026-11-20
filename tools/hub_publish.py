@@ -56,6 +56,11 @@ def slim(src: Path, dst: Path) -> dict:
 
 THUMB = (320, 240)
 
+NOTICE = "https://github.com/themakerrobot/easydetect/blob/main/NOTICE"
+#: the Apache-2.0 models each hub model is built from (their notices: NOTICE)
+BUILT_FROM = ["D-FINE (Apache-2.0)", "PP-HGNetV2 from PaddleDetection (Apache-2.0)"]
+BUILT_FROM_TASK = {"segment": ["MobileSAM (Apache-2.0)"]}
+
 #: a hub model's task: its folder's suffix, the file beside the detector, its score
 TASKS = {"detect": ("", None, "mAP50-95"),
          "segment": ("-seg", "mask_decoder.onnx", "mask mAP50-95"),
@@ -202,6 +207,7 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
         "model": f"ed-{ckpt.get('variant', 's')}", "imgsz": size, "files": files,
         "classes": {int(k): v for k, v in names.items()}, "conf": round(conf, 2),
         "task": task, "metric": TASKS[task][2],
+        "weights_license": "Apache-2.0", "built_from": BUILT_FROM + BUILT_FROM_TASK.get(task, []),
         "score": task_scores.get("onnx", box), "score_int8": task_scores.get("int8", box8),
         # the detector's own boxes, whatever the task
         "map50_95": box, "map50_95_int8": box8,
@@ -300,8 +306,9 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "  OpenVINO on an Intel CPU, GPU or NPU.",
         "- **Small and fast.** ed-s (10M parameters), a real-time DETR: no NMS to tune.",
         "  320 px for small devices, with an 8-bit file for a Raspberry Pi; 640 px for accuracy.",
-        "- **Apache-2.0 weights.** Each dataset keeps its own licence (in the table and on",
-        "  its page): check it before commercial use, and keep the credit it asks for.",
+        "- **Apache-2.0 weights**, built from Apache-2.0 models (D-FINE, PP-HGNetV2, MobileSAM).",
+        "  The training data's terms still apply: each dataset's licence and credit are in",
+        "  the table and on its page; keep the credit, and check them before commercial use.",
         "- **Your own data next.** Every model comes with the checkpoint to fine-tune from.", "",
         "## Quick start (no PyTorch)", "",
         "```bash", "pip install -U easydetect        # 0.7.16 or later", "```", "",
@@ -350,8 +357,13 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         f"{datasets} datasets: {contents}", "", *tables,
         "\\* more terms on the dataset's page (the pictures' own licences).", "", *others,
         "## Licence", "",
-        "The weights are Apache-2.0. Each dataset's licence, the credit it asks for and the",
-        "paper to cite are on its page (click its name); keep them with a model trained on it.",
+        "The weights (what was made here) are Apache-2.0. They are built from Apache-2.0",
+        "models: D-FINE, PP-HGNetV2 (PaddleDetection) and, for masks, MobileSAM; their",
+        f"notices are in [easydetect's NOTICE]({NOTICE}).", "",
+        "The training data's terms still apply to a model trained on it. Each dataset's",
+        "licence, the credit it asks for and the paper to cite are on its page (click its",
+        "name): keep the credit with the model, and check the dataset's and its pictures'",
+        "terms before commercial use.",
         "", "Made with [easydetect](https://github.com/themakerrobot/easydetect).", ""])
 
 
@@ -377,7 +389,10 @@ def dataset_readme(dataset: str, index: dict) -> str:
     lines = [f"# {first['title']}", "", f"Category: {category(dataset)}", "",
              "![sample](thumb.jpg)", "",
              f"Source: {first['source']}  ",
-             f"Licence: {first['license']}", ""]
+             f"Licence of the data: {first['license']}  ",
+             f"Licence of the weights: Apache-2.0, built from D-FINE, PP-HGNetV2 and (masks) "
+             f"MobileSAM, all Apache-2.0 ([NOTICE]({NOTICE})). The data's terms above still "
+             "apply: keep its credit, and check them before commercial use.", ""]
     if first.get("attribution"):
         lines += [f"Credit (keep it with the model): {first['attribution']}", ""]
     if first.get("citation"):

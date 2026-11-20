@@ -303,7 +303,7 @@ const T = {
     none: "No model matches. Try another word.", err: "Could not read the list from Hugging Face.", open: "Open it there",
     foot: "Trained on public datasets. The weights are Apache-2.0; each dataset has its own licence (CC BY 4.0, MIT, CDLA…), so check it before commercial use and keep its credit.",
     install: "Install", python: "Python", cli: "Command line", pi: "Raspberry Pi", npu: "Intel NPU", tune: "Fine-tune", folder: "Download all",
-    copy: "Copy", copied: "Copied to clipboard", score: "mAP50-95", int8: "8-bit", conf: "Threshold", queries: "Queries",
+    copy: "Copy", copied: "Copied to clipboard", savedN: "{n} files — keep them in one folder", score: "mAP50-95", int8: "8-bit", conf: "Threshold", queries: "Queries",
     download: "Download", useIt: "Use it", licNote: "Check this licence before commercial use, and keep the credit below.", licence: "Licence", source: "Source", credit: "Credit", cite: "Cite", note: "Note",
     classesAll: "Classes", onHF: "View files on Hugging Face", px: "px", noTorch: "no PyTorch",
     fOnnx: "ONNX", fOnnxS: "any CPU", fInt8: "ONNX 8-bit", fInt8S: "Raspberry Pi", fOv: "OpenVINO", fOvS: "Intel CPU · GPU · NPU", fPt: "PyTorch", fPtS: "to fine-tune",
@@ -320,7 +320,7 @@ const T = {
     none: "맞는 모델이 없습니다. 다른 단어로 찾아보세요.", err: "Hugging Face에서 목록을 읽지 못했습니다.", open: "거기서 보기",
     foot: "공개 데이터셋으로 학습했습니다. 가중치는 Apache-2.0이고, 데이터셋마다 라이선스(CC BY 4.0, MIT, CDLA 등)가 따로 있으니 상업적으로 쓰기 전에 해당 데이터셋의 조건을 확인하고 표기를 지켜 주세요.",
     install: "설치", python: "파이썬", cli: "명령줄", pi: "라즈베리파이", npu: "인텔 NPU", tune: "이어서 학습", folder: "폴더 받기",
-    copy: "복사", copied: "복사했습니다", score: "mAP50-95", int8: "8비트", conf: "확신 기준", queries: "쿼리",
+    copy: "복사", copied: "복사했습니다", savedN: "파일 {n}개 — 한 폴더에 두세요", score: "mAP50-95", int8: "8비트", conf: "확신 기준", queries: "쿼리",
     download: "내려받기", useIt: "사용법", licNote: "상업적으로 쓰기 전에 이 라이선스를 확인하고, 아래 표기를 지켜 주세요.", licence: "라이선스", source: "출처", credit: "표기", cite: "인용", note: "참고",
     classesAll: "클래스", onHF: "Hugging Face에서 파일 보기", px: "px", noTorch: "PyTorch 없이",
     fOnnx: "ONNX", fOnnxS: "모든 CPU", fInt8: "ONNX 8비트", fInt8S: "라즈베리파이", fOv: "OpenVINO", fOvS: "인텔 CPU · GPU · NPU", fPt: "PyTorch", fPtS: "이어서 학습",
@@ -485,8 +485,7 @@ function openDetail(id, size) {
 function fileCard(kind, files, label, sub, main) {
   const { v, sizes } = current;
   const total = files.reduce((n, f) => n + (sizes[f] || 0), 0);
-  const more = files.slice(1).map((f) => `${RAW}/${v.key}/${f}?download=true`).join(" ");
-  return `<a class="file${main ? " main" : ""}" href="${RAW}/${v.key}/${files[0]}?download=true" data-more="${esc(more)}" download>
+  return `<a class="file${main ? " main" : ""}" href="${RAW}/${v.key}/${files[0]}?download=true" data-files="${esc(files.join(" "))}" download>
     <span class="ic">${esc(kind)}</span><span><b>${esc(label)}</b><small>${esc(sub)}${total ? " · " + fmtSize(total) : ""}</small></span></a>`;
 }
 function drawFiles() {
@@ -496,7 +495,7 @@ function drawFiles() {
   box.innerHTML = [
     has(`${n}.onnx`) ? fileCard("ONNX", [`${n}.onnx`], t("fOnnx"), t("fOnnxS"), true) : "",
     has(`${n}-int8.onnx`) && v.map50_95_int8 != null ? fileCard("INT8", [`${n}-int8.onnx`], t("fInt8"), t("fInt8S")) : "",
-    has(`${n}.xml`) ? fileCard("OV", [`${n}.xml`, `${n}.bin`, ...(has(`${n}.names.json`) ? [`${n}.names.json`] : [])], t("fOv"), t("fOvS")) : "",
+    has(`${n}.xml`) ? fileCard("OV", [`${n}.xml`, `${n}.bin`, `${n}.names.json`], t("fOv"), t("fOvS")) : "",
     has(`${n}.pt`) ? fileCard("PT", [`${n}.pt`], t("fPt"), t("fPtS")) : "",
   ].join("");
 }
@@ -563,10 +562,37 @@ $("grid").addEventListener("click", (e) => { const c = e.target.closest(".card")
 $("detail").addEventListener("click", (e) => {
   if (e.target === $("detail") || e.target.closest("#close")) return $("detail").close();
   const s = e.target.closest("[data-size]"); if (s) return openDetail(current.d.id, Number(s.dataset.size));
-  const a = e.target.closest("a[data-more]");
-  if (a && a.dataset.more) a.dataset.more.split(" ").forEach((u, i) => setTimeout(() => {   // OpenVINO: .bin and names with the .xml
-    const x = document.createElement("a"); x.href = u; x.download = ""; document.body.append(x); x.click(); x.remove(); }, 700 * (i + 1)));
+  const a = e.target.closest("a[data-files]");
+  if (a) { e.preventDefault(); fetchFiles(a.dataset.files.split(" ")); }
 });
+
+/* Hugging Face sends big files (.onnx, .bin, .pt) as downloads but shows small
+   text ones (.xml, .json) in the browser: those are fetched and saved here. */
+function save(blob, name) {
+  const u = URL.createObjectURL(blob);
+  const x = document.createElement("a"); x.href = u; x.download = name; document.body.append(x); x.click(); x.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 30000);
+}
+async function fetchFiles(files) {
+  const { d, v } = current;
+  for (const [i, f] of files.entries()) {
+    if (i) await new Promise((r) => setTimeout(r, 700));
+    const url = `${RAW}/${v.key}/${f}`;
+    if (/\.(xml|json)$/.test(f)) {
+      try {
+        const r = await fetch(url);
+        if (r.ok) { save(await r.blob(), f); continue; }
+      } catch {}
+      if (f.endsWith(".names.json")) {           // older models: the names from the list
+        save(new Blob([JSON.stringify(d.meta.classes || {})], { type: "application/json" }), f);
+        continue;
+      }
+    }
+    const x = document.createElement("a"); x.href = url + "?download=true"; x.download = f;
+    document.body.append(x); x.click(); x.remove();
+  }
+  if (files.length > 1) toast(t("savedN").replace("{n}", files.length));
+}
 $("detail").addEventListener("close", () => { current = null; history.replaceState(null, "", location.pathname + location.search); });
 document.addEventListener("keydown", (e) => {
   if (e.key === "/" && document.activeElement !== $("q") && !$("detail").open) { e.preventDefault(); $("q").focus(); }

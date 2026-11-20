@@ -717,11 +717,14 @@ class EDCriterion(nn.Module):
         dn_positive_idx, dn_num_group = dn_meta["dn_positive_idx"], dn_meta["dn_num_group"]
         num_gts = [len(t["labels"]) for t in targets]
         device = targets[0]["labels"].device
+        # a crowded picture lent only some of its boxes to denoising
+        picked = dn_meta.get("dn_gt_idx") or [None] * len(num_gts)
 
         dn_match_indices = []
         for i, num_gt in enumerate(num_gts):
             if num_gt > 0:
-                gt_idx = torch.arange(num_gt, dtype=torch.int64, device=device)
+                gt_idx = (torch.arange(num_gt, dtype=torch.int64, device=device)
+                          if picked[i] is None else picked[i].to(torch.int64))
                 gt_idx = gt_idx.tile(dn_num_group)
                 assert len(dn_positive_idx[i]) == len(gt_idx)
                 dn_match_indices.append((dn_positive_idx[i], gt_idx))

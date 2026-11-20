@@ -25,8 +25,17 @@ def get_contrastive_denoising_training_group(
     if num_denoising <= 0:
         return None, None, None, None
 
-    num_gts = [len(t["labels"]) for t in targets]
     device = targets[0]["labels"].device
+    # a picture lends at most num_denoising of its boxes (easydetect addition):
+    # the denoising queries grow with the most boxes a picture has, and so does
+    # the decoder's self-attention, by their square; a crowded dataset
+    # (thousands of boxes a picture) ran out of memory. A picture with more
+    # lends a random share, a new one each step; one with fewer, all, as before.
+    picked = [torch.randperm(len(t["labels"]), device=device)[:num_denoising]
+              if len(t["labels"]) > num_denoising else None for t in targets]
+    targets = [t if p is None else {**t, "labels": t["labels"][p], "boxes": t["boxes"][p]}
+               for t, p in zip(targets, picked)]
+    num_gts = [len(t["labels"]) for t in targets]
 
     max_gt_num = max(num_gts)
     if max_gt_num == 0:
@@ -116,6 +125,8 @@ def get_contrastive_denoising_training_group(
         "dn_positive_idx": dn_positive_idx,
         "dn_num_group": num_group,
         "dn_num_split": [num_denoising, num_queries],
+        # which of each picture's boxes the denoising queries stand for
+        "dn_gt_idx": picked,
     }
 
     # print(input_query_class.shape) # torch.Size([4, 196, 256])

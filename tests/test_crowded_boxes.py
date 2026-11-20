@@ -37,3 +37,33 @@ def test_a_big_batch_is_matched_a_picture_at_a_time_the_same_way():
     apart = matcher(out, targets)["indices"]
     for (i1, j1), (i2, j2) in zip(whole, apart, strict=True):
         assert torch.equal(i1, i2) and torch.equal(j1, j2)
+
+
+def test_a_crowded_picture_lends_some_of_its_boxes_to_denoising():
+    from easydetect.nn.denoising import get_contrastive_denoising_training_group
+
+    torch.manual_seed(0)
+    embed = torch.nn.Embedding(8, 16)
+    targets = [{"labels": torch.randint(0, 7, (n,)), "boxes": torch.rand(n, 4) * 0.4 + 0.2}
+               for n in (3000, 40, 0)]
+    logits, boxes, mask, meta = get_contrastive_denoising_training_group(
+        targets, 7, 300, embed, num_denoising=100)
+    assert logits.shape[1] == 200 and mask.shape == (500, 500)   # not 2 x 3000
+    picked = meta["dn_gt_idx"]
+    assert len(picked[0]) == 100 and picked[1] is None and picked[2] is None
+    from easydetect.utils import loss as L
+    pairs = L.EDCriterion.get_cdn_matched_indices(meta, targets)
+    assert len(pairs[0][0]) == len(pairs[0][1]) == 100
+    assert set(pairs[0][1].tolist()) == set(picked[0].tolist())
+    assert len(pairs[1][1]) == 40 * meta["dn_num_group"]
+
+
+def test_a_sparse_batch_denoises_as_before():
+    from easydetect.nn.denoising import get_contrastive_denoising_training_group
+
+    embed = torch.nn.Embedding(8, 16)
+    targets = [{"labels": torch.randint(0, 7, (n,)), "boxes": torch.rand(n, 4) * 0.4 + 0.2}
+               for n in (5, 20)]
+    logits, _, _, meta = get_contrastive_denoising_training_group(targets, 7, 300, embed)
+    assert meta["dn_num_group"] == 5 and logits.shape[1] == 200
+    assert meta["dn_gt_idx"] == [None, None]

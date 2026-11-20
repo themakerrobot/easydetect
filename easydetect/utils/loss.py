@@ -20,7 +20,13 @@ import torch.nn.functional as F
 import torchvision
 from scipy.optimize import linear_sum_assignment
 
-from ..nn.ops import bbox2distance, box_cxcywh_to_xyxy, box_iou, generalized_box_iou
+from ..nn.ops import (
+    bbox2distance,
+    box_cxcywh_to_xyxy,
+    box_iou_aligned,
+    generalized_box_iou,
+    generalized_box_iou_aligned,
+)
 
 
 def _indices_to(device, groups):
@@ -106,25 +112,42 @@ class HungarianMatcher(nn.Module):
 
         return {"indices": indices}  # , 'indices_o2m': C.min(-1)[1]}
 
+    #: queries x target boxes in a batch above which the cost is worked out a
+    #: picture at a time: a picture's queries only ever match its own boxes, so
+    #: the rest of the (batch x queries, all boxes) matrix is never read, and a
+    #: crowded dataset (hundreds of boxes a picture) would spend gigabytes on it
+    PER_PICTURE = 8_000_000
+
     @torch.no_grad()
     def _cost(self, outputs, targets):
         """The matching cost of every query against every target box in the
-        batch, ``(batch, queries, all targets)``, on the outputs' device."""
+        batch, ``(batch, queries, all targets)``, on the outputs' device. Only
+        each picture's own block is used; for a big batch only those are filled."""
         bs, num_queries = outputs["pred_logits"].shape[:2]
+        sizes = [len(v["boxes"]) for v in targets]
+        total = sum(sizes)
+        if bs * num_queries * total <= self.PER_PICTURE:
+            return self._cost_block(outputs["pred_logits"].flatten(0, 1),
+                                    outputs["pred_boxes"].flatten(0, 1),
+                                    torch.cat([v["labels"] for v in targets]),
+                                    torch.cat([v["boxes"] for v in targets])
+                                    ).view(bs, num_queries, -1)
+        C = outputs["pred_logits"].new_ones(bs, num_queries, total)
+        start = 0
+        for b, (v, n) in enumerate(zip(targets, sizes)):
+            if n:
+                C[b, :, start:start + n] = self._cost_block(
+                    outputs["pred_logits"][b], outputs["pred_boxes"][b], v["labels"], v["boxes"])
+            start += n
+        return C
 
+    def _cost_block(self, logits, out_bbox, tgt_ids, tgt_bbox):
+        """``(queries, targets)`` costs of these queries against these boxes."""
         # We flatten to compute the cost matrices in a batch
         if self.use_focal_loss:
-            out_prob = F.sigmoid(outputs["pred_logits"].flatten(0, 1))
+            out_prob = F.sigmoid(logits)
         else:
-            out_prob = (
-                outputs["pred_logits"].flatten(0, 1).softmax(-1)
-            )  # [batch_size * num_queries, num_classes]
-
-        out_bbox = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
-
-        # Also concat the target labels and boxes
-        tgt_ids = torch.cat([v["labels"] for v in targets])
-        tgt_bbox = torch.cat([v["boxes"] for v in targets])
+            out_prob = logits.softmax(-1)
 
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - proba[target class].
@@ -149,7 +172,7 @@ class HungarianMatcher(nn.Module):
 
         # Final cost matrix 3 * self.cost_bbox + 2 * self.cost_class + self.cost_giou
         C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou
-        return torch.nan_to_num(C.view(bs, num_queries, -1), nan=1.0)
+        return torch.nan_to_num(C, nan=1.0)
 
     @torch.no_grad()
     def match_many(self, outputs_list, targets):
@@ -270,8 +293,9 @@ class EDCriterion(nn.Module):
         if values is None:
             src_boxes = outputs["pred_boxes"][idx]
             target_boxes = torch.cat([t["boxes"][i] for t, (_, i) in zip(targets, indices)], dim=0)
-            ious, _ = box_iou(box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
-            ious = torch.diag(ious).detach()
+            ious, _ = box_iou_aligned(box_cxcywh_to_xyxy(src_boxes),
+                                      box_cxcywh_to_xyxy(target_boxes))
+            ious = ious.detach()
         else:
             ious = values
 
@@ -306,8 +330,9 @@ class EDCriterion(nn.Module):
         if values is None:
             src_boxes = outputs["pred_boxes"][idx]
             target_boxes = torch.cat([t["boxes"][i] for t, (_, i) in zip(targets, indices)], dim=0)
-            ious, _ = box_iou(box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
-            ious = torch.diag(ious).detach()
+            ious, _ = box_iou_aligned(box_cxcywh_to_xyxy(src_boxes),
+                                      box_cxcywh_to_xyxy(target_boxes))
+            ious = ious.detach()
         else:
             ious = values
 
@@ -348,9 +373,8 @@ class EDCriterion(nn.Module):
         loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction="none")
         losses["loss_bbox"] = loss_bbox.sum() / num_boxes
 
-        loss_giou = 1 - torch.diag(
-            generalized_box_iou(box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
-        )
+        loss_giou = 1 - generalized_box_iou_aligned(
+            box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
         loss_giou = loss_giou if boxes_weight is None else loss_giou * boxes_weight
         losses["loss_giou"] = loss_giou.sum() / num_boxes
 
@@ -389,11 +413,9 @@ class EDCriterion(nn.Module):
                 self.fgl_targets_dn if "is_dn" in outputs else self.fgl_targets
             )
 
-            ious = torch.diag(
-                box_iou(
-                    box_cxcywh_to_xyxy(outputs["pred_boxes"][idx]), box_cxcywh_to_xyxy(target_boxes)
-                )[0]
-            )
+            ious = box_iou_aligned(
+                box_cxcywh_to_xyxy(outputs["pred_boxes"][idx]), box_cxcywh_to_xyxy(target_boxes)
+            )[0]
             weight_targets = ious.unsqueeze(-1).repeat(1, 1, 4).reshape(-1).detach()
 
             losses["loss_fgl"] = self.unimodal_distribution_focal_loss(
@@ -670,15 +692,12 @@ class EDCriterion(nn.Module):
         target_boxes = torch.cat([t["boxes"][j] for t, (_, j) in zip(targets, indices)], dim=0)
 
         if self.boxes_weight_format == "iou":
-            iou, _ = box_iou(
+            iou, _ = box_iou_aligned(
                 box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes)
             )
-            iou = torch.diag(iou)
         elif self.boxes_weight_format == "giou":
-            iou = torch.diag(
-                generalized_box_iou(
-                    box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes)
-                )
+            iou = generalized_box_iou_aligned(
+                box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes)
             )
         else:
             raise AttributeError()

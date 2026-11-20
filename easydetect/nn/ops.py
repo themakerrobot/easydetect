@@ -176,6 +176,31 @@ def box_iou(boxes1: Tensor, boxes2: Tensor):
     return iou, union
 
 
+def box_iou_aligned(boxes1: Tensor, boxes2: Tensor):
+    """``(iou, union)`` of each box in ``boxes1`` with the box at the same row of
+    ``boxes2``, both (N,): what ``torch.diag(box_iou(a, b)[0])`` gives, without
+    the (N, N) matrix (gigabytes when a batch holds tens of thousands of boxes)."""
+    area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])
+    area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])
+    lt = torch.max(boxes1[:, :2], boxes2[:, :2])
+    rb = torch.min(boxes1[:, 2:], boxes2[:, 2:])
+    wh = (rb - lt).clamp(min=0)
+    inter = wh[:, 0] * wh[:, 1]
+    union = area1 + area2 - inter
+    return inter / union, union
+
+
+def generalized_box_iou_aligned(boxes1: Tensor, boxes2: Tensor) -> Tensor:
+    """GIoU of each box with the box at the same row of the other, (N,):
+    ``torch.diag(generalized_box_iou(a, b))`` without the (N, N) matrix."""
+    iou, union = box_iou_aligned(boxes1, boxes2)
+    lt = torch.min(boxes1[:, :2], boxes2[:, :2])
+    rb = torch.max(boxes1[:, 2:], boxes2[:, 2:])
+    wh = (rb - lt).clamp(min=0)
+    area = wh[:, 0] * wh[:, 1]
+    return iou - (area - union) / area
+
+
 def generalized_box_iou(boxes1, boxes2):
     """
     Generalized IoU from https://giou.stanford.edu/

@@ -19,11 +19,10 @@ train and test in a browser. Apache-2.0 code and weights.
 
 * **Three lines to a detector.** `Detector("ed-s")`, point it at a picture,
   read the boxes. The same object trains, validates and exports.
-* **A permissive licence.** Apache-2.0 code, Apache-2.0 COCO weights (from
-  D-FINE's), Apache-2.0 exports: no copyleft that makes a product publish its
-  source. The data a model learned from keeps its own terms: COCO's annotations
-  are CC BY 4.0 (keep the credit) and its pictures are under Flickr's terms, so
-  check those before commercial use.
+* **Free for products.** Apache-2.0 code, Apache-2.0 COCO weights (from
+  D-FINE's), Apache-2.0 exports: use them commercially, with no source to
+  publish. Ship the LICENSE and NOTICE with them, and credit COCO (its
+  annotations are CC BY 4.0).
 * **Accurate for its size.** The ed detectors are real-time DETRs: ed-s
   scores 48.5 COCO mAP with 10M parameters.
 * **Runs on the machine you have.** OpenVINO runs it on a CPU, an Intel GPU or
@@ -208,9 +207,8 @@ Read it plainly:
   0.810).
 * **The licence.** Ultralytics YOLO is AGPL-3.0: a product that ships it, or
   serves it over a network, must publish its source or buy a commercial
-  licence. The code and weights here are Apache-2.0, with no such condition;
-  what remains is the training data's own terms (COCO: CC BY 4.0 annotations,
-  pictures under Flickr's terms).
+  licence. The code and weights here are Apache-2.0: commercial use is fine,
+  with no source to publish.
 * **Where YOLO fits better:** pose and segmentation trained end to end, more
   tasks (oriented boxes, classification, depth), and a far larger ecosystem.
 
@@ -382,9 +380,9 @@ model.export(format="openvino")            # 배포용 IR + labels.txt
 ```
 
 세 줄이면 물체 검출이 됩니다. 모델은 ed(실시간 DETR)이고, 코드와 가중치는
-모두 Apache-2.0이라 AGPL처럼 소스를 공개해야 하는 조건이 없습니다. 다만 학습에 쓴
-데이터의 조건은 따로 있습니다(COCO: 정답은 CC BY 4.0, 사진은 Flickr 약관). 출처를
-표기하고, 상업적으로 쓰기 전에 그 조건을 확인하세요.
+모두 Apache-2.0이라 상용 제품에도 쓸 수 있고, AGPL처럼 소스를 공개할 의무도 없습니다.
+배포할 때 LICENSE와 NOTICE를 함께 넣고 COCO 출처를 표기하면 됩니다(COCO 정답 데이터는
+CC BY 4.0). 내 데이터로 학습한 모델도 마찬가지입니다.
 
 설치는 두 가지입니다. `pip install easydetect`는 추론용으로 OpenVINO와 ONNX
 Runtime이 함께 들어가고 PyTorch는 없습니다. `pip install "easydetect[train]"`은
@@ -427,6 +425,7 @@ and loss, and adds its own training loop, inference stack and tooling — see
 ## License
 
 Apache-2.0 — see [LICENSE](https://github.com/themakerrobot/easydetect/blob/main/LICENSE) and [NOTICE](https://github.com/themakerrobot/easydetect/blob/main/NOTICE).
-The weights are Apache-2.0 too; the data they learned from keeps its own terms
-(COCO: CC BY 4.0 annotations, pictures under Flickr's terms; each easydetect hub
-dataset's are on its page).
+The COCO weights are Apache-2.0 too, for any use, commercial included (credit
+COCO, whose annotations are CC BY 4.0), and so is a model you train from them on
+your own data. easydetect hub's models are the exception to read up on: each
+dataset there has its own terms, shown on its page, to check before commercial use.

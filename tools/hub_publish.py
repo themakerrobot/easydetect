@@ -17,7 +17,12 @@ the repo:
 * ``ed-<v>-<size>.xml/.bin``  OpenVINO IR (Intel CPU, GPU, NPU)
 * ``ed-<v>-<size>-int8.onnx`` at 320 px or less: 8 bits for a Raspberry Pi or Pibo
   (convolutions only, the stem in float, as Pibo's own model)
-* ``model.json``          dataset, classes, size, COCO-style mAP50-95 on its val split
+* ``model.json``          dataset, classes, size, task, COCO-style score on its val split
+
+``--task segment`` / ``--task pose`` with ``--head`` (a mask_decoder.onnx or a
+pose.onnx, see hub_tasks.py) publishes the same detector with that network
+beside it, in a folder of its own: ``<dataset>/ed-<v>-<size>-seg/`` or
+``-pose/``, scored the task's way (mask mAP50-95, OKS AP).
 
 Then ``index.json`` (every model in the repo), ``<dataset>/README.md`` and the
 front ``README.md`` are rebuilt from it and uploaded. ``--dry-run`` stops
@@ -51,6 +56,11 @@ def slim(src: Path, dst: Path) -> dict:
 
 THUMB = (320, 240)
 
+#: a hub model's task: its folder's suffix, the file beside the detector, its score
+TASKS = {"detect": ("", None, "mAP50-95"),
+         "segment": ("-seg", "mask_decoder.onnx", "mask mAP50-95"),
+         "pose": ("-pose", "pose.onnx", "OKS AP")}
+
 
 def fit(image, center: tuple[float, float] | None = None):
     """``image`` cut to 4:3 around ``center`` (its middle by default) and
@@ -70,7 +80,7 @@ def fit(image, center: tuple[float, float] | None = None):
     return cv2.resize(image, THUMB, interpolation=cv2.INTER_AREA)
 
 
-def thumbnail(onnx: Path, data: str, out: Path, look: int = 200) -> Path:
+def thumbnail(onnx: Path, data: str, out: Path, look: int = 200, task: str = "detect") -> Path:
     """One val picture with the model's boxes on it, 4:3 around the boxes.
     Of the first ``look``, one with 3-8 boxes found where they are largest (the
     clearest to look at); failing that, the one with the most, up to 20. Black
@@ -81,7 +91,7 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200) -> Path:
     from easydetect import Detector
     from easydetect.data.dataset import DetDataset
 
-    model = Detector(str(onnx), verbose=False)
+    model = Detector(str(onnx), task=task, verbose=False)
     clear, clearest, busy, most = None, -1.0, None, -1
     for f in DetDataset(data, "val", 64, augment=False).files[:look]:
         result = model(str(f), verbose=False)[0]
@@ -113,9 +123,14 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200) -> Path:
 
 
 def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
-          score_data: str | None = None, int8_from: Path | None = None) -> dict:
+          score_data: str | None = None, int8_from: Path | None = None,
+          task: str = "detect", head: Path | None = None, truth: str | None = None,
+          coco: Path | None = None) -> dict:
     """The files of one model in ``folder``; ``int8_from``: an 8-bit .onnx made
-    already (a quantization-aware one) instead of quantizing this one."""
+    already (a quantization-aware one) instead of quantizing this one. For
+    ``task`` "segment" or "pose", ``head`` goes beside the detector and the
+    task's score is taken: on ``truth`` (hub_tasks.py's val.json) for masks,
+    on COCO's val2017 in ``coco`` for keypoints."""
     sys.path.insert(0, str(HERE))
     from pi_kit import ort_int8, score
     from pibo_conf import pick
@@ -160,16 +175,34 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
         scores["int8"] = score(int8, score_data, limit, backend="onnxruntime")
         files.append(int8.name)
     shutil.rmtree(work, ignore_errors=True)
-    thumbnail(onnx, score_data, folder / "sample.jpg")
+    task_scores = {}
+    if task != "detect":
+        from hub_tasks import score_pose, score_seg
+
+        beside = folder / TASKS[task][1]
+        shutil.copyfile(head, beside)
+        files.append(beside.name)
+        runs = [("onnx", onnx)] + ([("int8", folder / f"{name}-int8.onnx")] if size <= 320 else [])
+        for kind, path in runs:
+            if task == "segment":
+                r = score_seg(str(path), str(beside), truth, limit, backend="onnxruntime")
+                task_scores[kind] = r["mask_map50_95"]
+            else:
+                r = score_pose(str(path), str(beside), coco, limit)
+                task_scores[kind] = r["oks_ap"]
+    thumbnail(onnx, score_data, folder / "sample.jpg", task=task)
     files.append("sample.jpg")
 
     names = ckpt["names"]
     names = names if isinstance(names, dict) else dict(enumerate(names))
+    box, box8 = scores["onnx"]["map_official"], scores.get("int8", {}).get("map_official")
     return {
-        "model": name.rsplit("-", 1)[0], "imgsz": size, "files": files,
+        "model": f"ed-{ckpt.get('variant', 's')}", "imgsz": size, "files": files,
         "classes": {int(k): v for k, v in names.items()}, "conf": round(conf, 2),
-        "map50_95": scores["onnx"]["map_official"],
-        "map50_95_int8": scores.get("int8", {}).get("map_official"),
+        "task": task, "metric": TASKS[task][2],
+        "score": task_scores.get("onnx", box), "score_int8": task_scores.get("int8", box8),
+        # the detector's own boxes, whatever the task
+        "map50_95": box, "map50_95_int8": box8,
         "queries": ckpt.get("queries"), "epochs": ckpt.get("epochs"),
     }
 
@@ -207,13 +240,15 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         thumb = f"https://huggingface.co/{repo}/resolve/main/{dataset}/thumb.jpg"
         cells = []
         for size in (320, 640):
-            m = next((m for m in models.values() if m["imgsz"] == size), None)
+            m = next((m for m in models.values()
+                      if m["imgsz"] == size and m.get("task", "detect") == "detect"), None)
             cells.append("—" if m is None else f"{m['map50_95']:.3f}" + (
                 f" ({m['map50_95_int8']:.3f})" if m.get("map50_95_int8") else ""))
         group = category(dataset)
+        tasks = " · ".join(task_of(index, dataset))
         sections.setdefault(group, []).append(
             f"| <img src=\"{thumb}\" width=\"120\" height=\"90\"> | "
-            f"[{short_title(first['title'])}]({dataset}/)<br><sub>{group}</sub> | "
+            f"[{short_title(first['title'])}]({dataset}/)<br><sub>{group} · {tasks}</sub> | "
             f"{len(first['classes'])} | {cells[0]} | {cells[1]} | "
             f"{short_license(first['license']).replace(' ', '&nbsp;')} |")
     order = [c for c in [*CATEGORIES, "Other"] if c in sections]
@@ -222,6 +257,30 @@ def front_readme(index: dict, repo: str = REPO) -> str:
     # naming its own under the dataset
     tables = [HEADER, "| --- | --- | --- | --- | --- | --- |",
               *(row for c in order for row in sections[c]), ""]
+    others = []
+    for dataset, models in _by_dataset(index).items():
+        for task in ("segment", "pose"):
+            cells = []
+            for size in (320, 640):
+                m = next((m for m in models.values()
+                          if m["imgsz"] == size and m.get("task") == task), None)
+                cells.append("—" if m is None else f"{m['score']:.3f}" + (
+                    f" ({m['score_int8']:.3f})" if m.get("score_int8") else ""))
+            if cells != ["—", "—"]:
+                first = next(iter(models.values()))
+                others.append(f"| [{short_title(first['title'])}]({dataset}/) | {task} | "
+                              f"{TASKS[task][2]} | {cells[0]} | {cells[1]} |")
+    if others:
+        others = ["## Segmentation and keypoints", "",
+                  "The same detectors with a second network beside them, trained on the",
+                  "dataset's masks or keypoints, each in a folder of its own",
+                  "(`ed-s-<size>-seg`, `ed-s-<size>-pose`). Use one with `task=`:", "",
+                  "```python",
+                  'Detector("hub:coco/ed-s-640-seg", task="segment")   # masks',
+                  'Detector("hub:coco/ed-s-640-pose", task="pose")     # keypoints',
+                  "```", "",
+                  "| dataset | task | score | 320&nbsp;px (8&#8209;bit) | 640&nbsp;px |",
+                  "| --- | --- | --- | --- | --- |", *others, ""]
     big = [k for k in sorted(index) if k.endswith("-640")]
     example = next((k for k in big if k.startswith("taco/")), (big or sorted(index))[0])
     small = next((k for k in sorted(index) if k.endswith("-320")), example)
@@ -287,7 +346,7 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "ed-s. mAP50-95 on each dataset's own val split, COCO's way; in brackets",
         "the 8-bit file.", "",
         f"{datasets} datasets: {contents}", "", *tables,
-        "\\* more terms on the dataset's page (the pictures' own licences).", "",
+        "\\* more terms on the dataset's page (the pictures' own licences).", "", *others,
         "## Licence", "",
         "The weights are Apache-2.0. Each dataset's licence, the credit it asks for and the",
         "paper to cite are on its page (click its name); keep them with a model trained on it.",
@@ -298,10 +357,18 @@ def dataset_readme(dataset: str, index: dict) -> str:
     models = {k: m for k, m in index.items() if k.startswith(dataset + "/")}
     first = next(iter(models.values()))
     names = ", ".join(first["classes"].values())
-    rows = [f"| `{k.split('/', 1)[1]}` | {m['imgsz']} | {m['map50_95']:.3f} | "
-            f"{m['map50_95_int8']:.3f} |" if m.get("map50_95_int8") else
-            f"| `{k.split('/', 1)[1]}` | {m['imgsz']} | {m['map50_95']:.3f} | — |"
-            for k, m in sorted(models.items())]
+
+    def row(k, m):
+        score = m.get("score", m["map50_95"])
+        int8 = m.get("score_int8", m.get("map50_95_int8"))
+        task = m.get("task", "detect")
+        return (f"| `{k.split('/', 1)[1]}` | {task} | {m['imgsz']} | "
+                f"{m.get('metric', TASKS[task][2])} | {score:.3f} | "
+                f"{f'{int8:.3f}' if int8 else '—'} |")
+
+    order = {t: i for i, t in enumerate(TASKS)}
+    rows = [row(k, m) for k, m in sorted(models.items(), key=lambda km: (
+        order.get(km[1].get("task", "detect"), 9), km[1]["imgsz"]))]
     sys.path.insert(0, str(HERE))
     from hub_datasets import category
 
@@ -316,18 +383,29 @@ def dataset_readme(dataset: str, index: dict) -> str:
     if first.get("note"):
         lines += [first["note"], ""]
     return "\n".join([*lines, f"{len(first['classes'])} classes: {names}", "",
-                      "| model | size | mAP50-95 | 8-bit |", "| --- | --- | --- | --- |", *rows,
+                      "| model | task | size | score | value | 8-bit |",
+                      "| --- | --- | --- | --- | --- | --- |", *rows,
                       ""])
 
 
 def _fill_categories(index: dict) -> None:
-    """Every entry with its category (the web page groups by it), including
-    entries published before categories were recorded."""
+    """Every entry with its category (the web page groups by it) and its task
+    and score, including entries published before those were recorded."""
     sys.path.insert(0, str(HERE))
     from hub_datasets import category
 
     for key, entry in index.items():
         entry["category"] = category(key.split("/", 1)[0])
+        entry.setdefault("task", "detect")
+        entry.setdefault("metric", TASKS[entry["task"]][2])
+        entry.setdefault("score", entry.get("map50_95"))
+        entry.setdefault("score_int8", entry.get("map50_95_int8"))
+
+
+def task_of(index: dict, dataset: str) -> list[str]:
+    """The tasks a dataset has models for, in TASKS' order."""
+    have = {m.get("task", "detect") for k, m in index.items() if k.split("/", 1)[0] == dataset}
+    return [t for t in TASKS if t in have]
 
 
 @contextlib.contextmanager
@@ -388,6 +466,12 @@ def main() -> int:
     parser.add_argument("--size", type=int, help="input size (default: the checkpoint's)")
     parser.add_argument("--int8", help="an 8-bit .onnx made already (e.g. quantization-aware) "
                         "instead of quantizing the float one; 320 px or less")
+    parser.add_argument("--task", default="detect", choices=list(TASKS),
+                        help="segment / pose: the detector with --head beside it")
+    parser.add_argument("--head", help="--task segment: mask_decoder.onnx; pose: pose.onnx")
+    parser.add_argument("--truth", help="--task segment: hub_tasks.py's val.json to score on")
+    parser.add_argument("--coco", default="~/datasets/coco",
+                        help="--task pose: COCO 2017 (val2017 person keypoints) to score on")
     parser.add_argument("--repo", default=REPO)
     parser.add_argument("--stage", default="~/hub-stage", help="where the files are built")
     parser.add_argument("--limit", type=int, help="val pictures to score (a quick try)")
@@ -398,6 +482,10 @@ def main() -> int:
         return refresh_thumbs(args.repo, Path(args.stage).expanduser(), args.dry_run)
     if not (args.weights and args.data and args.dataset):
         parser.error("--weights, --data and --dataset are needed")
+    if args.task != "detect" and not args.head:
+        parser.error(f"--task {args.task} needs --head")
+    if args.task == "segment" and not args.truth:
+        parser.error("--task segment needs --truth (hub_tasks.py seg-data writes it)")
 
     import torch
 
@@ -412,13 +500,16 @@ def main() -> int:
     ckpt = torch.load(weights, map_location="cpu", weights_only=False)
     size = args.size or int(ckpt.get("imgsz") or 640)
     variant = ckpt.get("variant", "s")
-    key = f"{args.dataset}/ed-{variant}-{size}"
+    key = f"{args.dataset}/ed-{variant}-{size}{TASKS[args.task][0]}"
     stage = Path(args.stage).expanduser()
     folder = stage / key
     score_data = str(Path(args.score_data).expanduser()) if args.score_data else None
     int8_from = Path(args.int8).expanduser() if args.int8 else None
     info = build(weights, str(Path(args.data).expanduser()), folder, size, args.limit, score_data,
-                 int8_from)
+                 int8_from, task=args.task,
+                 head=Path(args.head).expanduser() if args.head else None,
+                 truth=str(Path(args.truth).expanduser()) if args.truth else None,
+                 coco=Path(args.coco).expanduser())
     info.update(facts, category=category(args.dataset))
     (folder / "model.json").write_text(json.dumps(info, ensure_ascii=False, indent=2))
     print(json.dumps({k: v for k, v in info.items() if k != "classes"}, ensure_ascii=False))
@@ -442,14 +533,18 @@ def main() -> int:
         _fill_categories(index)
         (stage / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2))
         (stage / "README.md").write_text(front_readme(index, args.repo))
-        shutil.copyfile(folder / "sample.jpg", stage / args.dataset / "thumb.jpg")
+        # the dataset's picture is its detector's (a mask or keypoint model
+        # draws it only for a dataset that has no detector of its own)
+        own_thumb = args.task == "detect" or "detect" not in task_of(index, args.dataset)
+        if own_thumb:
+            shutil.copyfile(folder / "sample.jpg", stage / args.dataset / "thumb.jpg")
         (stage / args.dataset / "README.md").write_text(dataset_readme(args.dataset, index))
         if args.dry_run:
             print(f"built {folder} (not uploaded)")
             return 0
         ops = [CommitOperationAdd(name, str(stage / name)) for name in
                ("index.json", "README.md", f"{args.dataset}/README.md",
-                f"{args.dataset}/thumb.jpg")]
+                *([f"{args.dataset}/thumb.jpg"] if own_thumb else []))]
         api.create_commit(args.repo, ops, commit_message=f"{key}: list and pages")
     print(f"https://huggingface.co/{args.repo}/tree/main/{key}")
     return 0

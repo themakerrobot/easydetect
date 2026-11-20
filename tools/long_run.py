@@ -276,8 +276,23 @@ HUB = [(f"hub-{_k}-{_size}", ["hub", _k, str(_size)],
          "lvis": ["coco-data"], "coco": ["coco-data"]}.get(_k, []))
        for _k in HUB_ORDER for _size in (320, 640)]
 
+#: the hub's mask and keypoint models (tools/hub_tasks.py): the dataset's
+#: detector with MobileSAM's decoder fine-tuned on its masks, or with the COCO
+#: keypoint network, each published in a folder of its own (-seg, -pose).
+#: Only datasets that outline objects or place keypoints have them.
+from hub_tasks import POSE as HUB_POSE, SEG as HUB_SEG  # noqa: E402
+
+HUB_TASKS = [
+    *((f"hub-seg-data-{_k}", ["hub-seg-data", _k], [f"hub-{_k}-640"]) for _k in HUB_SEG),
+    *((f"hub-seg-train-{_k}", ["hub-seg-train", _k], [f"hub-seg-data-{_k}"]) for _k in HUB_SEG),
+    *((f"hub-seg-{_k}-{_size}", ["hub-seg", _k, str(_size)],
+       [f"hub-seg-train-{_k}", f"hub-{_k}-{_size}"]) for _k in HUB_SEG for _size in (320, 640)),
+    *((f"hub-pose-{_k}-{_size}", ["hub-pose", _k, str(_size)], [f"hub-{_k}-{_size}"])
+      for _k in HUB_POSE for _size in (320, 640)),
+]
+
 #: run only when named (--only): set aside for later, not part of a plain run
-ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD + LAB_FORM + HUB
+ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD + LAB_FORM + HUB + HUB_TASKS
 
 
 def known_steps() -> list[tuple[str, list[str], list[str]]]:
@@ -754,6 +769,49 @@ def step_hub(root: Path, args, key: str, size: str) -> None:
           *(["--score-data", str(scored)] if scored else [])])
 
 
+def _hub_weights(root: Path, args, key: str, size: int) -> tuple[Path, Path, Path | None]:
+    """(best.pt, data.yaml, 8-bit .onnx made already) the hub's detector of
+    ``key`` at ``size`` was published from."""
+    from easydetect import downloads
+
+    if key == "coco":
+        coco_yaml = Path(args.coco).expanduser() / "data.yaml"
+        if size == 640:
+            return downloads.download_checkpoint("ed-s"), coco_yaml, None
+        int8 = root / "pi-kit-kd" / "ed-sq-320-qatp-ortc" / "ed-sq-320-qatp-ortc.onnx"
+        return (root / "coco" / "ed-sq-320" / "weights" / "best.pt", coco_yaml,
+                int8 if int8.exists() else None)
+    train, _ = _hub_data(args, key)
+    return root / "hub" / f"{key}-s{size}" / "weights" / "best.pt", train, None
+
+
+def step_hub_seg_data(root: Path, args, key: str) -> None:
+    _run([PY, "-u", str(HERE / "hub_tasks.py"), "seg-data", key,
+          "--root", args.hub_root, "--coco", args.coco])
+
+
+def step_hub_seg_train(root: Path, args, key: str) -> None:
+    _run([PY, "-u", str(HERE / "hub_tasks.py"), "seg-train", key,
+          "--root", args.hub_root, "--coco", args.coco])
+
+
+def step_hub_task(root: Path, args, task: str, key: str, size: str) -> None:
+    """The hub's detector of ``key`` at ``size`` with its mask decoder or
+    keypoint network beside it, published as <key>/ed-s-<size>-seg / -pose."""
+    from easydetect import downloads
+
+    size = int(size)
+    weights, data, int8 = _hub_weights(root, args, key, size)
+    if task == "segment":
+        seg = Path(args.hub_root).expanduser() / f"{key}-seg"
+        extra = ["--head", str(seg / "run" / "decoder.onnx"), "--truth", str(seg / "val.json")]
+    else:                                  # COCO's keypoint network, trained already
+        extra = ["--head", str(downloads.download_pose("s")), "--coco", args.coco]
+    _run([PY, "-u", str(HERE / "hub_publish.py"), "--weights", str(weights), "--data", str(data),
+          "--dataset", key, "--size", str(size), "--stage", str(root / "hub-stage"),
+          "--task", task, *extra, *(["--int8", str(int8)] if int8 else [])])
+
+
 def step_oi_data(root: Path, args) -> None:
     """Open Images' boxes and pictures, as tools/openimages2yolo.py makes them."""
     _run([PY, "-u", str(HERE / "openimages2yolo.py"), "--out", args.openimages])
@@ -991,9 +1049,17 @@ def main():
     parser.add_argument("--wait-lock", action="store_true",
                         help="queue behind whatever holds <root>/.lock (another long_run, or "
                              "a job run under `flock ~/longrun/.lock`) instead of giving up")
+    parser.add_argument("--left", action="store_true",
+                        help="print how many of the steps (--only) are not done yet, and stop")
     parser.add_argument("--internal", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     args = parser.parse_args()
     root = Path(args.root).expanduser().resolve()
+    if args.left:
+        only = args.only or []
+        names = [n for n, _, _ in known_steps() if not only or any(
+            n == o or (o.endswith("*") and n.startswith(o[:-1])) for o in only)]
+        print(sum(not (root / "state" / f"{n}.done").exists() for n in names))
+        return
     (root / "bench").mkdir(parents=True, exist_ok=True)
 
     if args.internal:                               # inside one step's process
@@ -1018,6 +1084,14 @@ def main():
             step_lab_form(root, args)
         elif kind == "hub":
             step_hub(root, args, *rest)
+        elif kind == "hub-seg-data":
+            step_hub_seg_data(root, args, *rest)
+        elif kind == "hub-seg-train":
+            step_hub_seg_train(root, args, *rest)
+        elif kind == "hub-seg":
+            step_hub_task(root, args, "segment", *rest)
+        elif kind == "hub-pose":
+            step_hub_task(root, args, "pose", *rest)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

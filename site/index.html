@@ -307,6 +307,16 @@ function sc(v, size) {
   return `<div class="sc"><div class="l">${size} ${t("px")}</div><div class="v">${f3(v.score)}</div>
     <div class="track"><div class="fill" style="width:${Math.round((v.score || 0) * 100)}%"></div></div><div class="i8">${i8}</div></div>`;
 }
+/* the dataset's picture is its detector's; a mask or keypoint model drew its
+   own sample.jpg when it was published, shown when that task is picked */
+function sampleOf(d, v) {
+  return v && v.task !== "detect" && (v.files || []).includes("sample.jpg")
+    ? `${RAW}/${v.key.split("/").map(encodeURIComponent).join("/")}/sample.jpg` : null;
+}
+function thumbOf(d, task) {
+  const v = task && task !== "detect" ? d.of(task, 640) || d.of(task, 320) : null;
+  return sampleOf(d, v) || `${RAW}/${encodeURIComponent(d.id)}/thumb.jpg`;
+}
 function renderGrid() {
   const words = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const list = S.datasets.filter((d) => (!S.task || d.tasks.includes(S.task)) && (!S.cat || d.category === S.cat)
@@ -316,7 +326,7 @@ function renderGrid() {
           : (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category) || a.rf - b.rf || a.name.localeCompare(b.name));
   $("grid").innerHTML = list.length ? list.map((d) => `
     <button type="button" class="card" data-id="${esc(d.id)}" aria-label="${esc(d.name)}">
-      <div class="thumb"><img loading="lazy" alt="" src="${RAW}/${encodeURIComponent(d.id)}/thumb.jpg" onerror="this.remove()">
+      <div class="thumb"><img loading="lazy" alt="" src="${thumbOf(d, S.task)}" onerror="this.remove()">
         <span class="badge">${esc(catName(d.category))}</span>${d.rf ? `<span class="badge r">RF100</span>` : ""}</div>
       <div class="body">
         <div><h3>${esc(d.name)}</h3><div class="names">${d.classes.length} ${esc(t("classes"))} · ${esc(d.classes.slice(0, 6).join(", "))}</div></div>
@@ -393,7 +403,7 @@ function drawDetail() {
       <button type="button" class="hbtn" id="close" aria-label="${esc(t("close"))}">✕</button></div>
     <div class="cols">
     <aside class="left">
-      <img alt="" src="${RAW}/${encodeURIComponent(d.id)}/thumb.jpg" onerror="this.style.visibility='hidden'">
+      <img alt="" src="${sampleOf(d, v) || `${RAW}/${encodeURIComponent(d.id)}/thumb.jpg`}" onerror="this.style.visibility='hidden'">
       <div class="info">
         <div><div class="pb-label">${esc(t("licence"))}</div>${esc(m.license || "")}<div class="hint" style="margin-top:4px">${esc(t("licNote"))}</div></div>
         <div><div class="pb-label">${esc(t("wLicence"))}</div>${esc(t("wModel"))}<div class="hint" style="margin-top:4px">${esc(t("wFrom"))} ${esc((v.built_from || ["D-FINE (Apache-2.0)", "PP-HGNetV2 from PaddleDetection (Apache-2.0)", ...(v.task === "segment" ? ["MobileSAM (Apache-2.0)"] : [])]).join(", "))} · <a href="https://github.com/themakerrobot/easydetect/blob/main/NOTICE" target="_blank" rel="noopener">NOTICE</a></div></div>

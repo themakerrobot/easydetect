@@ -89,11 +89,41 @@ def fit(image, center: tuple[float, float] | None = None):
     return cv2.resize(image, THUMB, interpolation=cv2.INTER_AREA)
 
 
+def _sample_score(result, task: str) -> float | None:
+    """How well a picture shows this model's work (higher is better), or None
+    to pass it over. Boxes: 3-8 of them, as large as can be. Masks: 2-8
+    objects and none over 40% of the picture (a table or a field behind the
+    rest paints the whole sample one colour). Keypoints: 1-3 people with
+    their keypoints placed, as large as can be."""
+    import numpy as np
+
+    n = len(result.boxes)
+    if not n:
+        return None
+    wh = result.boxes.xywhn[:, 2:]
+    areas = wh[:, 0] * wh[:, 1]
+    if task == "pose":
+        names = result.names or {}
+        people = [i for i, c in enumerate(np.asarray(result.boxes.cls).astype(int))
+                  if str(names.get(int(c), "")).lower() == "person"]
+        if not 1 <= len(people) <= 3 or result.keypoints is None:
+            return None
+        placed = result.keypoints.data[people][..., 2] > 0.3
+        if placed.mean() < 0.5:
+            return None
+        return float(areas[people].sum())
+    if task == "segment":
+        if not 2 <= n <= 8 or areas.max() > 0.4:
+            return None
+        return float(areas.mean())
+    return float(areas.mean()) if 3 <= n <= 8 else None
+
+
 def thumbnail(onnx: Path, data: str, out: Path, look: int = 200, task: str = "detect") -> Path:
-    """One val picture with the model's boxes on it, 4:3 around the boxes.
-    Of the first ``look``, one with 3-8 boxes found where they are largest (the
-    clearest to look at); failing that, the one with the most, up to 20. Black
-    bands baked into the picture are cut off."""
+    """One val picture with the model's work on it, 4:3 around the boxes.
+    Of the first ``look``, the one that shows it best (``_sample_score``);
+    failing that, the one with the most boxes up to 20, or else the fewest.
+    Black bands baked into the picture are cut off."""
     import cv2
     import numpy as np
 
@@ -105,11 +135,9 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200, task: str = "de
     for f in DetDataset(data, "val", 64, augment=False).files[:look]:
         result = model(str(f), verbose=False)[0]
         found = len(result.boxes)
-        if 3 <= found <= 8:
-            wh = result.boxes.xywhn[:, 2:]
-            area = float((wh[:, 0] * wh[:, 1]).mean())
-            if area > clearest:
-                clear, clearest = result, area
+        score = _sample_score(result, task)
+        if score is not None and score > clearest:
+            clear, clearest = result, score
         if most < found <= 20:
             busy, most = result, found
         if fewest is None or found < fewest:         # every picture crowded: the least
@@ -502,6 +530,28 @@ def _refresh_thumbs(repo, stage, dry_run, CommitOperationAdd, HfApi, hf_hub_down
     return 0
 
 
+def refresh_samples(repo: str, stage: Path, dataset: str, data: str, dry_run: bool) -> int:
+    """The sample.jpg of each mask and keypoint model of ``dataset`` drawn again
+    from its val pictures (``data``), the way thumbnail() picks one now."""
+    from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download
+
+    from easydetect import downloads
+
+    index = json.loads(Path(hf_hub_download(repo, "index.json", force_download=True)).read_text())
+    ops = []
+    for key, m in sorted(index.items()):
+        if not key.startswith(dataset + "/") or m.get("task", "detect") == "detect":
+            continue
+        onnx = downloads.download_hub(f"hub:{key}")       # its network comes beside it
+        out = stage / key / "sample.jpg"
+        thumbnail(onnx, data, out, task=m["task"])
+        ops.append(CommitOperationAdd(f"{key}/sample.jpg", str(out)))
+        print(f"{key}: sample drawn again", flush=True)
+    if ops and not dry_run:
+        HfApi().create_commit(repo, ops, commit_message=f"{dataset}: mask and keypoint samples")
+    return 0
+
+
 def refresh_pages(repo: str, stage: Path, dry_run: bool) -> int:
     """The list, the front page, every dataset's page and the model.json of
     models published with older wording, rewritten from what hub_publish.py
@@ -542,6 +592,9 @@ def main() -> int:
     parser.add_argument("--weights", help="best.pt of the training")
     parser.add_argument("--data", help="its data.yaml (val split scored)")
     parser.add_argument("--dataset", help="folder name in the repo, e.g. voc")
+    parser.add_argument("--refresh-samples", action="store_true",
+                        help="only draw again the sample.jpg of --dataset's mask and keypoint "
+                             "models, from --data's val pictures")
     parser.add_argument("--refresh-pages", action="store_true",
                         help="only rewrite the list, the front page, every dataset's page and "
                              "older model.json files the way this version writes them")
@@ -568,6 +621,11 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="build, do not upload")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
+    if args.refresh_samples:
+        if not (args.dataset and args.data):
+            parser.error("--refresh-samples needs --dataset and --data")
+        return refresh_samples(args.repo, Path(args.stage).expanduser(), args.dataset,
+                               str(Path(args.data).expanduser()), args.dry_run)
     if args.refresh_pages:
         return refresh_pages(args.repo, Path(args.stage).expanduser(), args.dry_run)
     if args.refresh_thumbs:

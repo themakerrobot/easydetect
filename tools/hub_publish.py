@@ -60,7 +60,8 @@ def slim(src: Path, dst: Path) -> dict:
 THUMB = (320, 240)
 
 NOTICE = "https://github.com/themakerrobot/easydetect/blob/main/NOTICE"
-#: the Apache-2.0 models each hub model is built from (their notices: NOTICE)
+#: the Apache-2.0 models a hub model starts from (their notices: NOTICE); the
+#: model itself, trained on a dataset, follows that dataset's terms
 BUILT_FROM = ["D-FINE (Apache-2.0)", "PP-HGNetV2 from PaddleDetection (Apache-2.0)"]
 BUILT_FROM_TASK = {"segment": ["MobileSAM (Apache-2.0)"]}
 
@@ -211,7 +212,10 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
         "model": f"ed-{ckpt.get('variant', 's')}", "imgsz": size, "files": files,
         "classes": {int(k): v for k, v in names.items()}, "conf": round(conf, 2),
         "task": task, "metric": TASKS[task][2],
-        "weights_license": "Apache-2.0", "built_from": BUILT_FROM + BUILT_FROM_TASK.get(task, []),
+        # ed-s, where it started, is Apache-2.0; trained on the dataset, the
+        # model follows the dataset's terms ("license" above)
+        "base": "ed-s", "base_license": "Apache-2.0",
+        "built_from": BUILT_FROM + BUILT_FROM_TASK.get(task, []),
         "score": task_scores.get("onnx", box), "score_int8": task_scores.get("int8", box8),
         # the detector's own boxes, whatever the task
         "map50_95": box, "map50_95_int8": box8,
@@ -301,7 +305,9 @@ def front_readme(index: dict, repo: str = REPO) -> str:
     small = next((k for k in sorted(index) if k.endswith("-320")), example)
     datasets, models = len(_by_dataset(index)), len(index)
     return "\n".join([
-        "---", "license: apache-2.0", "library_name: easydetect",
+        # each model follows its dataset's terms: not one licence for the repository
+        "---", "license: other", "license_name: dataset-terms",
+        f"license_link: https://huggingface.co/{repo}#licence", "library_name: easydetect",
         "pipeline_tag: object-detection", "tags:", "  - object-detection", "  - detr",
         "  - onnx", "  - openvino", "  - int8", "  - raspberry-pi", "  - edge", "---", "",
         "# easydetect hub", "",
@@ -313,9 +319,9 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "  OpenVINO on an Intel CPU, GPU or NPU.",
         "- **Small and fast.** ed-s (10M parameters), a real-time DETR: no NMS to tune.",
         "  320 px for small devices, with an 8-bit file for a Raspberry Pi; 640 px for accuracy.",
-        "- **Apache-2.0 weights**, built from Apache-2.0 models (D-FINE, PP-HGNetV2, MobileSAM).",
-        "  The training data's terms still apply: each dataset's licence and credit are in",
-        "  the table and on its page; keep the credit, and check them before commercial use.",
+        "- **Built on ed-s (Apache-2.0).** Each model here is ed-s trained on a public dataset",
+        "  and follows that dataset's terms (in the table and on its page): keep the credit,",
+        "  and check them before commercial use.",
         "- **Your own data next.** Every model comes with the checkpoint to fine-tune from.", "",
         "## Quick start (no PyTorch)", "",
         "```bash", "pip install -U easydetect        # 0.7.17 or later", "```", "",
@@ -374,13 +380,13 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         f"{datasets} datasets: {contents}", "", *tables,
         "\\* more terms on the dataset's page (the pictures' own licences).", "", *others,
         "## Licence", "",
-        "The weights (what was made here) are Apache-2.0. They are built from Apache-2.0",
-        "models: D-FINE, PP-HGNetV2 (PaddleDetection) and, for masks, MobileSAM; their",
-        f"notices are in [easydetect's NOTICE]({NOTICE}).", "",
-        "The training data's terms still apply to a model trained on it. Each dataset's",
-        "licence, the credit it asks for and the paper to cite are on its page (click its",
-        "name): keep the credit with the model, and check the dataset's and its pictures'",
-        "terms before commercial use.",
+        "The models start from ed-s, which is Apache-2.0: easydetect's code and starting",
+        "weights, from D-FINE, PP-HGNetV2 (PaddleDetection) and, for masks, MobileSAM",
+        f"([NOTICE]({NOTICE})).", "",
+        "Each model here is ed-s trained on a public dataset, and follows that dataset's",
+        "terms. Its licence, the credit it asks for and the paper to cite are on its page",
+        "(click its name): keep the credit with the model, and check the dataset's and its",
+        "pictures' terms before commercial use.",
         "", "Made with [easydetect](https://github.com/themakerrobot/easydetect).", ""])
 
 
@@ -407,9 +413,9 @@ def dataset_readme(dataset: str, index: dict) -> str:
              "![sample](thumb.jpg)", "",
              f"Source: {first['source']}  ",
              f"Licence of the data: {first['license']}  ",
-             f"Licence of the weights: Apache-2.0, built from D-FINE, PP-HGNetV2 and (masks) "
-             f"MobileSAM, all Apache-2.0 ([NOTICE]({NOTICE})). The data's terms above still "
-             "apply: keep its credit, and check them before commercial use.", ""]
+             f"The models: ed-s (Apache-2.0: D-FINE, PP-HGNetV2 and, for masks, MobileSAM; "
+             f"[NOTICE]({NOTICE})) trained on this data, so they follow its terms above: "
+             "keep its credit, and check them before commercial use.", ""]
     if first.get("attribution"):
         lines += [f"Credit (keep it with the model): {first['attribution']}", ""]
     if first.get("citation"):
@@ -434,6 +440,11 @@ def _fill_categories(index: dict) -> None:
         entry.setdefault("metric", TASKS[entry["task"]][2])
         entry.setdefault("score", entry.get("map50_95"))
         entry.setdefault("score_int8", entry.get("map50_95_int8"))
+        # ed-s, where a model starts, is Apache-2.0; the model follows its
+        # dataset's terms ("license"), so no licence of its own is claimed
+        entry.pop("weights_license", None)
+        entry["base"], entry["base_license"] = "ed-s", "Apache-2.0"
+        entry["built_from"] = BUILT_FROM + BUILT_FROM_TASK.get(entry["task"], [])
 
 
 def task_of(index: dict, dataset: str) -> list[str]:
@@ -484,11 +495,49 @@ def _refresh_thumbs(repo, stage, dry_run, CommitOperationAdd, HfApi, hf_hub_down
     return 0
 
 
+def refresh_pages(repo: str, stage: Path, dry_run: bool) -> int:
+    """The list, the front page, every dataset's page and the model.json of
+    models published with older wording, rewritten from what hub_publish.py
+    writes now, in one commit (the models themselves are untouched)."""
+    from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download
+
+    with _publishing(stage):
+        index = json.loads(Path(hf_hub_download(repo, "index.json",
+                                                force_download=True)).read_text())
+        stale = [k for k, m in index.items() if "weights_license" in m or "base" not in m]
+        _fill_categories(index)
+        ops = [CommitOperationAdd("index.json", json.dumps(index, ensure_ascii=False,
+                                                           indent=2).encode()),
+               CommitOperationAdd("README.md", front_readme(index, repo).encode())]
+        for dataset in _by_dataset(index):
+            ops.append(CommitOperationAdd(f"{dataset}/README.md",
+                                          dataset_readme(dataset, index).encode()))
+        for key in stale:
+            try:
+                info = json.loads(Path(hf_hub_download(repo, f"{key}/model.json",
+                                                       force_download=True)).read_text())
+            except Exception:  # noqa: BLE001  (a folder without one keeps none)
+                continue
+            info.pop("weights_license", None)
+            info.update({k: index[key][k] for k in ("base", "base_license", "built_from")})
+            ops.append(CommitOperationAdd(f"{key}/model.json", json.dumps(
+                info, ensure_ascii=False, indent=2).encode()))
+        print(f"{len(_by_dataset(index))} dataset pages, {len(stale)} model.json, the list "
+              "and the front page", flush=True)
+        if not dry_run:
+            HfApi().create_commit(repo, ops, commit_message="pages: ed-s is Apache-2.0, each "
+                                  "model follows its dataset's terms")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--weights", help="best.pt of the training")
     parser.add_argument("--data", help="its data.yaml (val split scored)")
     parser.add_argument("--dataset", help="folder name in the repo, e.g. voc")
+    parser.add_argument("--refresh-pages", action="store_true",
+                        help="only rewrite the list, the front page, every dataset's page and "
+                             "older model.json files the way this version writes them")
     parser.add_argument("--refresh-thumbs", action="store_true",
                         help="only cut every published thumbnail to the same size and "
                              "rebuild the front page")
@@ -512,6 +561,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="build, do not upload")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
+    if args.refresh_pages:
+        return refresh_pages(args.repo, Path(args.stage).expanduser(), args.dry_run)
     if args.refresh_thumbs:
         return refresh_thumbs(args.repo, Path(args.stage).expanduser(), args.dry_run)
     if not (args.weights and args.data and args.dataset):

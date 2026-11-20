@@ -140,10 +140,9 @@ COCO numbers are the original authors' for these checkpoints (640 px, val2017).
 trained on over a hundred public datasets (trash, plants, blood cells, safety
 gear, documents, games, aerial and underwater pictures, COCO, Open Images,
 LVIS...), each at 320 px (with an 8-bit file for a Raspberry Pi) and 640 px.
-The weights are Apache-2.0, built from Apache-2.0 models; the training data's
-terms still apply. Each dataset's licence and credit are shown with its models:
-keep the credit, and check them before commercial use. Name one and it downloads
-once, no PyTorch needed:
+They are ed-s (Apache-2.0) trained on those datasets, so each follows its
+dataset's terms, shown with it: keep the credit, and check them before
+commercial use. Name one and it downloads once, no PyTorch needed:
 
 ```python
 model = Detector("hub:taco/ed-s-640")          # ONNX
@@ -392,7 +391,7 @@ Runtime이 함께 들어가고 PyTorch는 없습니다. `pip install "easydetect
 
 공개 데이터셋 100여 개로 학습한 모델이 [easydetect hub](https://huggingface.co/leeyunjai/easydetect-hub)에
 있습니다(쓰레기, 식물, 혈액세포, 안전장비, 문서, 게임, 항공·수중 사진, COCO, Open Images,
-LVIS 등). 가중치는 Apache-2.0이고, 학습에 쓴 데이터셋의 조건(출처 표기 등)은 그대로
+LVIS 등). ed-s 모델(Apache-2.0)을 각 데이터셋으로 학습한 것이라 그 데이터셋의 조건을
 따릅니다. 표기를 지키고, 상업적으로 쓰기 전에 데이터셋과 사진의 조건을 확인하세요. `Detector("hub:taco/ed-s-640")`처럼 이름만
 쓰면 한 번 내려받아 PyTorch 없이 돌고, `easydetect hub`로 목록과 점수를 봅니다.
 

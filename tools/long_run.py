@@ -292,8 +292,21 @@ HUB_TASKS = [
       for _k in HUB_POSE for _size in (320, 640)),
 ]
 
+
+
+def _after_needs(steps: list, extra: list) -> list:
+    """``steps`` with each of ``extra`` placed right after the last step it
+    needs: a dataset's mask and keypoint models follow its detector, not the
+    whole hub (COCO's and TACO's come early; LVIS's after its detector)."""
+    out = list(steps)
+    for step in extra:
+        at = max((i for i, (name, _, _) in enumerate(out) if name in step[2]), default=len(out) - 1)
+        out.insert(at + 1, step)
+    return out
+
+
 #: run only when named (--only): set aside for later, not part of a plain run
-ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD + LAB_FORM + HUB + HUB_TASKS
+ON_DEMAND = RF100 + DEIM + OPENIMAGES + PIBO_KD + LAB_FORM + _after_needs(HUB, HUB_TASKS)
 
 
 def known_steps() -> list[tuple[str, list[str], list[str]]]:

@@ -92,7 +92,7 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200, task: str = "de
     from easydetect.data.dataset import DetDataset
 
     model = Detector(str(onnx), task=task, verbose=False)
-    clear, clearest, busy, most = None, -1.0, None, -1
+    clear, clearest, busy, most, calm, fewest = None, -1.0, None, -1, None, None
     for f in DetDataset(data, "val", 64, augment=False).files[:look]:
         result = model(str(f), verbose=False)[0]
         found = len(result.boxes)
@@ -103,7 +103,9 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200, task: str = "de
                 clear, clearest = result, area
         if most < found <= 20:
             busy, most = result, found
-    best = clear or busy
+        if fewest is None or found < fewest:         # every picture crowded: the least
+            calm, fewest = result, found
+    best = clear or busy or calm
     image = best.plot(conf=False, line_width=2)
     lit = best.orig_img.max(axis=2) > 12
     rows, cols = np.flatnonzero(lit.any(axis=1)), np.flatnonzero(lit.any(axis=0))

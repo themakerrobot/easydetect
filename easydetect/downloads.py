@@ -57,6 +57,17 @@ def is_hub_name(name: str | Path) -> bool:
     return str(name).strip().lower().startswith(HUB_PREFIX)
 
 
+#: a hub folder named ...-seg / ...-pose: the dataset's detector with the network
+#: of that task beside it, trained on the dataset's masks or keypoints
+HUB_TASKS = {"-seg": ("segment", "mask_decoder.onnx"), "-pose": ("pose", "pose.onnx")}
+
+
+def hub_task(folder: str) -> tuple[str, str | None]:
+    """``ed-s-640-seg`` -> ``("segment", "mask_decoder.onnx")``; a detector's
+    folder -> ``("detect", None)``."""
+    return next((v for k, v in HUB_TASKS.items() if folder.endswith(k)), ("detect", None))
+
+
 def hub_parts(name: str) -> tuple[str, str, str]:
     """``hub:taco/ed-s-640`` -> ``("taco", "ed-s-640", "ed-s-640.onnx")``:
     the dataset, the model's folder and the file. ``-int8`` names the 8-bit
@@ -79,7 +90,8 @@ def hub_parts(name: str) -> tuple[str, str, str]:
 
 def download_hub(name: str) -> Path:
     """The local copy of a hub model (downloaded once into ``~/.easydetect/hub``);
-    an ``.xml`` comes with its ``.bin``."""
+    an ``.xml`` comes with its ``.bin``, a ``-seg`` / ``-pose`` model with the
+    network beside its detector (where task="segment" / "pose" finds it)."""
     dataset, folder, filename = hub_parts(name)
     base, dest = f"{hub_url()}/{dataset}/{folder}", cache_dir() / "hub" / dataset / folder
     try:
@@ -88,6 +100,9 @@ def download_hub(name: str) -> Path:
             stem = filename[: -len(".xml")]
             download(f"{base}/{stem}.bin", dest / f"{stem}.bin")
             _hub_names(base, dest, stem)
+        head = hub_task(folder)[1]
+        if head:
+            download(f"{base}/{head}", dest / head)
     except DownloadError as exc:
         raise ModelNotFoundError(
             f"{name!r} is not on easydetect-hub ({exc}). See what is: easydetect hub") from exc

@@ -305,7 +305,7 @@ def front_readme(index: dict, repo: str = REPO) -> str:
         "```bash", "pip install -U easydetect        # 0.7.16 or later", "```", "",
         "```python", "from easydetect import Detector", "",
         f"model = Detector(\"hub:{example}\")     # downloads once; names and threshold inside",
-        f"# model = Detector(\"{example.split('/')[-1]}.onnx\")   # a file you downloaded: its path",
+        f"# model = Detector(\"{example.split('/')[-1]}.onnx\")  # a downloaded file: its path",
         "result = model(\"photo.jpg\")[0]",
         "result.show()                # or result.save(\"out.jpg\")",
         "print(result.summary())      # [{'name': ..., 'confidence': ..., 'box': {...}}, ...]",

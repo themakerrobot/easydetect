@@ -120,3 +120,26 @@ def test_a_model_address_is_fetched_once(tmp_path, monkeypatch):
 
     with pytest.raises(ModelNotFoundError, match=r"\.onnx, \.xml or \.pt"):
         downloads.model_url_to_path("https://example.org/model.zip")
+
+
+def test_a_mask_or_keypoint_model_comes_with_its_network(tmp_path, monkeypatch):
+    monkeypatch.setenv("EASYDETECT_HOME", str(tmp_path))
+    monkeypatch.setenv("EASYDETECT_HUB_URL", "https://example.org/hub")
+    fetched = []
+
+    def fake(url, dest, progress=True):
+        fetched.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x")
+        return dest
+
+    monkeypatch.setattr(downloads, "download", fake)
+    assert downloads.hub_parts("hub:coco/ed-s-320-seg-int8") == \
+        ("coco", "ed-s-320-seg", "ed-s-320-seg-int8.onnx")
+    path = downloads.download_hub("hub:coco/ed-s-320-seg-int8")
+    assert (path.parent / "mask_decoder.onnx").exists()
+    assert fetched[-1] == "https://example.org/hub/coco/ed-s-320-seg/mask_decoder.onnx"
+    downloads.download_hub("hub:coco/ed-s-640-pose")
+    assert fetched[-1] == "https://example.org/hub/coco/ed-s-640-pose/pose.onnx"
+    assert downloads.hub_task("ed-s-640-pose") == ("pose", "pose.onnx")
+    assert downloads.hub_task("ed-s-640") == ("detect", None)

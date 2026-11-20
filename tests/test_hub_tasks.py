@@ -33,7 +33,8 @@ def _coco(tmp: Path) -> Path:
         images, anns = [], []
         for i in range(n):
             iid = 100 * (split == "val") + i + 1
-            cv2.imwrite(str(coco / "images" / part / f"{iid:012d}.jpg"), np.zeros((40, 60, 3), np.uint8))
+            cv2.imwrite(str(coco / "images" / part / f"{iid:012d}.jpg"),
+                        np.zeros((40, 60, 3), np.uint8))
             images.append({"id": iid, "file_name": f"{iid:012d}.jpg", "width": 60, "height": 40})
             if i == n - 1 and split == "val":
                 continue                                    # a picture with nothing in it

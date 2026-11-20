@@ -104,15 +104,18 @@ def list_hub(search: Any = None) -> int:
         return 1
     word = str(search).lower() if search else ""
     rows = [(key, m) for key, m in sorted(index.items())
-            if word in f"{key} {m.get('title', '')} {m.get('category', '')}".lower()]
+            if word in f"{key} {m.get('title', '')} {m.get('category', '')} "
+                       f"{m.get('task', 'detect')}".lower()]
     if not rows:
         print(f"nothing on easydetect-hub matches {search!r}")
         return 1
     width = max(len(key) for key, _ in rows) + len("hub:")
     for key, m in rows:
-        int8 = f"  8-bit {m['map50_95_int8']:.3f}" if m.get("map50_95_int8") else ""
-        print(f"{'hub:' + key:<{width}}  mAP50-95 {m['map50_95']:.3f}{int8:<14}  "
-              f"{len(m.get('classes', {}))} classes  {m.get('title', '')}")
+        score, int8 = m.get("score", m.get("map50_95")), m.get("score_int8", m.get("map50_95_int8"))
+        metric = m.get("metric", "mAP50-95")
+        int8 = f"  8-bit {int8:.3f}" if int8 else ""
+        print(f"{'hub:' + key:<{width}}  {m.get('task', 'detect'):<7}  {metric} {score:.3f}"
+              f"{int8:<14}  {len(m.get('classes', {}))} classes  {m.get('title', '')}")
     print(f"\n{len(rows)} models. Use one: easydetect predict model=hub:{rows[0][0]} "
           "source=photo.jpg  (add -int8 for the 8-bit file, .xml for OpenVINO)")
     return 0

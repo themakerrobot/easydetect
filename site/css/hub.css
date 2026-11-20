@@ -1,0 +1,164 @@
+/* easydetect hub — what the themaker-ui kit does not cover.
+   Kit tokens only: no new colours, fonts or gradients, except the dark palette
+   at the end, which redefines the same tokens (as easydetect lab does).
+   css/themaker-ui.css is a verbatim copy of the kit and is never edited. */
+
+:root{
+  --sans:'Pretendard Variable',Pretendard,-apple-system,'Segoe UI',sans-serif;
+  --serif:var(--sans);
+  --mono:ui-monospace,'SF Mono','Cascadia Mono',Consolas,'DejaVu Sans Mono',Menlo,'Pretendard Variable',monospace;
+  --toast-bg:#233642; --toast-ink:#fff;
+  color-scheme:light;
+}
+/* a page that scrolls, not an app that fills the window */
+html,body{height:auto;overflow:visible}
+body{display:block;min-height:100vh;font-size:14px;word-break:keep-all;overflow-wrap:break-word}
+[hidden]{display:none !important}
+a{color:var(--acc-ink)}
+a.db{text-decoration:none}
+code,pre{font-family:var(--mono);word-break:normal}
+.grow{flex:1}
+.num{font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#toast,.toast{background:var(--toast-bg);color:var(--toast-ink)}
+
+/* ── header ── */
+header{background:var(--panel);position:sticky;top:8px;z-index:20}
+header h1 svg{width:26px;height:26px;color:var(--acc);flex-shrink:0}
+header h1 a{color:inherit;text-decoration:none;display:flex;align-items:center;gap:9px}
+header nav{display:flex;align-self:stretch;align-items:flex-end;gap:2px}
+header nav .navlink{height:100%;padding-top:0;padding-bottom:0;align-items:center}
+.navlink .ext{font-size:10px;color:var(--ink3)}
+
+.page{max-width:1240px;margin:0 auto;padding:12px}
+
+/* ── intro: what this is, and the three lines to run one ── */
+.intro{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.intro .pb{padding:18px 20px}
+.intro h2{font-size:22px;line-height:1.35;font-weight:800;color:var(--ink);margin-bottom:10px}
+.intro h2 em{font-style:normal;color:var(--acc-ink)}
+.lead{font-size:14px;color:var(--ink2);line-height:1.7}
+.facts{display:flex;gap:28px;margin-top:18px}
+.facts div{display:flex;flex-direction:column}
+.facts b{font-size:24px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.2}
+.facts span{font-size:12px;color:var(--ink3)}
+.intro .row{margin-top:18px;flex-wrap:wrap}
+.lic{margin-top:14px}
+
+/* code: tabs above, copy at the corner (as in lab) */
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tabs .db{padding:4px 10px;font-size:12px}
+.code{position:relative;margin-top:10px}
+.code pre{margin:0;padding:12px 14px;border-radius:8px;background:var(--panel2);color:var(--ink);
+  border:1px solid var(--line-soft);font-size:12.5px;line-height:1.7;overflow-x:auto;white-space:pre}
+.code pre .c{color:var(--ink3)}
+.code pre .s{color:var(--ok)}
+.code pre .k{color:var(--acc-ink);font-weight:700}
+.code .copy{position:absolute;top:7px;right:7px;padding:3px 9px;font-size:11px}
+
+/* ── browse ── */
+.browse{margin-top:12px}
+.browse > .ph .sub{font-weight:400;color:var(--ink3);font-size:12px}
+.tools{display:grid;grid-template-columns:1fr 170px;gap:8px}
+.tools .inp{font-size:13.5px;padding:9px 11px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chips .db{padding:5px 11px;font-size:12.5px}
+.chips .db small{color:var(--ink3);font-weight:600;font-variant-numeric:tabular-nums}
+.chips .db.on small{color:var(--acc-ink)}
+
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-top:14px}
+.card{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden;transition:border-color .12s}
+.card:hover{border-color:var(--acc)}
+.card:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.thumb{position:relative;aspect-ratio:4/3;background:var(--panel2);border-bottom:1px solid var(--line-soft)}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb .badge{position:absolute;top:8px;left:8px;background:var(--panel)}
+.thumb .badge.r{left:auto;right:8px}
+.card .body{padding:11px 13px 13px;display:flex;flex-direction:column;gap:9px;flex:1}
+.card h3{font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.35}
+.card .names{margin-top:2px;font-size:12px;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scores{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto}
+.sc{border:1px solid var(--line-soft);border-radius:8px;padding:7px 9px 8px;background:var(--panel2)}
+.sc .l{font-size:11px;color:var(--ink3);display:flex;justify-content:space-between;font-weight:600}
+.sc .v{font-size:17px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.3}
+.sc .track{height:4px;margin-top:5px}
+.sc.none .v{color:var(--ink3)}
+.meta{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink3)}
+.empty{grid-column:1/-1;padding:50px 16px;text-align:center;color:var(--ink2)}
+.empty.err{color:var(--warn)}
+.skel{height:320px;border:1px solid var(--line-soft);border-radius:12px;background:var(--panel2)}
+
+footer{max-width:1240px;margin:0 auto;padding:6px 14px 30px;display:flex;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink3);line-height:1.7}
+
+/* ── detail ── */
+dialog{margin:auto;border:1px solid var(--line);padding:0;width:min(980px,96vw);max-height:92vh;border-radius:12px;
+  background:var(--panel);color:var(--ink);box-shadow:0 12px 40px rgba(0,0,0,.25);overflow:hidden}
+dialog::backdrop{background:rgba(26,25,22,.45)}
+.dl{display:flex;flex-direction:column;max-height:92vh}
+.dl > .ph{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line-soft)}
+.dl > .ph h2{font-size:17px;font-weight:800;line-height:1.3}
+.dl > .ph .k{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--ink3);margin-top:3px}
+.dl > .ph code{font-size:11.5px;background:var(--panel2);border:1px solid var(--line-soft);padding:1px 6px;border-radius:5px;color:var(--ink2)}
+.dl .cols{display:grid;grid-template-columns:330px 1fr;min-height:0;overflow:hidden;flex:1}
+.dl .left{background:var(--panel2);border-right:1px solid var(--line-soft);overflow-y:auto}
+.dl .left img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;border-bottom:1px solid var(--line-soft)}
+.info{padding:14px 16px 18px;display:flex;flex-direction:column;gap:12px;font-size:12.5px;color:var(--ink2);line-height:1.6}
+.info .pb-label{margin-bottom:2px}
+.info a{word-break:break-all}
+.tags{display:flex;flex-wrap:wrap;gap:4px;max-height:150px;overflow-y:auto}
+.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:var(--panel);border:1px solid var(--line-soft);color:var(--ink2)}
+.dl .right{padding:14px 16px 18px;overflow-y:auto;display:flex;flex-direction:column;gap:16px;min-width:0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+.kpi{border:1px solid var(--line-soft);border-radius:8px;padding:9px 11px;background:var(--panel2)}
+.kpi .l{font-size:11px;color:var(--ink3);font-weight:600}
+.kpi .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--ink)}
+.files{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.file{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;
+  color:var(--ink);text-decoration:none;transition:all .12s}
+.file:hover{border-color:var(--acc);background:var(--acc-soft)}
+.file .ic{width:34px;height:34px;border-radius:7px;display:grid;place-items:center;font:700 10px/1 var(--mono);
+  flex:none;background:var(--panel2);border:1px solid var(--line-soft);color:var(--ink2)}
+.file.main .ic{background:var(--acc);border-color:var(--acc);color:#fff}
+.file b{display:block;font-size:13px}
+.file small{display:block;font-size:11px;color:var(--ink3)}
+
+@media (max-width:900px){
+  .intro{grid-template-columns:1fr}
+  .dl{overflow-y:auto}
+  .dl .cols{display:flex;flex-direction:column;overflow:visible}
+  .dl .left{order:2;border-right:0;border-top:1px solid var(--line-soft);overflow:visible}
+  .dl .left img{display:none}
+  .dl .right{overflow:visible}
+}
+@media (max-width:700px){
+  body{font-size:15px}
+  header nav .navlink.ext-link{display:none}
+  .page{padding:8px}
+  .intro h2{font-size:20px}
+  .tools{grid-template-columns:1fr 120px}
+  .tools .inp{font-size:16px}
+  #grid{grid-template-columns:1fr}
+  dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0}
+  .dl{max-height:100dvh}
+  .kpis{grid-template-columns:repeat(3,1fr)}
+}
+
+/* dark screens: the same tokens, a dark sheet (as in easydetect lab) */
+@media (prefers-color-scheme:dark){
+  :root{
+    color-scheme:dark;
+    --paper:#1A1916; --line-d:#8A7F6C; --pen-blue:#2C7A9C; --pen-blue-d:#8DC6DF; --pen-red:#EE8A63;
+    --bg:var(--paper); --panel:#23211D; --panel2:#2A2824;
+    --line:#7A7164; --line-soft:#3A3732;
+    --ink:#EDE8DF; --ink2:#D2CBBF; --ink3:#ABA294;
+    --acc-soft:#1D3441; --ok:#6CC08F; --ok-soft:#1C2E23;
+    --shadow:0 1px 0 rgba(0,0,0,.4);
+    --toast-bg:#E8E2D6; --toast-ink:#23211D;
+  }
+  body{background-image:radial-gradient(rgba(141,198,223,.06) 1px,transparent 1px)}
+  .db.go:hover{background:#23698A;border-color:#23698A}
+  .navlink:hover{border-bottom-color:#4A453D}
+  dialog::backdrop{background:rgba(0,0,0,.6)}
+}

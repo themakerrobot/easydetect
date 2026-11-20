@@ -48,6 +48,7 @@
         <input class="inp" type="search" id="q" aria-label="search">
         <select class="inp" id="sort" aria-label="sort"></select>
       </div>
+      <div class="chips tasks" id="tasks"></div>
       <div class="chips" id="chips"></div>
       <div id="grid"><div class="skel"></div></div>
     </div>
@@ -86,7 +87,7 @@ const T = {
     lead: "No PyTorch, no GPU. Install easydetect and name a model: it downloads once and runs on any CPU, an Intel NPU or a Raspberry Pi.",
     ctaBrowse: "Browse models", ctaDocs: "Docs on GitHub", datasets: "datasets", models: "models", torch: "PyTorch needed",
     licShort: "Weights are Apache-2.0. Each dataset keeps its own licence: check it before commercial use.",
-    browseTitle: "Models", browseSub: "ed-s · 320 px (with 8-bit) and 640 px · mAP50-95 on each val split",
+    browseTitle: "Models", browseSub: "ed-s · 320 px (with 8-bit) and 640 px · scored COCO's way on each val split",
     search: "Search a dataset, class or category (helmet, cell, fish…)", all: "All",
     sortName: "By category", sortScore: "Best score", sortClasses: "Most classes", classes: "classes",
     none: "No model matches. Try another word.", err: "Could not read the list from Hugging Face.", open: "Open it there",
@@ -99,6 +100,10 @@ const T = {
     fOnnx: "ONNX", fOnnxS: "any CPU", fInt8: "ONNX 8-bit", fInt8S: "Raspberry Pi", fOv: "OpenVINO", fOvS: "Intel CPU · GPU · NPU", fPt: "PyTorch", fPtS: "to fine-tune",
     rf: "Roboflow 100", cWebcam: "straight from a webcam", cList: "what is here, with scores",
     cFile: "a file you downloaded: its path", cHub: "by name: downloads once",
+    tAll: "All tasks", detect: "Detection", segment: "Segmentation", pose: "Keypoints",
+    mDetect: "mAP50-95", mSegment: "mask mAP50-95", mPose: "OKS AP", boxScore: "box mAP50-95",
+    fHead: "with {0} beside it, one folder", cBeside: "{0} next to it, in the same folder",
+    anyMask: "Any model draws masks with task=\"segment\" (MobileSAM, not trained or scored on this dataset).",
   },
   ko: {
     navModels: "모델", introHead: "공개 데이터셋 모델", tryHead: "바로 써 보기",
@@ -106,7 +111,7 @@ const T = {
     lead: "PyTorch도 GPU도 필요 없어요. easydetect를 깔고 모델 이름만 쓰면 돼요. 한 번 받아 두면 CPU, 인텔 NPU, 라즈베리파이에서 돌아가요.",
     ctaBrowse: "모델 둘러보기", ctaDocs: "GitHub 문서", datasets: "데이터셋", models: "모델", torch: "PyTorch 필요",
     licShort: "가중치는 Apache-2.0이에요. 데이터셋 라이선스는 따로예요. 상업용이면 먼저 확인해 주세요.",
-    browseTitle: "모델", browseSub: "ed-s · 320 px(8비트 포함)와 640 px · 각 val의 mAP50-95",
+    browseTitle: "모델", browseSub: "ed-s · 320 px(8비트 포함)와 640 px · 각 val을 COCO 방식으로 채점",
     search: "데이터셋 · 클래스 · 분야로 찾기 (helmet, cell, fish…)", all: "전체",
     sortName: "분야순", sortScore: "점수순", sortClasses: "클래스 많은 순", classes: "클래스",
     none: "맞는 모델이 없어요. 다른 말로 찾아보세요.", err: "Hugging Face에서 목록을 못 읽었어요.", open: "거기서 보기",
@@ -119,13 +124,22 @@ const T = {
     fOnnx: "ONNX", fOnnxS: "모든 CPU", fInt8: "ONNX 8비트", fInt8S: "라즈베리파이", fOv: "OpenVINO", fOvS: "인텔 CPU · GPU · NPU", fPt: "PyTorch", fPtS: "이어서 학습",
     rf: "Roboflow 100", cWebcam: "웹캠으로 바로", cList: "목록과 점수",
     cFile: "받아 둔 파일이면 그 경로", cHub: "이름으로: 한 번만 받아요",
+    tAll: "모든 타입", detect: "감지", segment: "세그멘테이션", pose: "포즈",
+    mDetect: "mAP50-95", mSegment: "마스크 mAP50-95", mPose: "OKS AP", boxScore: "상자 mAP50-95",
+    fHead: "{0}와 함께 받아요. 한 폴더에 두세요", cBeside: "{0}가 같은 폴더에 있어야 해요",
+    anyMask: "어느 모델이든 task=\"segment\"로 범용 마스크를 만들 수 있어요(MobileSAM, 이 데이터셋으로 학습·채점 안 함).",
   },
 };
 let lang = (() => { try { return localStorage.getItem("hub.lang"); } catch { return null; } })()
   || ((navigator.language || "").toLowerCase().startsWith("ko") ? "ko" : "en");
 const t = (k) => (T[lang] && T[lang][k]) ?? T.en[k] ?? k;
 const catName = (c) => (lang === "ko" ? CAT_KO[c] || c : c);
-const S = { datasets: [], q: "", cat: "", sort: "name" };
+const S = { datasets: [], q: "", cat: "", task: "", sort: "name" };
+/* a hub model's task: detect (boxes), segment (the detector and a mask decoder)
+   or pose (the detector and a keypoint network), each in a folder of its own */
+const TASKS = ["detect", "segment", "pose"];
+const HEAD = { segment: "mask_decoder.onnx", pose: "pose.onnx" };
+const METRIC = { detect: "mDetect", segment: "mSegment", pose: "mPose" };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const f3 = (v) => (typeof v === "number" ? v.toFixed(3) : "—");
@@ -180,8 +194,10 @@ document.addEventListener("click", (e) => {
   if (tb) { box.dataset.on = tb.dataset.i; term(box.id, tabs); return; }
   if (e.target.closest(".copy")) copy(tabs[Number(box.dataset.on || 0)][1]);
 });
-function pythonCode(hub, file) {
-  return `from easydetect import Detector\n\n# ${t("cHub")}\nmodel = Detector("${hub}")\n# ${t("cFile")}\n# model = Detector("${file}")\n\nresult = model("photo.jpg")[0]\nresult.show()`;
+function pythonCode(hub, file, task = "detect") {
+  const arg = task === "detect" ? "" : `, task="${task}"`;
+  const beside = HEAD[task] ? `\n# ${t("cBeside").replace("{0}", HEAD[task])}` : "";
+  return `from easydetect import Detector\n\n# ${t("cHub")}\nmodel = Detector("${hub}")\n# ${t("cFile")}${beside}\n# model = Detector("${file}"${arg})\n\nresult = model("photo.jpg")[0]\nresult.show()`;
 }
 function heroTerm() {
   term("hero-term", [
@@ -201,15 +217,18 @@ async function load() {
     for (const [key, m] of Object.entries(await res.json())) {
       const [id, variant] = key.split("/");
       if (!by.has(id)) by.set(id, { id, variants: [], meta: m });
-      by.get(id).variants.push({ key, name: variant, ...m });
+      const task = m.task || "detect";
+      by.get(id).variants.push({ key, name: variant, ...m, task,
+        score: m.score ?? m.map50_95, score_int8: m.score_int8 ?? m.map50_95_int8 });
     }
     S.datasets = [...by.values()].map((d) => {
-      d.variants.sort((a, b) => (a.imgsz || 0) - (b.imgsz || 0));
+      d.variants.sort((a, b) => TASKS.indexOf(a.task) - TASKS.indexOf(b.task) || (a.imgsz || 0) - (b.imgsz || 0));
+      d.tasks = TASKS.filter((k) => d.variants.some((v) => v.task === k));
+      d.meta = (d.variants.find((v) => v.task === "detect") || d.variants[0]);
       d.title = d.meta.title || d.id; d.name = prettyName(d.id, d.title); d.rf = d.id.startsWith("rf100-");
       d.category = d.meta.category || "Other";
       d.classes = Object.values(d.meta.classes || {}).map(String);
-      d.v320 = d.variants.find((v) => v.imgsz === 320); d.v640 = d.variants.find((v) => v.imgsz === 640);
-      d.best = Math.max(...d.variants.map((v) => v.map50_95 || 0));
+      d.of = (task, size) => d.variants.find((v) => v.task === task && v.imgsz === size);
       return d;
     });
     renderAll();
@@ -220,10 +239,19 @@ async function load() {
       <a href="${HF}/${REPO}" target="_blank" rel="noopener">${esc(t("open"))}</a></div>`;
   }
 }
-function hay(d) { return [d.id, d.name, d.title, d.category, CAT_KO[d.category] || "", ...d.classes].join(" ").toLowerCase(); }
+function hay(d) { return [d.id, d.name, d.title, d.category, CAT_KO[d.category] || "", ...d.tasks, ...d.tasks.map((k) => T.ko[k]), ...d.classes].join(" ").toLowerCase(); }
 
 /* ---------- list ---------- */
-function renderAll() { renderFacts(); renderChips(); renderGrid(); }
+function renderAll() { renderFacts(); renderTasks(); renderChips(); renderGrid(); }
+const shown = () => S.task || "detect";
+function best(d) { return Math.max(0, ...d.variants.filter((v) => v.task === shown()).map((v) => v.score || 0)); }
+function renderTasks() {
+  const count = (k) => S.datasets.filter((d) => d.tasks.includes(k)).length;
+  const have = TASKS.filter((k) => count(k));
+  $("tasks").hidden = have.length < 2;
+  $("tasks").innerHTML = [`<button type="button" class="db${S.task ? "" : " on"}" data-task="">${esc(t("tAll"))}</button>`,
+    ...have.map((k) => `<button type="button" class="db${S.task === k ? " on" : ""}" data-task="${k}">${esc(t(k))} <small>${count(k)}</small></button>`)].join("");
+}
 function renderFacts() {
   const n = S.datasets.length;
   const models = S.datasets.reduce((k, d) => k + d.variants.length, 0);
@@ -232,20 +260,22 @@ function renderFacts() {
 }
 function renderChips() {
   const count = new Map();
-  for (const d of S.datasets) count.set(d.category, (count.get(d.category) || 0) + 1);
-  $("chips").innerHTML = [`<button type="button" class="db${S.cat ? "" : " on"}" data-cat="">${esc(t("all"))} <small>${S.datasets.length}</small></button>`,
+  const pool = S.datasets.filter((d) => !S.task || d.tasks.includes(S.task));
+  for (const d of pool) count.set(d.category, (count.get(d.category) || 0) + 1);
+  $("chips").innerHTML = [`<button type="button" class="db${S.cat ? "" : " on"}" data-cat="">${esc(t("all"))} <small>${pool.length}</small></button>`,
     ...ORDER.filter((c) => count.has(c)).map((c) => `<button type="button" class="db${S.cat === c ? " on" : ""}" data-cat="${esc(c)}">${esc(catName(c))} <small>${count.get(c)}</small></button>`)].join("");
 }
 function sc(v, size) {
   if (!v) return `<div class="sc none"><div class="l">${size} ${t("px")}</div><div class="v">—</div><div class="track"></div><div class="i8">&nbsp;</div></div>`;
-  const i8 = typeof v.map50_95_int8 === "number" ? `${esc(t("int8"))} ${f3(v.map50_95_int8)}` : "&nbsp;";
-  return `<div class="sc"><div class="l">${size} ${t("px")}</div><div class="v">${f3(v.map50_95)}</div>
-    <div class="track"><div class="fill" style="width:${Math.round((v.map50_95 || 0) * 100)}%"></div></div><div class="i8">${i8}</div></div>`;
+  const i8 = typeof v.score_int8 === "number" ? `${esc(t("int8"))} ${f3(v.score_int8)}` : "&nbsp;";
+  return `<div class="sc"><div class="l">${size} ${t("px")}</div><div class="v">${f3(v.score)}</div>
+    <div class="track"><div class="fill" style="width:${Math.round((v.score || 0) * 100)}%"></div></div><div class="i8">${i8}</div></div>`;
 }
 function renderGrid() {
   const words = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const list = S.datasets.filter((d) => (!S.cat || d.category === S.cat) && (!words.length || words.every((w) => hay(d).includes(w))));
-  list.sort(S.sort === "score" ? (a, b) => b.best - a.best
+  const list = S.datasets.filter((d) => (!S.task || d.tasks.includes(S.task)) && (!S.cat || d.category === S.cat)
+    && (!words.length || words.every((w) => hay(d).includes(w))));
+  list.sort(S.sort === "score" ? (a, b) => best(b) - best(a)
           : S.sort === "classes" ? (a, b) => b.classes.length - a.classes.length
           : (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category) || a.rf - b.rf || a.name.localeCompare(b.name));
   $("grid").innerHTML = list.length ? list.map((d) => `
@@ -254,8 +284,8 @@ function renderGrid() {
         <span class="badge">${esc(catName(d.category))}</span>${d.rf ? `<span class="badge r">RF100</span>` : ""}</div>
       <div class="body">
         <div><h3>${esc(d.name)}</h3><div class="names">${d.classes.length} ${esc(t("classes"))} · ${esc(d.classes.slice(0, 6).join(", "))}</div></div>
-        <div class="scores">${sc(d.v320, 320)}${sc(d.v640, 640)}</div>
-        <div class="meta"><span>${esc(shortLicence(d.meta.license))}</span><span>ed-s</span></div>
+        <div class="scores">${sc(d.of(shown(), 320), 320)}${sc(d.of(shown(), 640), 640)}</div>
+        <div class="meta"><span>${esc(shortLicence(d.meta.license))}</span><span>${d.tasks.map((k) => esc(t(k))).join(" · ")}</span></div>
       </div>
     </button>`).join("") : `<div class="empty">${esc(t("none"))}</div>`;
 }
@@ -269,9 +299,11 @@ async function sizesOf(key) {
     return Object.fromEntries((await r.json()).map((e) => [e.path.split("/").pop(), (e.lfs && e.lfs.size) || e.size || 0]));
   } catch { return {}; }
 }
-function openDetail(id, size) {
+function openDetail(id, size, task) {
   const d = S.datasets.find((x) => x.id === id); if (!d) return;
-  const v = (size && d.variants.find((x) => x.imgsz === size)) || d.v640 || d.variants.at(-1);
+  task = task || (S.task && d.tasks.includes(S.task) ? S.task : d.tasks[0]);
+  const mine = d.variants.filter((x) => x.task === task);
+  const v = (size && mine.find((x) => x.imgsz === size)) || mine.find((x) => x.imgsz === 640) || mine.at(-1);
   current = { d, v, sizes: {} };
   history.replaceState(null, "", "#" + encodeURIComponent(id));
   drawDetail();
@@ -288,22 +320,28 @@ function drawFiles() {
   const { v } = current; const n = v.name;
   const have = new Set(v.files || []); const has = (f) => !have.size || have.has(f);
   const box = $("files"); if (!box) return;
+  // a mask or keypoint model is its detector and the network beside it: both come
+  const head = HEAD[v.task] ? [HEAD[v.task]] : [];
+  const sub = (s) => head.length ? `${s} · ${t("fHead").replace("{0}", head[0])}` : s;
   box.innerHTML = [
-    has(`${n}.onnx`) ? fileCard("ONNX", [`${n}.onnx`], t("fOnnx"), t("fOnnxS"), true) : "",
-    has(`${n}-int8.onnx`) && v.map50_95_int8 != null ? fileCard("INT8", [`${n}-int8.onnx`], t("fInt8"), t("fInt8S")) : "",
-    has(`${n}.xml`) ? fileCard("OV", [`${n}.xml`, `${n}.bin`, `${n}.names.json`], t("fOv"), t("fOvS")) : "",
+    has(`${n}.onnx`) ? fileCard("ONNX", [`${n}.onnx`, ...head], t("fOnnx"), sub(t("fOnnxS")), true) : "",
+    has(`${n}-int8.onnx`) && v.score_int8 != null ? fileCard("INT8", [`${n}-int8.onnx`, ...head], t("fInt8"), sub(t("fInt8S"))) : "",
+    has(`${n}.xml`) ? fileCard("OV", [`${n}.xml`, `${n}.bin`, `${n}.names.json`, ...head], t("fOv"), sub(t("fOvS"))) : "",
     has(`${n}.pt`) ? fileCard("PT", [`${n}.pt`], t("fPt"), t("fPtS")) : "",
   ].join("");
 }
 function drawDetail() {
   const { d, v } = current; const m = d.meta; const hub = `hub:${d.id}/${v.name}`;
   const src = /^https?:\/\//.test(m.source || "") ? m.source : "";
-  const i8 = v.map50_95_int8 != null;
-  const fileNote = `# ${t("cFile")}`;
+  const i8 = v.score_int8 != null;
+  const task = v.task; const arg = task === "detect" ? "" : `, task="${task}"`;
+  const fileNote = `# ${t("cFile")}` + (HEAD[task] ? ` (${HEAD[task]})` : "");
+  const sizes = d.variants.filter((x) => x.task === task);
   $("detail").innerHTML = `<div class="dl">
     <div class="ph"><div class="grow"><h2>${esc(d.name)}</h2>
       <div class="k"><span class="badge">${esc(catName(d.category))}</span>${d.rf ? `<span>${esc(t("rf"))}</span>` : ""}<code>${esc(hub)}</code></div></div>
-      ${d.variants.length > 1 ? `<div class="row">${d.variants.map((x) => `<button type="button" data-size="${x.imgsz}" class="db${x === v ? " on" : ""}">${x.imgsz} ${t("px")}</button>`).join("")}</div>` : ""}
+      ${d.tasks.length > 1 ? `<div class="row">${d.tasks.map((k) => `<button type="button" data-task="${k}" class="db${k === task ? " on" : ""}">${esc(t(k))}</button>`).join("")}</div>` : ""}
+      ${sizes.length > 1 ? `<div class="row">${sizes.map((x) => `<button type="button" data-size="${x.imgsz}" class="db${x === v ? " on" : ""}">${x.imgsz} ${t("px")}</button>`).join("")}</div>` : ""}
       <button type="button" class="hbtn" id="close" aria-label="${esc(t("close"))}">✕</button></div>
     <div class="cols">
     <aside class="left">
@@ -320,21 +358,23 @@ function drawDetail() {
     </aside>
     <div class="right">
       <div class="kpis">
-        <div class="kpi"><div class="l">${esc(t("score"))}</div><div class="v">${f3(v.map50_95)}</div></div>
-        ${i8 ? `<div class="kpi"><div class="l">${esc(t("int8"))}</div><div class="v">${f3(v.map50_95_int8)}</div></div>` : ""}
+        <div class="kpi"><div class="l">${esc(t(METRIC[task]))}</div><div class="v">${f3(v.score)}</div></div>
+        ${i8 ? `<div class="kpi"><div class="l">${esc(t("int8"))}</div><div class="v">${f3(v.score_int8)}</div></div>` : ""}
+        ${task !== "detect" && typeof v.map50_95 === "number" ? `<div class="kpi"><div class="l">${esc(t("boxScore"))}</div><div class="v">${f3(v.map50_95)}</div></div>` : ""}
         ${typeof v.conf === "number" ? `<div class="kpi"><div class="l">${esc(t("conf"))}</div><div class="v">${v.conf}</div></div>` : ""}
         <div class="kpi"><div class="l">${esc(t("classesAll"))}</div><div class="v">${d.classes.length}</div></div>
       </div>
       <div><div class="pb-label">${esc(t("download"))}</div><div class="files" id="files"></div></div>
-      <div><div class="pb-label">${esc(t("useIt"))}</div><div class="term" id="dterm"></div></div>
+      <div><div class="pb-label">${esc(t("useIt"))}</div><div class="term" id="dterm"></div>
+        ${!d.tasks.includes("segment") ? `<p class="hint">${esc(t("anyMask"))}</p>` : ""}</div>
     </div></div></div>`;
   drawFiles();
   const n = v.name;
   term("dterm", [
-    [t("python"), `# pip install -U easydetect\n` + pythonCode(hub, `${n}.onnx`)],
-    [t("cli"), `easydetect predict model=${hub} source=photo.jpg\n# ${t("cWebcam")}\neasydetect predict model=${hub} source=0\n${fileNote}\neasydetect predict model=${n}.onnx source=photo.jpg`],
-    ...(i8 ? [[t("pi"), `Detector("${hub}-int8", backend="onnxruntime")\n${fileNote}\nDetector("${n}-int8.onnx", backend="onnxruntime")`]] : []),
-    [t("npu"), `Detector("${hub}.xml", device="NPU")\n${fileNote} (.bin, .names.json)\nDetector("${n}.xml", device="NPU")`],
+    [t("python"), `# pip install -U easydetect\n` + pythonCode(hub, `${n}.onnx`, task)],
+    [t("cli"), `easydetect predict model=${hub} source=photo.jpg\n# ${t("cWebcam")}\neasydetect predict model=${hub} source=0\n${fileNote}\neasydetect predict model=${n}.onnx${arg ? ` task=${task}` : ""} source=photo.jpg`],
+    ...(i8 ? [[t("pi"), `Detector("${hub}-int8", backend="onnxruntime")\n${fileNote}\nDetector("${n}-int8.onnx"${arg}, backend="onnxruntime")`]] : []),
+    [t("npu"), `Detector("${hub}.xml", device="NPU")\n${fileNote} (.bin, .names.json)\nDetector("${n}.xml"${arg}, device="NPU")`],
     [t("tune"), `pip install -U "easydetect[train]"\n\nmodel = Detector("${hub}.pt")\n${fileNote}\n# model = Detector("${n}.pt")\nmodel.train(data="my_data.yaml", epochs=50, imgsz=${v.imgsz})`],
     [t("folder"), `hf download ${REPO} --include "${v.key}/*" --local-dir hub`],
   ]);
@@ -356,10 +396,12 @@ $("lang").addEventListener("click", () => { lang = lang === "ko" ? "en" : "ko"; 
 let qt; $("q").addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { S.q = $("q").value; renderGrid(); }, 90); });
 $("sort").addEventListener("change", () => { S.sort = $("sort").value; renderGrid(); });
 $("chips").addEventListener("click", (e) => { const b = e.target.closest(".db"); if (!b) return; S.cat = b.dataset.cat; renderChips(); renderGrid(); });
+$("tasks").addEventListener("click", (e) => { const b = e.target.closest(".db"); if (!b) return; S.task = b.dataset.task; S.cat = ""; renderTasks(); renderChips(); renderGrid(); });
 $("grid").addEventListener("click", (e) => { const c = e.target.closest(".card"); if (c) openDetail(c.dataset.id); });
 $("detail").addEventListener("click", (e) => {
   if (e.target === $("detail") || e.target.closest("#close")) return $("detail").close();
-  const s = e.target.closest("[data-size]"); if (s) return openDetail(current.d.id, Number(s.dataset.size));
+  const k = e.target.closest("[data-task]"); if (k) return openDetail(current.d.id, current.v.imgsz, k.dataset.task);
+  const s = e.target.closest("[data-size]"); if (s) return openDetail(current.d.id, Number(s.dataset.size), current.v.task);
   const a = e.target.closest("a[data-files]");
   if (a) { e.preventDefault(); fetchFiles(a.dataset.files.split(" ")); }
 });

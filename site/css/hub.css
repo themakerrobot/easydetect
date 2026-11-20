@@ -171,3 +171,6 @@ dialog::backdrop{background:rgba(26,25,22,.45)}
   .navlink:hover{border-bottom-color:#4A453D}
   dialog::backdrop{background:rgba(0,0,0,.6)}
 }
+
+/* task row above the categories: detection, segmentation, keypoints */
+.chips.tasks{margin-top:12px;padding-bottom:10px;border-bottom:1px solid var(--line-soft)}

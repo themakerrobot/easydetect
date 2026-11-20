@@ -24,23 +24,20 @@
 </header>
 
 <div class="page">
-  <section class="intro">
-    <div class="pan">
-      <div class="ph" data-t="introHead">공개 데이터셋 모델</div>
-      <div class="pb">
-        <h2 data-t-html="title"></h2>
-        <p class="lead" data-t="lead"></p>
-        <div class="facts" id="facts"></div>
-        <div class="row">
-          <a class="db go" href="#models" data-t="ctaBrowse">모델 둘러보기</a>
-          <a class="db" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener" data-t="ctaDocs">GitHub 문서</a>
-        </div>
-        <p class="hint lic" data-t="licShort"></p>
+  <section class="pan intro">
+    <div class="side">
+      <h2 data-t-html="title"></h2>
+      <p class="lead" data-t="lead"></p>
+      <div class="facts" id="facts"></div>
+      <div class="row">
+        <a class="db go" href="#models" data-t="ctaBrowse">모델 둘러보기</a>
+        <a class="db" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener" data-t="ctaDocs">GitHub 문서</a>
       </div>
+      <p class="hint lic" data-t="licShort"></p>
     </div>
-    <div class="pan">
-      <div class="ph" data-t="tryHead">바로 써 보기</div>
-      <div class="pb"><div class="term" id="hero-term"></div></div>
+    <div class="try">
+      <div class="pb-label" data-t="tryHead">바로 써 보기</div>
+      <div class="term" id="hero-term"></div>
     </div>
   </section>
 
@@ -240,10 +237,10 @@ function renderChips() {
     ...ORDER.filter((c) => count.has(c)).map((c) => `<button type="button" class="db${S.cat === c ? " on" : ""}" data-cat="${esc(c)}">${esc(catName(c))} <small>${count.get(c)}</small></button>`)].join("");
 }
 function sc(v, size) {
-  if (!v) return `<div class="sc none"><div class="l"><span>${size} ${t("px")}</span></div><div class="v">—</div><div class="track"></div></div>`;
-  const i8 = typeof v.map50_95_int8 === "number" ? `<span>${esc(t("int8"))} ${f3(v.map50_95_int8)}</span>` : "";
-  return `<div class="sc"><div class="l"><span>${size} ${t("px")}</span>${i8}</div><div class="v">${f3(v.map50_95)}</div>
-    <div class="track"><div class="fill" style="width:${Math.round((v.map50_95 || 0) * 100)}%"></div></div></div>`;
+  if (!v) return `<div class="sc none"><div class="l">${size} ${t("px")}</div><div class="v">—</div><div class="track"></div><div class="i8">&nbsp;</div></div>`;
+  const i8 = typeof v.map50_95_int8 === "number" ? `${esc(t("int8"))} ${f3(v.map50_95_int8)}` : "&nbsp;";
+  return `<div class="sc"><div class="l">${size} ${t("px")}</div><div class="v">${f3(v.map50_95)}</div>
+    <div class="track"><div class="fill" style="width:${Math.round((v.map50_95 || 0) * 100)}%"></div></div><div class="i8">${i8}</div></div>`;
 }
 function renderGrid() {
   const words = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);

@@ -487,6 +487,25 @@ def ap10k(folder: Path) -> Path:
     return lay.finish(names)
 
 
+def ap10k_pose_yaml(folder: Path) -> Path:
+    """``<folder>/pose.yaml``: AP-10K's keypoint labels as easydetect reads a
+    keypoint dataset (``kpt_names``, a skeleton counted from 0, its OKS sigmas)."""
+    src = folder / "src"
+    cfg = yaml.safe_load(next(src.rglob("*.yaml")).read_text())
+    base = next(p.parent for p in src.rglob("images") if (p / "train").is_dir())
+    k = int(cfg["kpt_shape"][0])
+    skeleton = [list(map(int, e)) for e in cfg.get("skeleton") or []]
+    if skeleton and max(max(e) for e in skeleton) == k:          # counted from 1
+        skeleton = [[a - 1, b - 1] for a, b in skeleton]
+    out = folder / "pose.yaml"
+    out.write_text(yaml.safe_dump({
+        "path": str(base.resolve()), "train": "images/train", "val": "images/val",
+        "names": cfg["names"], "kpt_shape": cfg["kpt_shape"], "flip_idx": cfg["flip_idx"],
+        "kpt_names": cfg.get("keypoints"), "skeleton": skeleton,
+        "oks_sigmas": cfg.get("oks_sigmas")}, allow_unicode=True, sort_keys=False))
+    return out
+
+
 def _get(url: str, dest: Path, tries: int = 4) -> bool:
     """One file over http, into place only when whole."""
     import time
@@ -710,7 +729,9 @@ ORDER = QUICK + BIG
 #: added after the first run: fetched on their own (``--new``) until they train;
 #: the big downloads take the second lane
 NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet"]
+QUICK += ["ap10k"]
 BIG += ["fashionpedia", "izembek", "fathomnet"]
+ORDER = QUICK + BIG
 
 
 def _lock_path(key: str, root: Path) -> Path:

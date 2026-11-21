@@ -43,8 +43,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 #: datasets the hub has whose annotations outline objects / place keypoints
-SEG = ("coco", "taco", "lvis")
-POSE = ("coco",)
+SEG = ("coco", "taco", "lvis", "fashionpedia")
+#: COCO's people take easydetect's keypoint network as it is; the others get
+#: one trained on their own keypoints (long_run's hub-pose-train)
+POSE = ("coco", "ap10k")
 #: train pictures the decoder learns from: it starts from MobileSAM and only
 #: its small decoder trains, on embeddings cached at 2 MB a picture
 TRAIN_PICTURES = 10000
@@ -99,6 +101,25 @@ def _lvis(folder: Path, coco: Path):
     return cats, splits
 
 
+def _fashionpedia(folder: Path):
+    """Fashionpedia's masks on the pictures hub_data.py's fashionpedia() trains
+    on: those whose own licence allows any use."""
+    sys.path.insert(0, str(HERE))
+    from hub_data import FASHIONPEDIA_PICTURES
+
+    files = {p.name: p for d in ("src-train", "src-val") for p in (folder / d).rglob("*.jpg")}
+    cats, splits = None, {}
+    for split in ("train", "val"):
+        ann = json.loads((folder / f"ann-{split}.json").read_text())
+        free = {x["id"] for x in ann["licenses"] if x["name"] in FASHIONPEDIA_PICTURES}
+        cats = cats or sorted(ann["categories"], key=lambda c: c["id"])
+        splits[split] = ([im for im in ann["images"] if im.get("license") in free],
+                         ann["annotations"],
+                         lambda im: files.get(Path(im["file_name"]).name, Path("/nonexistent")),
+                         None)
+    return cats, splits
+
+
 def sources(key: str, root: Path, coco: Path):
     """``(categories in class order, {split: (images, annotations, path_of, unknown_of)})``."""
     if key == "coco":
@@ -107,6 +128,8 @@ def sources(key: str, root: Path, coco: Path):
         return _taco(root / "taco")
     if key == "lvis":
         return _lvis(root / "lvis", coco)
+    if key == "fashionpedia":
+        return _fashionpedia(root / "fashionpedia")
     raise KeyError(f"{key}: no masks on the hub's list (those with: {', '.join(SEG)})")
 
 
@@ -315,6 +338,41 @@ def score_pose(model: str, pose: str, coco: Path, limit: int | None = None,
     r = evaluate_pipeline(str(coco), Path(pose), model, device=device, limit=limit,
                           pycocotools=True)
     return {"oks_ap": round(float(r["coco_ap"]), 4), "oks_ap50": round(float(r["coco_ap50"]), 4)}
+
+
+def score_pose_data(model: str, pose: str, data: str, limit: int | None = None,
+                    device: str = "CPU") -> dict:
+    """OKS AP on a keypoint dataset's val split (``data``, Ultralytics' pose
+    format) the way it is used: the detector's boxes of the classes the
+    keypoint model is for, a keypoint set each, every picture's misses and
+    false boxes counted, with the model's own OKS sigmas."""
+    import cv2
+
+    from easydetect import Detector
+    from easydetect.data.keypoints import load_yolo
+    from easydetect.pose import KeypointAP, KeypointEstimator, keypoint_rows
+
+    estimator = KeypointEstimator(pose, device=device)
+    spec = estimator.spec
+    images, people = load_yolo(data, "val", spec)
+    detector = Detector(model, device=device, verbose=False)
+    ap = KeypointAP(sigmas=spec.sigmas)
+    ids = sorted(images)[:limit] if limit else sorted(images)
+    k = len(spec)
+    for image_id in ids:
+        img = cv2.imread(str(images[image_id]))
+        r = detector(img, conf=0.05, iou=0.7, max_det=100, verbose=False)[0]
+        rows = keypoint_rows(spec, r.names, r.boxes.cls)
+        boxes, box_conf = r.boxes.xyxy[rows], r.boxes.conf[rows]
+        xy, conf = estimator(img, boxes)
+        score = np.array([b * (c[c > 0.2].mean() if (c > 0.2).any() else 0.0)
+                          for b, c in zip(box_conf, conf, strict=True)])
+        anns = people.get(image_id, [])
+        ap.add(xy, score, np.array([a["keypoints"] for a in anns], np.float64).reshape(-1, k, 3),
+               np.array([a["area"] for a in anns]), np.zeros(len(anns), bool),
+               np.array([a["bbox"] for a in anns], np.float64).reshape(-1, 4))
+    r = ap.compute()
+    return {"oks_ap": round(float(r["ap"]), 4), "oks_ap50": round(float(r.get("ap50", 0.0)), 4)}
 
 
 def main(argv: list[str] | None = None) -> int:

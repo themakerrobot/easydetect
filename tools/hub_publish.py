@@ -104,8 +104,10 @@ def _sample_score(result, task: str) -> float | None:
     areas = wh[:, 0] * wh[:, 1]
     if task == "pose":
         names = result.names or {}
-        people = [i for i, c in enumerate(np.asarray(result.boxes.cls).astype(int))
-                  if str(names.get(int(c), "")).lower() == "person"]
+        cls = np.asarray(result.boxes.cls).astype(int)
+        people = [i for i, c in enumerate(cls) if str(names.get(int(c), "")).lower() == "person"]
+        if not any(str(v).lower() == "person" for v in names.values()):
+            people = list(range(n))             # a keypoint set of its own (animals)
         if not 1 <= len(people) <= 3 or result.keypoints is None:
             return None
         placed = result.keypoints.data[people][..., 2] > 0.3
@@ -164,7 +166,7 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200, task: str = "de
 def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
           score_data: str | None = None, int8_from: Path | None = None,
           task: str = "detect", head: Path | None = None, truth: str | None = None,
-          coco: Path | None = None) -> dict:
+          coco: Path | None = None, pose_data: str | None = None) -> dict:
     """The files of one model in ``folder``; ``int8_from``: an 8-bit .onnx made
     already (a quantization-aware one) instead of quantizing this one. For
     ``task`` "segment" or "pose", ``head`` goes beside the detector and the
@@ -217,7 +219,7 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
     shutil.rmtree(work, ignore_errors=True)
     task_scores = {}
     if task != "detect":
-        from hub_tasks import score_pose, score_seg
+        from hub_tasks import score_pose, score_pose_data, score_seg
 
         beside = folder / f"{name}.{TASKS[task][1]}"   # what easydetect looks for beside it
         shutil.copyfile(head, beside)
@@ -227,6 +229,9 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
             if task == "segment":
                 r = score_seg(str(path), str(beside), truth, limit, backend="onnxruntime")
                 task_scores[kind] = r["mask_map50_95"]
+            elif pose_data:
+                r = score_pose_data(str(path), str(beside), pose_data, limit)
+                task_scores[kind] = r["oks_ap"]
             else:
                 r = score_pose(str(path), str(beside), coco, limit)
                 task_scores[kind] = r["oks_ap"]
@@ -615,6 +620,8 @@ def main() -> int:
     parser.add_argument("--truth", help="--task segment: hub_tasks.py's val.json to score on")
     parser.add_argument("--coco", default="~/datasets/coco",
                         help="--task pose: COCO 2017 (val2017 person keypoints) to score on")
+    parser.add_argument("--pose-data", help="--task pose: a keypoint data.yaml whose val split "
+                        "scores it (a keypoint set of its own; default: COCO's people)")
     parser.add_argument("--repo", default=REPO)
     parser.add_argument("--stage", default="~/hub-stage", help="where the files are built")
     parser.add_argument("--limit", type=int, help="val pictures to score (a quick try)")
@@ -659,7 +666,8 @@ def main() -> int:
                  int8_from, task=args.task,
                  head=Path(args.head).expanduser() if args.head else None,
                  truth=str(Path(args.truth).expanduser()) if args.truth else None,
-                 coco=Path(args.coco).expanduser())
+                 coco=Path(args.coco).expanduser(),
+                 pose_data=str(Path(args.pose_data).expanduser()) if args.pose_data else None)
     info.update(facts, category=category(args.dataset))
     (folder / "model.json").write_text(json.dumps(info, ensure_ascii=False, indent=2))
     print(json.dumps({k: v for k, v in info.items() if k != "classes"}, ensure_ascii=False))

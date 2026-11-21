@@ -266,7 +266,9 @@ from hub_data import RF100_SETS  # noqa: E402
 
 HUB_ORDER = ["coco", "bccd", "construction-ppe", "taco", "plantdoc", "gwhd",
              *(f"rf100-{_n}" for _n in RF100_SETS),
-             "doclaynet", "caltech-camera-traps", "lvis", "openimages"]
+             "doclaynet", "caltech-camera-traps", "lvis", "openimages",
+             # added after the first run (hub_data.py --new fetches them beside it)
+             "ap10k", "fashionpedia", "izembek", "fathomnet"]
 #: a training still improving at its last epochs goes on this much longer, once
 HUB_EXTEND = 1.5
 #: epochs and patience where the picture count does not decide them
@@ -288,7 +290,10 @@ HUB_TASKS = [
     *((f"hub-seg-train-{_k}", ["hub-seg-train", _k], [f"hub-seg-data-{_k}"]) for _k in HUB_SEG),
     *((f"hub-seg-{_k}-{_size}", ["hub-seg", _k, str(_size)],
        [f"hub-seg-train-{_k}", f"hub-{_k}-{_size}"]) for _k in HUB_SEG for _size in (320, 640)),
-    *((f"hub-pose-{_k}-{_size}", ["hub-pose", _k, str(_size)], [f"hub-{_k}-{_size}"])
+    *((f"hub-pose-train-{_k}", ["hub-pose-train", _k], [f"hub-{_k}-640"])
+      for _k in HUB_POSE if _k != "coco"),
+    *((f"hub-pose-{_k}-{_size}", ["hub-pose", _k, str(_size)],
+       [f"hub-{_k}-{_size}"] + ([f"hub-pose-train-{_k}"] if _k != "coco" else []))
       for _k in HUB_POSE for _size in (320, 640)),
 ]
 
@@ -672,7 +677,7 @@ def step_lab_form(root: Path, args) -> None:
 
 
 #: hub datasets too big to share the GPU with another training
-HUB_HEAVY = ("doclaynet", "caltech-camera-traps", "lvis", "openimages")
+HUB_HEAVY = ("doclaynet", "caltech-camera-traps", "lvis", "openimages", "izembek", "fathomnet")
 
 
 #: boxes a picture above which a dataset trains alone (it needs far more memory)
@@ -819,11 +824,54 @@ def step_hub_task(root: Path, args, task: str, key: str, size: str) -> None:
     if task == "segment":
         seg = Path(args.hub_root).expanduser() / f"{key}-seg"
         extra = ["--head", str(seg / "run" / "decoder.onnx"), "--truth", str(seg / "val.json")]
-    else:                                  # COCO's keypoint network, trained already
+    elif key == "coco":                    # COCO's keypoint network, trained already
         extra = ["--head", str(downloads.download_pose("s")), "--coco", args.coco]
+    else:                                  # the one hub-pose-train made, scored on its data
+        from hub_data import ap10k_pose_yaml
+
+        data_yaml = ap10k_pose_yaml(Path(args.hub_root).expanduser() / key)
+        extra = ["--head", str(root / "hub" / f"{key}-pose" / "pose.onnx"),
+                 "--pose-data", str(data_yaml)]
     _run([PY, "-u", str(HERE / "hub_publish.py"), "--weights", str(weights), "--data", str(data),
           "--dataset", key, "--size", str(size), "--stage", str(root / "hub-stage"),
           "--task", task, *extra, *(["--int8", str(int8)] if int8 else [])])
+
+
+#: the keypoint networks trained for the hub: (epochs, batch)
+HUB_POSE_TRAIN = (120, 128)
+
+
+def step_hub_pose_train(root: Path, args, key: str) -> None:
+    """A keypoint network on ``key``'s own keypoints (AP-10K's animals), from
+    ed-s's backbone, with the dataset's keypoint names, flip pairs, skeleton
+    and OKS sigmas inside: ``<root>/hub/<key>-pose/pose.onnx``."""
+    import math
+
+    import yaml
+    from hub_data import ap10k_pose_yaml
+
+    from easydetect.data.keypoints import KeypointDataset
+    from easydetect.pose import KeypointSpec
+    from easydetect.pose_trainer import train_keypoints
+
+    data = ap10k_pose_yaml(Path(args.hub_root).expanduser() / key)
+    cfg = yaml.safe_load(data.read_text())
+    names = cfg["names"]
+    spec = KeypointSpec(cfg["kpt_names"] or [f"kp{i}" for i in range(cfg["kpt_shape"][0])],
+                        cfg["flip_idx"], cfg["skeleton"], cfg.get("oks_sigmas"),
+                        sorted(int(k) for k in (names if isinstance(names, dict)
+                                                else range(len(names)))))
+    train_ds = KeypointDataset.from_yolo(data, "train", augment=True, spec=spec)
+    val_ds = KeypointDataset.from_yolo(data, "val", augment=False, spec=spec)
+    out = root / "hub" / f"{key}-pose"
+    epochs, batch = HUB_POSE_TRAIN
+    onnx = train_keypoints(train_ds, val_ds, out, size="s", init="ed-s", epochs=epochs,
+                           batch=batch, lr=1e-3 * math.sqrt(batch / 64), warmup=200,
+                           workers=args.workers, val_every=10,
+                           resume=(out / "last.pt").exists(), log=lambda m: print(m, flush=True))
+    if onnx is None:
+        raise RuntimeError(f"{key}: the keypoint network did not finish")
+    shutil.copyfile(onnx, out / "pose.onnx")
 
 
 def step_oi_data(root: Path, args) -> None:
@@ -1107,6 +1155,8 @@ def main():
             step_hub_task(root, args, "segment", *rest)
         elif kind == "hub-pose":
             step_hub_task(root, args, "pose", *rest)
+        elif kind == "hub-pose-train":
+            step_hub_pose_train(root, args, *rest)
         elif kind == "speed":
             step_speed(root, args)
         elif kind == "speed-s":

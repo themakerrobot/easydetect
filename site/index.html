@@ -100,7 +100,9 @@ const CAT_KO = {
 const T = {
   en: {
     navModels: "Models", navTry: "Try in the browser", navTryS: "Try it", ctaTry: "Try in the browser",
-    tryIt: "Try it in the browser", tryNote: "a picture, a video or your webcam, nothing uploaded",
+    tryIt: "Try it in the browser", tryNote: "runs in this browser, nothing is uploaded",
+    tryHere: "Try it here", tryBig: "Open the full page", miniCam: "▶ Webcam", miniCamOff: "■ Stop", miniPic: "Picture",
+    miniLoad: "Downloading", miniRt: "Starting", miniErr: "Could not load: ", miniFound: "{n} found", camErr: "Could not open the webcam: ",
     introHead: "Models for public datasets", tryHead: "Try it",
     title: "Object detectors for <em>public datasets</em>, ready to run.",
     lead: "No PyTorch, no GPU. Install easydetect and name a model: it downloads once and runs on any CPU, an Intel NPU or a Raspberry Pi.",
@@ -134,7 +136,9 @@ const T = {
   },
   ko: {
     navModels: "모델", navTry: "브라우저에서 해 보기", navTryS: "해 보기", ctaTry: "브라우저에서 해 보기",
-    tryIt: "브라우저에서 해 보기", tryNote: "사진 · 영상 · 웹캠, 아무것도 올라가지 않아요",
+    tryIt: "브라우저에서 해 보기", tryNote: "이 브라우저에서만 돌아요. 아무것도 올라가지 않아요",
+    tryHere: "여기서 해 보기", tryBig: "큰 화면으로", miniCam: "▶ 웹캠", miniCamOff: "■ 멈추기", miniPic: "사진",
+    miniLoad: "받는 중", miniRt: "준비 중", miniErr: "불러오지 못했어요: ", miniFound: "{n}개", camErr: "웹캠을 열지 못했어요: ",
     introHead: "공개 데이터셋 모델", tryHead: "바로 써 보기",
     title: "<em>공개 데이터셋</em>으로 학습한<br>바로 쓰는 물체 인식 모델",
     lead: "PyTorch도 GPU도 필요 없어요. easydetect를 깔고 모델 이름만 쓰면 돼요. 한 번 받아 두면 CPU, 인텔 NPU, 라즈베리파이에서 돌아가요.",
@@ -394,6 +398,7 @@ function drawFiles() {
   ].join("");
 }
 function drawDetail() {
+  miniStop(!!mini && mini.key !== current.v.key);
   const { d, v } = current; const m = d.meta; const hub = `hub:${d.id}/${v.name}`;
   const src = /^https?:\/\//.test(m.source || "") ? m.source : "";
   const i8 = v.score_int8 != null;
@@ -429,7 +434,17 @@ function drawDetail() {
         ${typeof v.conf === "number" ? `<div class="kpi"><div class="l">${esc(t("conf"))}</div><div class="v">${v.conf}</div></div>` : ""}
         <div class="kpi"><div class="l">${esc(t("classesAll"))}</div><div class="v">${d.classes.length}</div></div>
       </div>
-      <div class="row tryit"><a class="db go" href="try.html#${esc(v.key)}">▶ ${esc(t("tryIt"))}</a><span class="hint">${esc(t("tryNote"))}</span></div>
+      <div class="mini" id="mini">
+        <div class="row"><span class="pb-label">${esc(t("tryHere"))}</span><span class="grow"></span>
+          <a class="hint" href="try.html#${esc(v.key)}">${esc(t("tryBig"))} ↗</a></div>
+        <div class="row">
+          <button type="button" class="db go" id="miniCam">${esc(t("miniCam"))}</button>
+          <label class="db" for="miniPick">${esc(t("miniPic"))}</label>
+          <input type="file" id="miniPick" accept="image/*" hidden>
+          <span class="hint" id="miniStat">${esc(t("tryNote"))}</span>
+        </div>
+        <canvas id="miniOut" hidden></canvas>
+      </div>
       <div><div class="pb-label">${esc(t("download"))}</div><div class="files" id="files"></div></div>
       <div><div class="pb-label">${esc(t("useIt"))}</div><div class="term" id="dterm"></div>
         ${!d.tasks.includes("segment") ? `<p class="hint">${esc(t("anyMask"))}</p>` : ""}</div>
@@ -447,6 +462,88 @@ function drawDetail() {
     [t("folder"), `hf download ${REPO} --include "${v.key}/*" --local-dir hub`],
   ]);
 }
+
+
+/* ---------- a small try inside the detail: the model on the webcam or a picture
+   (js/engine.js, as try.html); the model stays loaded while the detail shows it ---------- */
+let engine = null, mini = null;
+const miniEl = (id) => document.getElementById(id);
+function miniSay(s) { const e = miniEl("miniStat"); if (e) e.textContent = s; }
+async function miniModel() {
+  const { d, v } = current;
+  if (mini && mini.key === v.key) return mini.ready;
+  miniStop(true);
+  const me = mini = { key: v.key };
+  me.ready = (async () => {
+    const E = engine = engine || await import("./js/engine.js");
+    miniSay(t("miniRt"));
+    let ep = "auto"; try { ep = localStorage.getItem("try.ep") || "auto"; } catch {}
+    await E.runtime(ep);
+    const base = `${RAW}/${v.key.split("/").map(encodeURIComponent).join("/")}/`;
+    const get = (u, name) => E.fetchModel(u, (a, b) => { if (mini === me) miniSay(`${t("miniLoad")} · ${name} ${b ? Math.round(a / b * 100) + "%" : (a / 1e6).toFixed(0) + " MB"}`); });
+    const n = stemOf(d, v), head = headOf(d, v);
+    const det = await get(base + `${n}.onnx`, `${n}.onnx`);
+    const h = head ? await get(base + head, head) : null;
+    const enc = v.task === "segment" ? await get(E.ENCODER, "encoder.onnx") : null;
+    const model = await E.Model.create({ det, head: h, task: v.task, encoder: enc, prefer: E.preferred(),
+      names: Object.fromEntries(Object.entries(d.meta.classes || {}).map(([k, x]) => [Number(k), x])) });
+    if (mini !== me) { model.release(); return null; }
+    me.model = model; miniSay(t("tryNote"));
+    return model;
+  })().catch((e) => { if (mini === me) { miniSay(t("miniErr") + (e.message || e)); mini = null; } return null; });
+  return me.ready;
+}
+async function miniShow(model, src, flip) {
+  const r = await engine.analyse(model, src, { flip });
+  const c = miniEl("miniOut"); if (!c || !mini || mini.model !== model) return;
+  engine.render(c, src, r.dets, model); c.hidden = false;
+  return r.dets.length;
+}
+async function miniCam() {
+  if (mini && mini.live) return miniStop();
+  const model = await miniModel(); if (!model) return;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 540 } }, audio: false }); }
+  catch (e) { miniSay(t("camErr") + (e.message || e.name)); return; }
+  const video = document.createElement("video"); video.muted = true; video.playsInline = true; video.srcObject = stream;
+  await video.play();
+  const live = mini.live = { stream, stop: false, fps: 0 };
+  miniEl("miniCam").textContent = t("miniCamOff");
+  let prev = performance.now(), buf = null;
+  const tick = async () => {
+    if (live.stop) return;
+    if (video.readyState >= 2) {
+      buf = engine.frame(video, 960, buf);
+      try {
+        const n = await miniShow(model, buf, false);
+        const now = performance.now(); live.fps = live.fps ? live.fps * 0.8 + 200 / (now - prev) : 1000 / (now - prev); prev = now;
+        if (!live.stop) miniSay(`${t("miniFound").replace("{n}", n ?? 0)} · ${live.fps.toFixed(1)} fps`);
+      } catch (e) { console.error(e); }
+    }
+    if (!live.stop) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+async function miniPicture(file) {
+  if (mini && mini.live) miniStop();
+  const model = await miniModel(); if (!model) return;
+  const img = new Image(); img.src = URL.createObjectURL(file); await img.decode();
+  const src = engine.frame(img, 1280); URL.revokeObjectURL(img.src);
+  const t0 = performance.now();
+  const n = await miniShow(model, src, true);
+  miniSay(`${t("miniFound").replace("{n}", n ?? 0)} · ${Math.round(performance.now() - t0)} ms`);
+}
+/* the webcam stops on any redraw; ``all`` also lets the model go */
+function miniStop(all = false) {
+  if (mini && mini.live) {
+    mini.live.stop = true; mini.live.stream.getTracks().forEach((tr) => tr.stop()); mini.live = null;
+    const b = miniEl("miniCam"); if (b) b.textContent = t("miniCam");
+  }
+  if (all && mini) { mini.model?.release(); mini = null; }
+}
+document.addEventListener("change", (e) => {
+  if (e.target.id === "miniPick" && e.target.files[0]) { miniPicture(e.target.files[0]); e.target.value = ""; }
+});
 
 /* ---------- events ---------- */
 function applyLang() {
@@ -470,6 +567,7 @@ $("detail").addEventListener("click", (e) => {
   if (e.target === $("detail") || e.target.closest("#close")) return $("detail").close();
   const k = e.target.closest("[data-task]"); if (k) return openDetail(current.d.id, current.v.imgsz, k.dataset.task);
   const s = e.target.closest("[data-size]"); if (s) return openDetail(current.d.id, Number(s.dataset.size), current.v.task);
+  if (e.target.closest("#miniCam")) return miniCam();
   const a = e.target.closest("a[data-files]");
   if (a) { e.preventDefault(); fetchFiles(a.dataset.files.split(" ")); }
 });
@@ -501,7 +599,7 @@ async function fetchFiles(files) {
   }
   if (files.length > 1) toast(t("savedN").replace("{n}", files.length));
 }
-$("detail").addEventListener("close", () => { current = null; history.replaceState(null, "", location.pathname + location.search); });
+$("detail").addEventListener("close", () => { miniStop(true); current = null; history.replaceState(null, "", location.pathname + location.search); });
 document.addEventListener("keydown", (e) => {
   if (e.key === "/" && document.activeElement !== $("q") && !$("detail").open) { e.preventDefault(); $("q").focus(); }
 });

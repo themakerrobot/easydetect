@@ -1,7 +1,7 @@
 // Apache-2.0
 /* The "try it" page: pick a hub model (or drop your own .onnx), then a picture,
    a video or the webcam. Everything runs in this page (js/engine.js). */
-import { runtime, fetchModel, headKind, Model, paintMasks, ENCODER, SAM_DECODER, POSE, COCO_SKELETON } from "./engine.js";
+import { runtime, preferred, fetchModel, headKind, Model, render, colour, ENCODER, SAM_DECODER, POSE } from "./engine.js";
 
 const REPO = "leeyunjai/easydetect-hub";
 const RAW = `https://huggingface.co/${REPO}/resolve/main`;
@@ -56,21 +56,6 @@ let lang = (() => { try { return localStorage.getItem("hub.lang"); } catch { ret
   || ((navigator.language || "").toLowerCase().startsWith("ko") ? "ko" : "en");
 const t = (k) => (T[lang] && T[lang][k]) ?? T.en[k] ?? k;
 
-/* BGR in plotting.py, RGB here */
-const PALETTE = [[255, 56, 56], [255, 157, 151], [255, 112, 31], [255, 178, 29], [207, 210, 49], [72, 249, 10], [146, 204, 23],
-  [61, 219, 134], [26, 147, 52], [0, 212, 187], [44, 153, 168], [0, 194, 255], [52, 69, 147], [100, 115, 255], [0, 24, 236],
-  [132, 56, 255], [82, 0, 133], [203, 56, 255], [255, 149, 200], [255, 55, 199]];
-const colour = (i) => PALETTE[i % PALETTE.length];
-const LIMB = { face: [80, 200, 255], arm: [255, 220, 80], body: [120, 255, 120], leg: [200, 120, 255] };
-const EDGE = [[80, 200, 255], [255, 220, 80], [120, 255, 120], [200, 120, 255], [255, 160, 80], [255, 120, 200], [120, 255, 255], [200, 200, 120]];
-function limb(a, b) {
-  const s = [a, b];
-  const is = (x, y) => (a === x && b === y) || (a === y && b === x);
-  if (is(5, 6) || is(5, 11) || is(6, 12) || is(11, 12)) return "body";
-  if (s.every((v) => v >= 5 && v <= 10)) return "arm";
-  if (s.every((v) => v >= 11 && v <= 16)) return "leg";
-  return "face";
-}
 
 const S = {
   src: "hub", list: [], ds: "", task: "detect", size: 640, int8: false,
@@ -190,10 +175,10 @@ function loadHub() {
     const h = head ? await get(url(v, head), head) : null;
     const enc = v.task === "segment" ? await get(ENCODER, "encoder.onnx") : null;
     return Model.create({ det: bytes, head: h, task: v.task, encoder: enc, names: Object.fromEntries(Object.entries(d.meta.classes || {}).map(([k, x]) => [Number(k), x])),
-      prefer: runtimeEp(), int8: S.int8 });
+      prefer: preferred(), int8: S.int8 });
   }, notes.join(" "));
 }
-function runtimeEp() { return ep === "wasm" ? "wasm" : (navigator.gpu ? "webgpu" : "wasm"); }
+
 
 /* your own model: the detector, and a keypoint net or mask decoder if one came with it */
 async function addMine(files) {
@@ -230,7 +215,7 @@ function loadMine() {
   build(id, async () => {
     const head = m.task === "detect" ? null : own || await get(m.task === "pose" ? POSE : SAM_DECODER, m.task === "pose" ? "pose-s.onnx" : "decoder.onnx");
     const enc = m.task === "segment" ? await get(ENCODER, "encoder.onnx") : null;
-    return Model.create({ det: m.det.bytes, head, task: m.task, encoder: enc, prefer: runtimeEp() });
+    return Model.create({ det: m.det.bytes, head, task: m.task, encoder: enc, prefer: preferred() });
   }, notes.join(" "));
 }
 
@@ -268,64 +253,14 @@ async function finish({ src, raw, emb, model }) {
   const dets = all.filter((d) => !S.hidden.has(d.cls));
   if (model.task === "pose" && model.pose) await model.keypoints(src, dets, { flip: !S.live });
   if (model.task === "segment" && emb) await model.masks(emb, dets);
-  draw(src, dets, model);
+  render($("out"), src, dets, model);
+  $("out").hidden = false; $("hello").hidden = true; $("save").disabled = false;
   drawFound(all, model);
   S.count = dets.length; stat();
 }
 function stat() {
   const speed = S.live ? (S.fps ? t("fps").replace("{0}", S.fps.toFixed(1)) : "") : (S.ms ? t("ms").replace("{0}", Math.round(S.ms)) : "");
   $("stat").textContent = `· ${t("count").replace("{n}", S.count || 0)}${speed ? " · " + speed : ""}`;
-}
-
-function draw(src, dets, model) {
-  const c = $("out"); const w = src.width, h = src.height;
-  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
-  const g = c.getContext("2d", { willReadFrequently: model.task === "segment" });
-  g.drawImage(src, 0, 0);
-  if (model.task === "segment") {
-    const img = g.getImageData(0, 0, w, h);
-    paintMasks(img, dets, colour);
-    g.putImageData(img, 0, 0);
-  }
-  const lw = Math.max(Math.round((w + h) / 2 * 0.003), 2);
-  const fs = Math.max(Math.round((w + h) / 2 * 0.022), 12);
-  g.font = `600 ${fs}px 'Pretendard Variable', Pretendard, sans-serif`; g.textBaseline = "top";
-  const placed = [];
-  for (const d of dets) {
-    const [x1, y1, x2, y2] = d.box; const [r, gg, b] = colour(d.cls);
-    g.strokeStyle = `rgb(${r},${gg},${b})`; g.lineWidth = lw; g.strokeRect(x1, y1, x2 - x1, y2 - y1);
-    const label = `${model.names[d.cls] ?? d.cls} ${d.score.toFixed(2)}`;
-    const tw = g.measureText(label).width + fs * 0.5, th = fs * 1.3;
-    const left = Math.max(0, Math.min(x1, w - tw));
-    let top = null;
-    for (const y of [y1 - th, y2, y1, y1 + th]) {   // above the box, below, inside: the first free slot
-      const yy = Math.max(0, Math.min(y, h - th));
-      if (!placed.some((p) => left < p[2] && left + tw > p[0] && yy < p[3] && yy + th > p[1])) { top = yy; break; }
-    }
-    if (top === null) top = Math.max(0, Math.min(y1 - th, h - th));
-    placed.push([left, top, left + tw, top + th]);
-    g.fillStyle = `rgb(${r},${gg},${b})`; g.fillRect(left, top, tw, th);
-    g.fillStyle = (r * 0.299 + gg * 0.587 + b * 0.114) > 150 ? "#111" : "#fff";
-    g.fillText(label, left + fs * 0.25, top + fs * 0.15);
-  }
-  if (model.task === "pose") {
-    const sk = model.spec?.skeleton || COCO_SKELETON; const coco = model.spec?.coco !== false;
-    for (const d of dets) {
-      if (!d.kpts) continue;
-      const seen = d.kpts.map((p) => p[2] >= 0.3);
-      sk.forEach(([a, b], n) => {
-        if (!seen[a] || !seen[b]) return;
-        const [r, gg, bb] = coco ? LIMB[limb(a, b)] : EDGE[n % EDGE.length];
-        g.strokeStyle = `rgb(${r},${gg},${bb})`; g.lineWidth = lw; g.lineCap = "round";
-        g.beginPath(); g.moveTo(d.kpts[a][0], d.kpts[a][1]); g.lineTo(d.kpts[b][0], d.kpts[b][1]); g.stroke();
-      });
-      for (const [x, y] of d.kpts.filter((_, i) => seen[i])) {
-        g.beginPath(); g.arc(x, y, lw + 1, 0, Math.PI * 2); g.fillStyle = "#fff"; g.fill();
-        g.lineWidth = 1; g.strokeStyle = "#282828"; g.stroke();
-      }
-    }
-  }
-  c.hidden = false; $("hello").hidden = true; $("save").disabled = false;
 }
 
 function drawFound(all, model) {

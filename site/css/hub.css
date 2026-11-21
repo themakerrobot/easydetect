@@ -234,12 +234,16 @@ dialog::backdrop{background:rgba(26,25,22,.45)}
   #out{max-height:70vh}
   .drop{padding:40px 16px}
 }
-.dl .tryit{margin-top:0;align-items:center;flex-wrap:wrap;gap:10px}
-.dl .tryit .db{padding:8px 16px;font-size:13.5px}
-.dl .tryit .hint{margin-top:0}
 .navlink .narrow{display:none}
 @media (max-width:700px){
   .navlink .wide{display:none}
   .navlink .narrow{display:inline}
 }
 #hubBox,#mineBox{display:flex;flex-direction:column;gap:8px}
+.mini{border:1px solid var(--line-soft);border-radius:10px;padding:10px 12px;background:var(--panel2);display:flex;flex-direction:column;gap:8px}
+.mini .row{align-items:center;flex-wrap:wrap;gap:8px}
+.mini .pb-label{margin:0}
+.mini .hint{margin:0}
+.mini .db{padding:6px 14px;font-size:13px;cursor:pointer}
+#miniOut{display:block;max-width:100%;max-height:340px;margin:0 auto;border-radius:6px}
+#miniOut[hidden]{display:none}

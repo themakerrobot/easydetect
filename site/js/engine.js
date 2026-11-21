@@ -19,6 +19,8 @@ let gpu = false;
 
 /** Load ONNX Runtime Web once: its WebGPU build when the browser has a GPU
     adapter and "wasm" was not asked for, its WASM build otherwise. */
+export const preferred = () => (gpu ? "webgpu" : "wasm");
+
 export async function runtime(want = "auto") {
   if (ort) return { ort, gpu };
   if (want !== "wasm" && navigator.gpu) {
@@ -394,4 +396,105 @@ export function paintMasks(img, dets, colour, alpha = 0.45) {
       }
     }
   }
+}
+
+/* ---------------------------------------------------------------- drawing (plotting.py) */
+
+/* BGR in plotting.py, RGB here */
+export const PALETTE = [[255, 56, 56], [255, 157, 151], [255, 112, 31], [255, 178, 29], [207, 210, 49], [72, 249, 10], [146, 204, 23],
+  [61, 219, 134], [26, 147, 52], [0, 212, 187], [44, 153, 168], [0, 194, 255], [52, 69, 147], [100, 115, 255], [0, 24, 236],
+  [132, 56, 255], [82, 0, 133], [203, 56, 255], [255, 149, 200], [255, 55, 199]];
+export const colour = (i) => PALETTE[i % PALETTE.length];
+const LIMB = { face: [80, 200, 255], arm: [255, 220, 80], body: [120, 255, 120], leg: [200, 120, 255] };
+const EDGE = [[80, 200, 255], [255, 220, 80], [120, 255, 120], [200, 120, 255], [255, 160, 80], [255, 120, 200], [120, 255, 255], [200, 200, 120]];
+function limb(a, b) {
+  const s = [a, b];
+  const is = (x, y) => (a === x && b === y) || (a === y && b === x);
+  if (is(5, 6) || is(5, 11) || is(6, 12) || is(11, 12)) return "body";
+  if (s.every((v) => v >= 5 && v <= 10)) return "arm";
+  if (s.every((v) => v >= 11 && v <= 16)) return "leg";
+  return "face";
+}
+
+/** Draw a picture and its detections (masks, boxes and labels, keypoints) onto canvas ``c``. */
+export function render(c, src, dets, model) {
+  const w = src.width, h = src.height;
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  const g = c.getContext("2d", { willReadFrequently: model.task === "segment" });
+  g.drawImage(src, 0, 0);
+  if (model.task === "segment") {
+    const img = g.getImageData(0, 0, w, h);
+    paintMasks(img, dets, colour);
+    g.putImageData(img, 0, 0);
+  }
+  const lw = Math.max(Math.round((w + h) / 2 * 0.003), 2);
+  const fs = Math.max(Math.round((w + h) / 2 * 0.022), 12);
+  g.font = `600 ${fs}px 'Pretendard Variable', Pretendard, sans-serif`; g.textBaseline = "top";
+  const placed = [];
+  for (const d of dets) {
+    const [x1, y1, x2, y2] = d.box; const [r, gg, b] = colour(d.cls);
+    g.strokeStyle = `rgb(${r},${gg},${b})`; g.lineWidth = lw; g.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    const label = `${model.names[d.cls] ?? d.cls} ${d.score.toFixed(2)}`;
+    const tw = g.measureText(label).width + fs * 0.5, th = fs * 1.3;
+    const left = Math.max(0, Math.min(x1, w - tw));
+    let top = null;
+    for (const y of [y1 - th, y2, y1, y1 + th]) {   // above the box, below, inside: the first free slot
+      const yy = Math.max(0, Math.min(y, h - th));
+      if (!placed.some((p) => left < p[2] && left + tw > p[0] && yy < p[3] && yy + th > p[1])) { top = yy; break; }
+    }
+    if (top === null) top = Math.max(0, Math.min(y1 - th, h - th));
+    placed.push([left, top, left + tw, top + th]);
+    g.fillStyle = `rgb(${r},${gg},${b})`; g.fillRect(left, top, tw, th);
+    g.fillStyle = (r * 0.299 + gg * 0.587 + b * 0.114) > 150 ? "#111" : "#fff";
+    g.fillText(label, left + fs * 0.25, top + fs * 0.15);
+  }
+  if (model.task === "pose") {
+    const sk = model.spec?.skeleton || COCO_SKELETON; const coco = model.spec?.coco !== false;
+    for (const d of dets) {
+      if (!d.kpts) continue;
+      const seen = d.kpts.map((p) => p[2] >= 0.3);
+      sk.forEach(([a, b], n) => {
+        if (!seen[a] || !seen[b]) return;
+        const [r, gg, bb] = coco ? LIMB[limb(a, b)] : EDGE[n % EDGE.length];
+        g.strokeStyle = `rgb(${r},${gg},${bb})`; g.lineWidth = lw; g.lineCap = "round";
+        g.beginPath(); g.moveTo(d.kpts[a][0], d.kpts[a][1]); g.lineTo(d.kpts[b][0], d.kpts[b][1]); g.stroke();
+      });
+      for (const [x, y] of d.kpts.filter((_, i) => seen[i])) {
+        g.beginPath(); g.arc(x, y, lw + 1, 0, Math.PI * 2); g.fillStyle = "#fff"; g.fill();
+        g.lineWidth = 1; g.strokeStyle = "#282828"; g.stroke();
+      }
+    }
+  }
+}
+
+
+
+/* ---------------------------------------------------------------- the whole pass */
+
+/** A picture (or video frame) as a canvas no bigger than ``max`` px a side;
+    ``reuse`` a canvas of the right size to draw into. */
+export function frame(el, max = 1600, reuse = null) {
+  const w0 = el.videoWidth || el.naturalWidth || el.width, h0 = el.videoHeight || el.naturalHeight || el.height;
+  if (!w0 || !h0) return null;
+  const k = Math.min(1, max / Math.max(w0, h0));
+  const w = Math.round(w0 * k), h = Math.round(h0 * k);
+  const c = reuse && reuse.width === w && reuse.height === h ? reuse : Object.assign(document.createElement("canvas"), { width: w, height: h });
+  c.getContext("2d").drawImage(el, 0, 0, w, h);
+  return c;
+}
+
+/** Detections for a canvas with their keypoints or masks: ``{all, dets}``,
+    ``dets`` without the classes in ``hidden``. */
+export async function analyse(model, src, { conf = model.conf, hidden = null, flip = true } = {}) {
+  const raw = await model.detect(src);
+  const emb = model.task === "segment" && model.encoder ? await model.embed(src, src.width, src.height) : null;
+  return { src, raw, emb, model, ...(await heads({ src, raw, emb, model }, { conf, hidden, flip })) };
+}
+/** The postprocessing and heads of ``analyse`` again, for a new threshold. */
+export async function heads({ src, raw, emb, model }, { conf = model.conf, hidden = null, flip = true } = {}) {
+  const all = model.boxes(raw, src.width, src.height, conf);
+  const dets = hidden ? all.filter((d) => !hidden.has(d.cls)) : all;
+  if (model.task === "pose" && model.pose) await model.keypoints(src, dets, { flip });
+  if (model.task === "segment" && emb) await model.masks(emb, dets);
+  return { all, dets };
 }

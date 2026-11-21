@@ -155,6 +155,11 @@ model = Detector("hub:taco/ed-s-640.pt")       # the checkpoint, to fine-tune
 A model's web address works too (a file, its Hugging Face page, or a hub
 model's folder), as do relative and absolute paths.
 
+[Try one in your browser](https://themakerrobot.github.io/easydetect/try.html)
+on a picture, a video or your webcam: it runs in the page (ONNX Runtime Web)
+and nothing is uploaded. Your own `.onnx` from the lab runs there too, with
+its `.pose.onnx` or `.mask_decoder.onnx` beside it.
+
 ## Speed
 
 `ed-s` at 640 on one desktop — a Core Ultra 5 250K Plus with an RTX 5090 —

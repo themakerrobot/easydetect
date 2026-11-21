@@ -15,6 +15,7 @@
   <h1><a href="#"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="currentColor"/><rect x="7" y="10" width="18" height="14" rx="2.5" fill="none" stroke="white" stroke-width="2.4"/><rect x="7" y="6" width="10" height="5" rx="1.5" fill="white"/><circle cx="16" cy="17" r="2.2" fill="white"/></svg>easydetect hub</a></h1>
   <nav>
     <a class="navlink on" href="#models" data-t="navModels">모델</a>
+    <a class="navlink" href="try.html"><span class="wide" data-t="navTry">브라우저에서 해 보기</span><span class="narrow" data-t="navTryS">해 보기</span></a>
     <a class="navlink ext-link" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener">GitHub <span class="ext">↗</span></a>
     <a class="navlink ext-link" href="https://huggingface.co/leeyunjai/easydetect-hub" target="_blank" rel="noopener">Hugging Face <span class="ext">↗</span></a>
     <a class="navlink ext-link" href="https://github.com/themakerrobot/easydetect-lab" target="_blank" rel="noopener">Lab <span class="ext">↗</span></a>
@@ -31,6 +32,7 @@
       <div class="facts" id="facts"></div>
       <div class="row">
         <a class="db go" href="#models" data-t="ctaBrowse">모델 둘러보기</a>
+        <a class="db" href="try.html" data-t="ctaTry">브라우저에서 해 보기</a>
         <a class="db" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener" data-t="ctaDocs">GitHub 문서</a>
       </div>
       <p class="hint lic" data-t="licShort"></p>
@@ -97,7 +99,9 @@ const CAT_KO = {
 
 const T = {
   en: {
-    navModels: "Models", introHead: "Models for public datasets", tryHead: "Try it",
+    navModels: "Models", navTry: "Try in the browser", navTryS: "Try it", ctaTry: "Try in the browser",
+    tryIt: "Try it in the browser", tryNote: "a picture, a video or your webcam, nothing uploaded",
+    introHead: "Models for public datasets", tryHead: "Try it",
     title: "Object detectors for <em>public datasets</em>, ready to run.",
     lead: "No PyTorch, no GPU. Install easydetect and name a model: it downloads once and runs on any CPU, an Intel NPU or a Raspberry Pi.",
     ctaBrowse: "Browse models", ctaDocs: "Docs on GitHub", datasets: "datasets", models: "models", torch: "PyTorch needed",
@@ -129,7 +133,9 @@ const T = {
     anyMask: "Any model draws masks with task=\"segment\" (MobileSAM, not trained or scored on this dataset).",
   },
   ko: {
-    navModels: "모델", introHead: "공개 데이터셋 모델", tryHead: "바로 써 보기",
+    navModels: "모델", navTry: "브라우저에서 해 보기", navTryS: "해 보기", ctaTry: "브라우저에서 해 보기",
+    tryIt: "브라우저에서 해 보기", tryNote: "사진 · 영상 · 웹캠, 아무것도 올라가지 않아요",
+    introHead: "공개 데이터셋 모델", tryHead: "바로 써 보기",
     title: "<em>공개 데이터셋</em>으로 학습한<br>바로 쓰는 물체 인식 모델",
     lead: "PyTorch도 GPU도 필요 없어요. easydetect를 깔고 모델 이름만 쓰면 돼요. 한 번 받아 두면 CPU, 인텔 NPU, 라즈베리파이에서 돌아가요.",
     ctaBrowse: "모델 둘러보기", ctaDocs: "GitHub 문서", datasets: "데이터셋", models: "모델", torch: "PyTorch 필요",
@@ -423,6 +429,7 @@ function drawDetail() {
         ${typeof v.conf === "number" ? `<div class="kpi"><div class="l">${esc(t("conf"))}</div><div class="v">${v.conf}</div></div>` : ""}
         <div class="kpi"><div class="l">${esc(t("classesAll"))}</div><div class="v">${d.classes.length}</div></div>
       </div>
+      <div class="row tryit"><a class="db go" href="try.html#${esc(v.key)}">▶ ${esc(t("tryIt"))}</a><span class="hint">${esc(t("tryNote"))}</span></div>
       <div><div class="pb-label">${esc(t("download"))}</div><div class="files" id="files"></div></div>
       <div><div class="pb-label">${esc(t("useIt"))}</div><div class="term" id="dterm"></div>
         ${!d.tasks.includes("segment") ? `<p class="hint">${esc(t("anyMask"))}</p>` : ""}</div>

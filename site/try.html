@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>easydetect hub · try</title>
+<meta name="description" content="Run an easydetect model in your browser on a picture, a video or your webcam. Nothing is uploaded.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231F5F7A'/%3E%3Crect x='7' y='10' width='18' height='14' rx='2.5' fill='none' stroke='white' stroke-width='2.4'/%3E%3Crect x='7' y='6' width='10' height='5' rx='1.5' fill='white'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="css/themaker-ui.css">
+<link rel="stylesheet" href="css/hub.css">
+</head>
+<body>
+<header>
+  <h1><a href="./"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="currentColor"/><rect x="7" y="10" width="18" height="14" rx="2.5" fill="none" stroke="white" stroke-width="2.4"/><rect x="7" y="6" width="10" height="5" rx="1.5" fill="white"/><circle cx="16" cy="17" r="2.2" fill="white"/></svg>easydetect hub</a></h1>
+  <nav>
+    <a class="navlink" href="./#models" data-t="navModels">모델</a>
+    <a class="navlink on" href="try.html"><span class="wide" data-t="navTry">브라우저에서 해 보기</span><span class="narrow" data-t="navTryS">해 보기</span></a>
+    <a class="navlink ext-link" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener">GitHub <span class="ext">↗</span></a>
+    <a class="navlink ext-link" href="https://github.com/themakerrobot/easydetect-lab" target="_blank" rel="noopener">Lab <span class="ext">↗</span></a>
+  </nav>
+  <span class="grow"></span>
+  <button type="button" class="lang-toggle" id="lang">EN</button>
+</header>
+
+<div class="page tryp">
+  <aside class="pan ctl">
+    <div class="pb">
+      <section>
+        <div class="pb-label" data-t="model">모델</div>
+        <div class="seg2" id="src">
+          <button type="button" class="db on" data-src="hub" data-t="fromHub">허브 모델</button>
+          <button type="button" class="db" data-src="mine" data-t="fromMine">내 모델</button>
+        </div>
+        <div id="hubBox">
+          <select class="inp" id="ds" aria-label="dataset"></select>
+          <div class="row" id="tasks"></div>
+          <div class="row" id="sizes"></div>
+        </div>
+        <div id="mineBox" hidden>
+          <label class="dropzone" id="mineDrop">
+            <input type="file" id="mineFiles" accept=".onnx" multiple hidden>
+            <b data-t="mineDrop">.onnx 파일을 끌어다 놓거나 눌러서 고르세요</b>
+            <small data-t="mineHint">lab이나 easydetect에서 내보낸 모델. 포즈·세그 모델이면 옆에 있는 .pose.onnx / .mask_decoder.onnx도 같이 고르세요.</small>
+          </label>
+          <div class="files" id="mineList"></div>
+          <div class="row" id="mineTasks"></div>
+        </div>
+        <div class="prg" id="prg" hidden><div class="lb"><span id="prgName"></span><span id="prgN" class="num"></span></div><div class="track"><div class="fill" id="prgFill"></div></div></div>
+        <p class="hint" id="modelNote"></p>
+      </section>
+
+      <section>
+        <div class="pb-label" data-t="input">입력</div>
+        <div class="row inrow">
+          <label class="db go" for="pick" data-t="open">사진 · 영상 열기</label>
+          <input type="file" id="pick" accept="image/*,video/*" hidden>
+          <button type="button" class="db" id="cam" data-t="camOn">웹캠 켜기</button>
+          <button type="button" class="db" id="flipCam" hidden data-t="camSwap">카메라 바꾸기</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="pb-label"><span data-t="conf">점수 기준</span> <b class="num" id="confV"></b></div>
+        <input type="range" id="conf" min="0.05" max="0.95" step="0.05" aria-label="conf">
+        <div class="pb-label sub" data-t="runOn">실행</div>
+        <select class="inp" id="ep" aria-label="runtime">
+          <option value="auto" data-t="epAuto">자동 (GPU가 있으면 WebGPU)</option>
+          <option value="wasm" data-t="epWasm">CPU만 (WASM)</option>
+        </select>
+      </section>
+
+      <section>
+        <div class="pb-label"><span data-t="found">찾은 것</span> <span class="num" id="stat"></span></div>
+        <div class="chips found" id="found"></div>
+        <p class="hint" data-t="foundHint">이름을 누르면 숨기거나 다시 보여요.</p>
+      </section>
+
+      <p class="hint privacy" data-t="privacy">사진과 영상은 이 브라우저 안에서만 처리돼요. 어디에도 올라가지 않아요. 모델은 처음 한 번만 받고 브라우저에 저장해 둬요.</p>
+    </div>
+  </aside>
+
+  <main class="pan stage" id="stage">
+    <div class="ph"><span class="grow" id="title"></span>
+      <button type="button" class="db" id="save" disabled data-t="save">결과 저장</button></div>
+    <div class="pb view" id="view">
+      <canvas id="out" hidden></canvas>
+      <div class="empty drop" id="hello"><b data-t="hello">사진이나 영상을 여기에 끌어다 놓으세요</b><span data-t="hello2">또는 웹캠을 켜 보세요</span></div>
+    </div>
+  </main>
+</div>
+
+<div id="toast" role="status"></div>
+<video id="vid" muted playsinline loop hidden></video>
+<script type="module" src="js/try.js"></script>
+</body>
+</html>

@@ -613,7 +613,7 @@ FATHOMNET_LICENCES = {"CC0-1.0", "CC-BY-4.0"}
 
 
 def fathomnet(folder: Path, workers: int = 16, classes: int = 60, min_boxes: int = 300,
-              most: int = 60000, page: int = 200, limit: int | None = None) -> Path:
+              most: int = 60000, page: int = 40, limit: int | None = None) -> Path:
     """Sea life (FathomNet), only pictures that are CC0 or CC BY 4.0 with every
     box CC0 or CC BY 4.0: the whole catalogue is read once (``catalog.jsonl``,
     resumable), the ``classes`` concepts with the most boxes (at least
@@ -625,23 +625,38 @@ def fathomnet(folder: Path, workers: int = 16, classes: int = 60, min_boxes: int
     import urllib.request
 
     catalog, state = folder / "catalog.jsonl", folder / "catalog.offset"
+
+    def read(offset: int, size: int) -> list | None:
+        """A page of the catalogue; None when the answer came cut short (the
+        server cuts long ones) or not at all."""
+        body = json.dumps({"limit": size, "offset": offset}).encode()
+        headers = {"Content-Type": "application/json", "User-Agent": "easydetect"}
+        try:
+            request = urllib.request.Request(URLS["fathomnet"], data=body, headers=headers)
+            with urllib.request.urlopen(request, timeout=300) as r:
+                return json.loads(r.read())
+        except Exception:  # noqa: BLE001  (a smaller page, or later)
+            return None
+
     if not (folder / "catalog.done").exists():
         offset = int(state.read_text()) if state.exists() else 0
+        size, misses = page, 0
         with open(catalog, "a") as out:
             while True:
-                body = json.dumps({"limit": page, "offset": offset}).encode()
-                for n in range(8):
-                    try:
-                        headers = {"Content-Type": "application/json", "User-Agent": "easydetect"}
-                        request = urllib.request.Request(URLS["fathomnet"], data=body,
-                                                         headers=headers)
-                        with urllib.request.urlopen(request, timeout=300) as r:
-                            got = json.loads(r.read())
-                        break
-                    except Exception:  # noqa: BLE001
-                        time.sleep(30 * (n + 1))
-                else:
-                    raise RuntimeError(f"fathomnet: the catalogue would not answer at {offset}")
+                got = read(offset, size)
+                if got is None:
+                    if size > 1:                       # cut short: ask for less
+                        size = max(1, size // 2)
+                        continue
+                    misses += 1
+                    if misses >= 8:                    # one picture it never sends whole
+                        print(f"fathomnet: picture {offset} would not come; skipped",
+                              flush=True)
+                        offset, misses = offset + 1, 0
+                        continue
+                    time.sleep(30 * misses)
+                    continue
+                misses = 0
                 if not got or (limit and offset >= limit):
                     break
                 for im in got:
@@ -655,10 +670,11 @@ def fathomnet(folder: Path, workers: int = 16, classes: int = 60, min_boxes: int
                             "boxes": [[b["concept"], b["x"], b["y"], b["width"], b["height"]]
                                       for b in boxes]}) + "\n")
                 out.flush()
-                offset += len(got)
+                before, offset = offset, offset + len(got)
                 state.write_text(str(offset))
-                if offset % 10000 < page:
+                if offset // 10000 != before // 10000:
                     print(f"fathomnet: {offset} pictures read", flush=True)
+                size = min(page, size * 2)             # back up after a short one
         (folder / "catalog.done").touch()
     entries = {}
     for line in catalog.read_text().splitlines():

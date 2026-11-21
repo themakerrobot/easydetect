@@ -101,7 +101,7 @@ const T = {
   en: {
     navModels: "Models", navTry: "Try in the browser", navTryS: "Try it", ctaTry: "Try in the browser",
     tryIt: "Try it in the browser", tryNote: "runs in this browser, nothing is uploaded",
-    tryHere: "Try it here", tryBig: "Open the full page", miniCam: "▶ Webcam", miniCamOff: "■ Stop", miniPic: "Picture",
+    tryHere: "Try it here", tryBig: "Open the full page", miniCam: "▶ Webcam", miniCamOff: "■ Stop", miniFlip: "Switch camera", miniPic: "Picture",
     miniLoad: "Downloading", miniRt: "Starting", miniErr: "Could not load: ", miniFound: "{n} found", camErr: "Could not open the webcam: ",
     camDenied: "The camera is blocked: allow it in the address bar, then try again.", camNone: "No camera found.",
     camBusy: "Another app is using the camera. Close it and try again.", camNoApi: "This browser cannot open a camera here (it needs https).",
@@ -139,7 +139,7 @@ const T = {
   ko: {
     navModels: "모델", navTry: "브라우저에서 해 보기", navTryS: "해 보기", ctaTry: "브라우저에서 해 보기",
     tryIt: "브라우저에서 해 보기", tryNote: "이 브라우저에서만 돌아요. 아무것도 올라가지 않아요",
-    tryHere: "여기서 해 보기", tryBig: "큰 화면으로", miniCam: "▶ 웹캠", miniCamOff: "■ 멈추기", miniPic: "사진",
+    tryHere: "여기서 해 보기", tryBig: "큰 화면으로", miniCam: "▶ 웹캠", miniCamOff: "■ 멈추기", miniFlip: "카메라 바꾸기", miniPic: "사진",
     miniLoad: "받는 중", miniRt: "준비 중", miniErr: "불러오지 못했어요: ", miniFound: "{n}개", camErr: "웹캠을 열지 못했어요: ",
     camDenied: "카메라가 막혀 있어요. 주소창에서 카메라를 허용한 뒤 다시 눌러 주세요.", camNone: "카메라를 찾지 못했어요.",
     camBusy: "다른 앱이 카메라를 쓰고 있어요. 그 앱을 닫고 다시 눌러 주세요.", camNoApi: "이 브라우저에서는 여기서 카메라를 열 수 없어요(https 필요).",
@@ -443,6 +443,7 @@ function drawDetail() {
           <a class="hint" href="try.html#${esc(v.key)}">${esc(t("tryBig"))} ↗</a></div>
         <div class="row">
           <button type="button" class="db go" id="miniCam">${esc(t("miniCam"))}</button>
+          <button type="button" class="db" id="miniFlip" hidden>${esc(t("miniFlip"))}</button>
           <label class="db" for="miniPick">${esc(t("miniPic"))}</label>
           <input type="file" id="miniPick" accept="image/*" hidden>
           <span class="hint" id="miniStat">${esc(t("tryNote"))}</span>
@@ -513,7 +514,10 @@ function camWhy(e) {
     : t("camErr") + ((e && (e.message || e.name)) || e);
 }
 /* the camera opens at once and shows itself while the model downloads; the
-   detections start when it is ready */
+   detections start when it is ready, drawn over the moving video (a phone
+   that takes a second a frame still shows smooth video). Phones start on the
+   back camera. */
+let miniFacing = matchMedia("(pointer: coarse)").matches ? "environment" : "user";
 async function miniCam() {
   if (mini && (mini.live || mini.opening)) return miniStop();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return miniSay(t("camNoApi"));
@@ -521,7 +525,7 @@ async function miniCam() {
   const ticket = ++me.cam; me.opening = true; me.note = "";
   miniEl("miniCam").textContent = t("miniCamOff");
   let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 540 } }, audio: false }); }
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: miniFacing }, width: { ideal: 960 }, height: { ideal: 540 } }, audio: false }); }
   catch (e) {
     if (mini === me && me.cam === ticket) { me.opening = false; miniEl("miniCam").textContent = t("miniCam"); miniSay(me.note = camWhy(e)); }
     return;
@@ -532,32 +536,16 @@ async function miniCam() {
   const video = Object.assign(document.createElement("video"), { muted: true, playsInline: true, autoplay: true, className: "vh" });
   video.setAttribute("playsinline", ""); video.srcObject = stream;
   miniEl("mini").append(video);
-  const live = me.live = { stream, video, stop: false, fps: 0 };
+  me.live = { stream, video, loop: null };
   try { await video.play(); } catch (e) { miniStop(); miniSay(camWhy(e)); return; }
+  navigator.mediaDevices.enumerateDevices().then((ds) => { const f = miniEl("miniFlip"); if (f) f.hidden = ds.filter((x) => x.kind === "videoinput").length < 2; }).catch(() => {});
+  if (!engine) engine = await import("./js/engine.js");
+  if (mini !== me || !me.live) return;
   let model = me.model || null; ready.then((m) => { model = m; });
-  let prev = 0, buf = null;
-  const tick = async () => {
-    if (live.stop) return;
-    if (video.readyState >= 2) {
-      buf = engine && engine.frame ? engine.frame(video, 960, buf) : null;
-      const c = miniEl("miniOut");
-      if (buf && c && !model) {                         // the camera, until the model is there
-        if (c.width !== buf.width || c.height !== buf.height) { c.width = buf.width; c.height = buf.height; }
-        c.getContext("2d").drawImage(buf, 0, 0); c.hidden = false;
-      } else if (buf && model) {
-        try {
-          const n = await miniShow(model, buf, false);
-          const now = performance.now();
-          if (prev) live.fps = live.fps ? live.fps * 0.8 + 200 / (now - prev) : 1000 / (now - prev);
-          prev = now;
-          if (!live.stop && n !== null) miniSay(`${t("miniFound").replace("{n}", n)}${live.fps ? " · " + live.fps.toFixed(1) + " fps" : ""}`);
-        } catch (e) { console.error(e); miniStop(); miniSay(t("miniErr") + (e.message || e)); return; }
-      }
-    }
-    if (!live.stop) requestAnimationFrame(tick);
-  };
-  if (!engine) await import("./js/engine.js").then((E) => { engine = E; });
-  requestAnimationFrame(tick);
+  const c = miniEl("miniOut"); c.hidden = false;
+  me.live.loop = engine.live({ video, canvas: c, max: 960, getModel: () => model,
+    onResult: ({ dets, fps }) => { if (mini === me && me.live) miniSay(`${t("miniFound").replace("{n}", dets.length)}${fps ? " · " + fps.toFixed(1) + " fps" : ""}`); },
+    onError: (e) => { console.error(e); if (mini === me) { miniStop(); miniSay(t("miniErr") + (e.message || e)); } } });
 }
 async function miniPicture(file) {
   if (mini && (mini.live || mini.opening)) miniStop();
@@ -576,10 +564,11 @@ function miniStop(all = false) {
   if (mini) {
     mini.cam++; mini.opening = false;
     if (mini.live) {
-      mini.live.stop = true; mini.live.stream.getTracks().forEach((tr) => tr.stop());
+      mini.live.loop?.stop(); mini.live.stream.getTracks().forEach((tr) => tr.stop());
       mini.live.video.remove(); mini.live = null;
     }
     const b = miniEl("miniCam"); if (b) b.textContent = t("miniCam");
+    const f = miniEl("miniFlip"); if (f) f.hidden = true;
   }
   if (all && mini) { mini.model?.release(); mini = null; }
 }
@@ -610,6 +599,7 @@ $("detail").addEventListener("click", (e) => {
   const k = e.target.closest("[data-task]"); if (k) return openDetail(current.d.id, current.v.imgsz, k.dataset.task);
   const s = e.target.closest("[data-size]"); if (s) return openDetail(current.d.id, Number(s.dataset.size), current.v.task);
   if (e.target.closest("#miniCam")) return miniCam();
+  if (e.target.closest("#miniFlip")) { miniFacing = miniFacing === "user" ? "environment" : "user"; miniStop(); return miniCam(); }
   const a = e.target.closest("a[data-files]");
   if (a) { e.preventDefault(); fetchFiles(a.dataset.files.split(" ")); }
 });

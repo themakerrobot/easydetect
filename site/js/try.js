@@ -1,7 +1,7 @@
 // Apache-2.0
 /* The "try it" page: pick a hub model (or drop your own .onnx), then a picture,
    a video or the webcam. Everything runs in this page (js/engine.js). */
-import { runtime, preferred, fetchModel, headKind, Model, render, colour, ENCODER, SAM_DECODER, POSE } from "./engine.js";
+import { runtime, preferred, fetchModel, headKind, Model, render, colour, live as live$, ENCODER, SAM_DECODER, POSE } from "./engine.js";
 
 const REPO = "leeyunjai/easydetect-hub";
 const RAW = `https://huggingface.co/${REPO}/resolve/main`;
@@ -65,7 +65,7 @@ const S = {
   src: "hub", list: [], ds: "", task: "detect", size: 640, int8: false,
   mine: { det: null, head: null, task: "detect" },
   model: null, loadId: 0, conf: null, hidden: new Set(),
-  frame: null, last: null, live: null, facing: "user", busy: false,
+  frame: null, last: null, live: null, facing: matchMedia("(pointer: coarse)").matches ? "environment" : "user", busy: false,
 };
 const ep = (() => { try { return localStorage.getItem("try.ep") || "auto"; } catch { return "auto"; } })();
 
@@ -158,7 +158,7 @@ async function build(id, make, note) {
     S.hidden.clear();
     $("prg").hidden = true;
     $("title").textContent = `${t("ready")} · ${t(model.task)} · ${model.size} ${t("px")} · ${t("epNow").replace("{0}", model.ep === "webgpu" ? "WebGPU" : "WASM")}`;
-    if (S.last) analyse(S.last.src, true);
+    if (S.last) analyse(S.last.src, true).catch((e) => console.error(e));
   } catch (e) {
     if (id !== S.loadId) return;
     $("prg").hidden = true; $("modelNote").textContent = t("err") + (e.message || e);
@@ -239,6 +239,12 @@ function grab(el, live) {
 
 async function analyse(src, still) {
   const model = S.model; if (!model) { toast(t("noModel")); return; }
+  try { await analyseOnce(model, src, still); } catch (e) {
+    if (!(await model.toWasm())) { toast(t("err") + (e.message || e)); throw e; }   // the GPU gave up: once more on the CPU
+    await analyseOnce(model, src, still);
+  }
+}
+async function analyseOnce(model, src, still) {
   const w = src.width, h = src.height;
   const t0 = performance.now();
   const raw = await model.detect(src);
@@ -309,7 +315,7 @@ async function camera() {
   $("cam").textContent = t("camOff"); $("cam").classList.add("on");
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: S.facing }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
   } catch (e) {
     if (ticket === camTicket) { S.camOpening = false; $("cam").textContent = t("camOn"); $("cam").classList.remove("on"); toast(camWhy(e)); }
     return;
@@ -323,27 +329,19 @@ async function camera() {
 }
 function startLive(video, cam) {
   S.last = null; S.fps = 0;
-  const live = { video, cam, stop: false };
+  const live = { video, cam };
   S.live = live;
-  let prev = performance.now();
-  const tick = async () => {
-    if (live.stop) return;
-    if (S.model && video.readyState >= 2) {
-      const c = grab(video, true);
-      if (c) {
-        try { await analyse(c, false); } catch (e) { console.error(e); toast(t("err") + (e.message || e)); stopLive(); return; }
-        const now = performance.now(); S.fps = S.fps ? S.fps * 0.8 + 200 / (now - prev) : 1000 / (now - prev); prev = now;
-      }
-    } else if (video.readyState >= 2) { const c = grab(video, true); if (c) drawPlain(c); }
-    if (!live.stop) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  $("out").hidden = false; $("hello").hidden = true; $("save").disabled = false;
+  live.loop = live$({ video, canvas: $("out"), max: 1280, getModel: () => S.model,
+    conf: () => S.conf, hidden: () => S.hidden,
+    onResult: ({ all, dets, fps }) => { if (S.live !== live) return; S.fps = fps; S.count = dets.length; drawFound(all, S.model); stat(); },
+    onError: (e) => { console.error(e); if (S.live === live) { toast(t("err") + (e.message || e)); stopLive(); } } });
 }
 function stopLive() {
   const live = S.live; if (!live) return;
-  live.stop = true; S.live = null;
-  const v = live.video;
-  if (S.frame) { const c = document.createElement("canvas"); c.width = S.frame.width; c.height = S.frame.height; c.getContext("2d").drawImage(S.frame, 0, 0); S.last = { src: c }; if (S.model) analyse(c, true).catch((e) => console.error(e)); }
+  live.loop.stop(); S.live = null;
+  const v = live.video; const f = live.loop.frame;
+  if (f) { const c = document.createElement("canvas"); c.width = f.width; c.height = f.height; c.getContext("2d").drawImage(f, 0, 0); S.last = { src: c }; if (S.model) analyse(c, true).catch((e) => console.error(e)); }
   if (v.srcObject) { v.srcObject.getTracks().forEach((tr) => tr.stop()); v.srcObject = null; }
   v.pause(); if (v.src && v.src.startsWith("blob:")) URL.revokeObjectURL(v.src);
   $("cam").textContent = t("camOn"); $("cam").classList.remove("on"); $("flipCam").hidden = true;

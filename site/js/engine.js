@@ -143,6 +143,8 @@ export class Model {
     const ep = int8 ? "wasm" : prefer;
     const d = await session(det, ep);
     m.det = d.s; m.ep = d.ep;
+    // kept so a WebGPU model that fails while running can start again on the CPU
+    if (m.ep === "webgpu") m.bytes = { det, head, encoder };
     const shape = m.det.inputMetadata?.[0]?.shape || [];
     m.size = Number(shape[2]) > 0 ? Number(shape[2]) : 640;
     m.inName = m.det.inputNames[0];
@@ -158,6 +160,19 @@ export class Model {
   }
 
   release() { for (const s of [this.det, this.pose, this.encoder, this.decoder]) s?.release?.(); }
+
+  /** The same model again on the CPU (WASM): for a GPU that fails mid-run. */
+  async toWasm() {
+    if (this.ep !== "webgpu" || !this.bytes) return false;
+    const { det, head, encoder } = this.bytes;
+    const old = [this.det, this.pose, this.encoder];
+    this.det = (await session(det, "wasm")).s;
+    if (this.pose) this.pose = (await session(head, "wasm")).s;
+    if (this.encoder) this.encoder = (await session(encoder, "wasm")).s;
+    this.ep = "wasm"; this.bytes = null;
+    for (const s of old) s?.release?.();
+    return true;
+  }
 
   /** Raw detector output for a picture (a canvas): boxes (Q x 4, cxcywh 0-1)
       and per-class scores (Q x C). */
@@ -485,7 +500,14 @@ export function frame(el, max = 1600, reuse = null) {
 
 /** Detections for a canvas with their keypoints or masks: ``{all, dets}``,
     ``dets`` without the classes in ``hidden``. */
-export async function analyse(model, src, { conf = model.conf, hidden = null, flip = true } = {}) {
+export async function analyse(model, src, opts = {}) {
+  try { return await analyseOnce(model, src, opts); } catch (e) {
+    if (!(await model.toWasm())) throw e;     // the GPU gave up: once more on the CPU
+    console.warn("webgpu failed, now on wasm:", e);
+    return analyseOnce(model, src, opts);
+  }
+}
+async function analyseOnce(model, src, { conf = model.conf, hidden = null, flip = true } = {}) {
   const raw = await model.detect(src);
   const emb = model.task === "segment" && model.encoder ? await model.embed(src, src.width, src.height) : null;
   return { src, raw, emb, model, ...(await heads({ src, raw, emb, model }, { conf, hidden, flip })) };
@@ -497,4 +519,46 @@ export async function heads({ src, raw, emb, model }, { conf = model.conf, hidde
   if (model.task === "pose" && model.pose) await model.keypoints(src, dets, { flip });
   if (model.task === "segment" && emb) await model.masks(emb, dets);
   return { all, dets };
+}
+
+/* ---------------------------------------------------------------- live video */
+
+/** Run a model on a playing ``video`` into ``canvas``: every frame is shown at
+    once with the latest detections drawn over it, while the model reads the
+    newest frame whenever it is free (a phone that takes a second a frame
+    still shows smooth video). ``getModel()`` may return null until a model is
+    ready: the video alone shows meanwhile. ``onResult({all, dets, fps})``,
+    ``onError(e)``. Returns ``{stop(), frame}``. */
+export function live({ video, canvas: out, getModel, max = 960, flip = false, conf = () => undefined, hidden = () => null, onResult = () => {}, onError = () => {} }) {
+  const st = { stop: false, frame: null, fps: 0 };
+  let last = null, busy = false, prev = 0, snap = null;
+  const plain = { task: "detect", names: {} };
+  const loop = () => {
+    if (st.stop) return;
+    if (video.readyState >= 2) {
+      st.frame = frame(video, max, st.frame);
+      const f = st.frame, model = getModel();
+      if (model && !busy) {
+        busy = true;
+        // the model reads a copy: the shown frame changes while it works
+        snap = snap && snap.width === f.width && snap.height === f.height ? snap : Object.assign(document.createElement("canvas"), { width: f.width, height: f.height });
+        snap.getContext("2d").drawImage(f, 0, 0);
+        const c = conf();
+        analyse(model, snap, { flip, hidden: hidden(), ...(c != null ? { conf: c } : {}) }).then((r) => {
+          if (st.stop) return;
+          const now = performance.now();
+          if (prev) st.fps = st.fps ? st.fps * 0.8 + 200 / (now - prev) : 1000 / (now - prev);
+          prev = now;
+          last = { ...r, w: snap.width, h: snap.height, model };
+          onResult({ all: r.all, dets: r.dets, fps: st.fps });
+        }).catch((e) => { if (!st.stop) { st.stop = true; onError(e); } }).finally(() => { busy = false; });
+      }
+      const fresh = last && last.model === model && last.w === f.width && last.h === f.height;
+      if (out.width !== f.width || out.height !== f.height) { out.width = f.width; out.height = f.height; }
+      render(out, f, fresh ? last.dets : [], fresh ? model : plain);
+    }
+    if (!st.stop) requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+  return { stop() { st.stop = true; }, get frame() { return st.frame; }, get fps() { return st.fps; } };
 }

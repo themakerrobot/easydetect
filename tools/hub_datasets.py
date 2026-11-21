@@ -102,6 +102,50 @@ DATASETS = {
         "attribution": "BCCD Dataset, MIT licence.",
         "citation": "BCCD Dataset. github.com/Shenggan/BCCD_Dataset.",
     },
+    "fashionpedia": {
+        "title": "Fashionpedia",
+        "license": "CC BY 4.0 (annotations); only pictures under CC BY 2.0, public domain or "
+                   "free stock licences (Unsplash, Pexels, freestocks, Burst)",
+        "source": "https://fashionpedia.github.io/home/",
+        "attribution": "Fashionpedia annotations, CC BY 4.0 (the iMaterialist Fashion group); "
+                       "pictures under the licence listed with each.",
+        "citation": "M. Jia et al. Fashionpedia: Ontology, Segmentation, and an Attribute "
+                    "Localization Dataset. ECCV 2020. arXiv:2004.12276.",
+        "note": "Trained only on the pictures whose own licence allows any use: those under "
+                "non-commercial, no-derivatives, share-alike or unknown terms were left out.",
+    },
+    "ap10k": {
+        "title": "AP-10K (animal pose)",
+        "license": "CC BY 4.0",
+        "source": "https://github.com/AlexTheBad/AP-10K",
+        "attribution": "AP-10K by H. Yu et al., CC BY 4.0.",
+        "citation": "H. Yu et al. AP-10K: A Benchmark for Animal Pose Estimation in the Wild. "
+                    "NeurIPS 2021 Datasets and Benchmarks. arXiv:2108.12617.",
+    },
+    "izembek": {
+        "title": "Izembek Lagoon Waterfowl",
+        "license": "CC0 1.0",
+        "source": "https://lila.science/datasets/izembek-lagoon-waterfowl/",
+        "attribution": "Izembek Lagoon waterfowl surveys, U.S. Geological Survey (LILA BC), "
+                       "CC0 1.0.",
+        "citation": "E. L. Weiser et al. Aerial photo imagery from fall waterfowl surveys, "
+                    "Izembek Lagoon, Alaska, 2017-2019. U.S. Geological Survey data release, "
+                    "2022. doi:10.5066/P9UHP1LE.",
+        "note": "The survey pictures (8688 x 5792) are cut into 640 px squares, so a bird "
+                "keeps its size: run the model on squares of a big aerial picture too.",
+    },
+    "fathomnet": {
+        "title": "FathomNet (CC0 / CC BY part)",
+        "license": "CC0 1.0 or CC BY 4.0, as listed with each picture and box",
+        "source": "https://fathomnet.org",
+        "attribution": "FathomNet (MBARI and contributors); pictures and boxes under CC0 1.0 "
+                       "or CC BY 4.0 as listed with each.",
+        "citation": "K. Katija et al. FathomNet: A global image database for enabling "
+                    "artificial intelligence in the ocean. Scientific Reports 12, 2022. "
+                    "arXiv:2109.14646.",
+        "note": "Only pictures that are CC0 or CC BY 4.0 with every box CC0 or CC BY 4.0, "
+                "and the 60 animals boxed most among them.",
+    },
 }
 
 RF100 = {
@@ -128,7 +172,8 @@ def lookup(key: str) -> dict:
 #: how easydetect-hub's front page groups them, in this order
 CATEGORIES = {
     "General objects": "coco openimages lvis",
-    "Everyday objects": "chess-pieces-mjzgj coins-1apki currency-v4f8j furniture-ngpea marbles "
+    "Everyday objects": "fashionpedia chess-pieces-mjzgj coins-1apki currency-v4f8j "
+                        "furniture-ngpea marbles "
                         "poker-cards-cxcvz soda-bottles uno-deck valentines-chocolate "
                         "washroom-rf1fa wine-labels pills-sxdht lettuce-pallets",
     "People, safety and traffic": "construction-ppe construction-safety-gsnvb mask-wearing-608pr "
@@ -136,14 +181,14 @@ CATEGORIES = {
                                   "soccer-players-5fuqs thermal-dogs-and-people-x6ejw smoke-uvylj "
                                   "road-signs-6ih4y road-traffic vehicles-q0x2v street-work "
                                   "truck-movement excavators-czvg9",
-    "Animals and environment": "caltech-camera-traps animals-ij5d2 bees-jt5in insects-mytwu "
+    "Animals and environment": "ap10k caltech-camera-traps animals-ij5d2 bees-jt5in insects-mytwu "
                                "pests-2xlvx thermal-cheetah-my4dp trail-camera shark-teeth-5atku "
                                "cloud-types taco",
     "Agriculture and plants": "gwhd plantdoc apples-fvpl5 cotton-20xz5 cotton-plant-disease "
                               "grass-weeds leaf-disease-nsdsr peanuts-sd4kf weed-crop-aerial",
-    "Underwater": "aquarium-qlnqy coral-lwptl underwater-objects-5v7p8 underwater-pipes-4ng4t "
-                  "peixos-fish fish-market-ggjso",
-    "Aerial and earth": "aerial-cows aerial-pool aerial-spheres solar-panels-taxvb "
+    "Underwater": "fathomnet aquarium-qlnqy coral-lwptl underwater-objects-5v7p8 "
+                  "underwater-pipes-4ng4t peixos-fish fish-market-ggjso",
+    "Aerial and earth": "izembek aerial-cows aerial-pool aerial-spheres solar-panels-taxvb "
                         "sedimentary-features-9eosf",
     "Medical and microscopy": "bccd abdomen-mri acl-x-ray axial-mri bacteria-ptywi "
                               "bone-fracture-7fylg brain-tumor-m2pbp cavity-rs0uf cells-uyemf "

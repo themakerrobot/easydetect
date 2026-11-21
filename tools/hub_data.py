@@ -4,6 +4,7 @@
 
     python tools/hub_data.py taco                      # one
     python tools/hub_data.py --all                     # every one hub_datasets.py lists
+    python tools/hub_data.py --new --prefetch          # the ones added later, beside training
 
 Each lands in ``<root>/<key>/`` (``~/datasets/hub`` by default) with
 ``images/{train,val}`` (links to the pictures where they were unpacked),
@@ -73,6 +74,19 @@ URLS = {
                   "eccv_18_annotations.tar.gz",
     "lvis-train": "https://dl.fbaipublicfiles.com/LVIS/lvis_v1_train.json.zip",
     "lvis-val": "https://dl.fbaipublicfiles.com/LVIS/lvis_v1_val.json.zip",
+    "fashionpedia-train": "https://s3.amazonaws.com/ifashionist-dataset/images/train2020.zip",
+    "fashionpedia-val": "https://s3.amazonaws.com/ifashionist-dataset/images/val_test2020.zip",
+    "fashionpedia-ann-train": "https://s3.amazonaws.com/ifashionist-dataset/annotations/"
+                              "instances_attributes_train2020.json",
+    "fashionpedia-ann-val": "https://s3.amazonaws.com/ifashionist-dataset/annotations/"
+                            "instances_attributes_val2020.json",
+    # AP-10K's split1 as YOLO-pose files, unchanged from the upstream archive
+    # (github.com/AlexTheBad/AP-10K, CC BY 4.0), which is on Google Drive only
+    "ap10k": "https://huggingface.co/datasets/LibreYOLO/ap10k-pose/resolve/main/ap10k-pose.zip",
+    "izembek-meta": "https://storage.googleapis.com/public-datasets-lila/izembek-lagoon-birds/"
+                    "izembek-lagoon-birds-metadata.zip",
+    "izembek-images": "https://storage.googleapis.com/public-datasets-lila/izembek-lagoon-birds/",
+    "fathomnet": "https://database.fathomnet.org/api/images/query",
 }
 
 
@@ -421,6 +435,257 @@ def lvis(folder: Path, coco: Path) -> Path:
     return lay.finish([c["name"] for c in cats], unknown=True)
 
 
+#: Fashionpedia's pictures each keep their own licence; only these are used:
+#: CC BY 2.0, public domain, and the free stock sites' (Unsplash, Pexels,
+#: freestocks, Burst). Non-commercial, no-derivatives, share-alike and
+#: unknown ones are left out.
+FASHIONPEDIA_PICTURES = {"Attribution License", "Public Domain Dedication", "unsplash", "pexels",
+                         "freestocks", "burst"}
+
+
+def fashionpedia(folder: Path) -> Path:
+    """Clothes and their parts (46 classes), from the pictures whose licence
+    allows any use (``FASHIONPEDIA_PICTURES``). The masks stay in
+    ``ann-{train,val}.json`` for the segmentation model."""
+    train_dir = _unpack(URLS["fashionpedia-train"], folder / "train2020.zip", folder / "src-train")
+    val_dir = _unpack(URLS["fashionpedia-val"], folder / "val_test2020.zip", folder / "src-val")
+    files = {p.name: p for d in (train_dir, val_dir) for p in d.rglob("*.jpg")}
+    lay = Layout(folder)
+    names = None
+    for split in ("train", "val"):
+        ann = json.loads(_fetch(URLS[f"fashionpedia-ann-{split}"], folder / f"ann-{split}.json")
+                         .read_text())
+        free = {x["id"] for x in ann["licenses"] if x["name"] in FASHIONPEDIA_PICTURES}
+        ann = {"images": [im for im in ann["images"] if im.get("license") in free],
+               "annotations": ann["annotations"], "categories": ann["categories"]}
+        cats = sorted(ann["categories"], key=lambda c: c["id"])
+        names = [c["name"] for c in cats]
+        _coco_like(lay, split, ann, folder, {c["id"]: i for i, c in enumerate(cats)},
+                   path_of=lambda im: files.get(Path(im["file_name"]).name, Path("/nonexistent")))
+    return lay.finish(names)
+
+
+def ap10k(folder: Path) -> Path:
+    """54 animal species, boxed; the 17 keypoints of each stay in the source
+    labels (``src/**/labels``) for a keypoint model."""
+    src = _unpack(URLS["ap10k"], folder / "ap10k-pose.zip", folder / "src")
+    cfg = yaml.safe_load(next(src.rglob("*.yaml")).read_text())
+    base = next(p.parent for p in src.rglob("images") if (p / "train").is_dir())
+    names = cfg["names"]
+    names = [names[k] for k in sorted(names)] if isinstance(names, dict) else list(names)
+    lay = Layout(folder)
+    for split in ("train", "val"):
+        for image in sorted((base / "images" / split).iterdir()):
+            label = base / "labels" / split / f"{image.stem}.txt"
+            rows = []
+            if label.exists():
+                for line in label.read_text().splitlines():
+                    v = line.split()
+                    if len(v) >= 5:
+                        rows.append((int(float(v[0])), *map(float, v[1:5])))
+            lay.add(split, image, rows)
+    return lay.finish(names)
+
+
+def _get(url: str, dest: Path, tries: int = 4) -> bool:
+    """One file over http, into place only when whole."""
+    import time
+    import urllib.request
+
+    tmp = dest.with_name(dest.name + ".part")
+    for n in range(tries):
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "easydetect"})
+            with urllib.request.urlopen(request, timeout=120) as r, open(tmp, "wb") as f:
+                shutil.copyfileobj(r, f, 1 << 20)
+            tmp.rename(dest)
+            return True
+        except Exception:  # noqa: BLE001  (tried again, then left out)
+            time.sleep(5 * (n + 1))
+    tmp.unlink(missing_ok=True)
+    return False
+
+
+def izembek(folder: Path, workers: int = 8, tile: int = 640, empty: float = 0.05,
+            limit: int | None = None) -> Path:
+    """Waterfowl from the air (CC0): 8688 x 5792 pictures where a bird is some
+    36 px wide, so each picture is cut into ``tile`` px squares (birds keep
+    their size) as it arrives, and the picture is dropped; the squares with
+    birds are kept, and ``empty`` of the others. A box goes with the square
+    holding at least half of it. Val takes whole pictures."""
+    import concurrent.futures
+
+    import cv2
+
+    meta = _unpack(URLS["izembek-meta"], folder / "meta.zip", folder / "src-meta")
+    ann = json.loads(next(meta.rglob("*.json")).read_text())
+    cats = sorted((c for c in ann["categories"] if c["name"] != "Empty"), key=lambda c: c["id"])
+    index = {c["id"]: i for i, c in enumerate(cats)}
+    per_image = defaultdict(list)
+    for a in ann["annotations"]:
+        if a.get("bbox") and a["category_id"] in index:
+            per_image[a["image_id"]].append(a)
+    images = sorted((im for im in ann["images"] if per_image[im["id"]]), key=lambda im: im["id"])
+    images = images[:limit]                     # a few, to try it
+    tiles, tmp = folder / "tiles", folder / "tmp"
+    tiles.mkdir(exist_ok=True)
+    tmp.mkdir(exist_ok=True)
+
+    def starts(n: int) -> list[int]:
+        return sorted(set(list(range(0, max(n - tile, 0), tile)) + [max(n - tile, 0)]))
+
+    def cut(im) -> None:
+        stem = Path(im["file_name"]).stem
+        done = tiles / f"{stem}.json"
+        if done.exists():
+            return
+        raw = tmp / Path(im["file_name"]).name
+        if not raw.exists() and not _get(URLS["izembek-images"] + im["file_name"], raw):
+            print(f"izembek: {im['file_name']} could not be fetched; left out", flush=True)
+            return
+        img = cv2.imread(str(raw))
+        if img is None:
+            raw.unlink(missing_ok=True)
+            return
+        h, w = img.shape[:2]
+        rng = random.Random(stem)
+        made = []
+        for y0 in starts(h):
+            for x0 in starts(w):
+                rows = []
+                for a in per_image[im["id"]]:
+                    bx, by, bw, bh = a["bbox"]
+                    ix = min(bx + bw, x0 + tile) - max(bx, x0)
+                    iy = min(by + bh, y0 + tile) - max(by, y0)
+                    if ix > 0 and iy > 0 and ix * iy >= 0.5 * bw * bh:
+                        r = box(index[a["category_id"]], bx - x0, by - y0, bx + bw - x0,
+                                by + bh - y0, tile, tile)
+                        if r:
+                            rows.append(r)
+                if not rows and rng.random() >= empty:
+                    continue
+                name = f"{stem}_{x0}_{y0}.jpg"
+                cv2.imwrite(str(tiles / name), img[y0:y0 + tile, x0:x0 + tile],
+                            [cv2.IMWRITE_JPEG_QUALITY, 90])
+                made.append([name, rows])
+        done.write_text(json.dumps(made))
+        raw.unlink(missing_ok=True)
+
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        for i, _ in enumerate(pool.map(cut, images), 1):
+            if i % 100 == 0 or i == len(images):
+                print(f"izembek: {i}/{len(images)} pictures cut", flush=True)
+    stems = [Path(im["file_name"]).stem for im in images]
+    random.Random(0).shuffle(stems)
+    val = set(stems[: len(stems) // 10])
+    lay = Layout(folder)
+    for stem in sorted(stems):
+        done = tiles / f"{stem}.json"
+        if not done.exists():
+            continue
+        for name, rows in json.loads(done.read_text()):
+            lay.add("val" if stem in val else "train", tiles / name, [tuple(r) for r in rows])
+    return lay.finish([c["name"] for c in cats])
+
+
+#: FathomNet pictures and boxes whose licences allow any use; the rest
+#: (much of it CC BY-NC-ND) is left out
+FATHOMNET_LICENCES = {"CC0-1.0", "CC-BY-4.0"}
+
+
+def fathomnet(folder: Path, workers: int = 16, classes: int = 60, min_boxes: int = 300,
+              most: int = 60000, page: int = 200, limit: int | None = None) -> Path:
+    """Sea life (FathomNet), only pictures that are CC0 or CC BY 4.0 with every
+    box CC0 or CC BY 4.0: the whole catalogue is read once (``catalog.jsonl``,
+    resumable), the ``classes`` concepts with the most boxes (at least
+    ``min_boxes``) are kept with the pictures holding only those, at most
+    ``most`` of them. ``credits.json`` lists each picture's licence and
+    address, for the credit CC BY asks."""
+    import concurrent.futures
+    import time
+    import urllib.request
+
+    catalog, state = folder / "catalog.jsonl", folder / "catalog.offset"
+    if not (folder / "catalog.done").exists():
+        offset = int(state.read_text()) if state.exists() else 0
+        with open(catalog, "a") as out:
+            while True:
+                body = json.dumps({"limit": page, "offset": offset}).encode()
+                for n in range(8):
+                    try:
+                        headers = {"Content-Type": "application/json", "User-Agent": "easydetect"}
+                        request = urllib.request.Request(URLS["fathomnet"], data=body,
+                                                         headers=headers)
+                        with urllib.request.urlopen(request, timeout=300) as r:
+                            got = json.loads(r.read())
+                        break
+                    except Exception:  # noqa: BLE001
+                        time.sleep(30 * (n + 1))
+                else:
+                    raise RuntimeError(f"fathomnet: the catalogue would not answer at {offset}")
+                if not got or (limit and offset >= limit):
+                    break
+                for im in got:
+                    boxes = im.get("boundingBoxes") or []
+                    if (im.get("valid", True) and im.get("imageLicense") in FATHOMNET_LICENCES
+                            and boxes and all(b.get("annotationLicense") in FATHOMNET_LICENCES
+                                              and not b.get("groupOf") for b in boxes)):
+                        out.write(json.dumps({
+                            "uuid": im["uuid"], "url": im["url"], "w": im["width"],
+                            "h": im["height"], "licence": im["imageLicense"],
+                            "boxes": [[b["concept"], b["x"], b["y"], b["width"], b["height"]]
+                                      for b in boxes]}) + "\n")
+                out.flush()
+                offset += len(got)
+                state.write_text(str(offset))
+                if offset % 10000 < page:
+                    print(f"fathomnet: {offset} pictures read", flush=True)
+        (folder / "catalog.done").touch()
+    entries = {}
+    for line in catalog.read_text().splitlines():
+        e = json.loads(line)
+        entries[e["uuid"]] = e
+    count = defaultdict(int)
+    for e in entries.values():
+        for b in e["boxes"]:
+            count[b[0]] += 1
+    names = sorted(c for c in sorted(count, key=count.get, reverse=True)[:classes]
+                   if count[c] >= min_boxes)
+    index = {c: i for i, c in enumerate(names)}
+    # a picture with a box of a concept left out would teach that animal as absent
+    keep = sorted(u for u, e in entries.items() if all(b[0] in index for b in e["boxes"]))
+    random.Random(0).shuffle(keep)
+    keep = keep[:most]
+    src = folder / "src"
+    src.mkdir(exist_ok=True)
+
+    def get(u: str) -> None:
+        e = entries[u]
+        dest = src / f"{u}{Path(urllib.parse.urlparse(e['url']).path).suffix.lower() or '.jpg'}"
+        if not dest.exists():
+            _get(e["url"], dest)
+
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        for i, _ in enumerate(pool.map(get, keep), 1):
+            if i % 2000 == 0 or i == len(keep):
+                print(f"fathomnet: {i}/{len(keep)} pictures tried", flush=True)
+    files = {p.stem: p for p in src.iterdir() if not p.name.endswith(".part")}
+    val = set(keep[: len(keep) // 10])
+    lay = Layout(folder)
+    credits = []
+    for u in sorted(keep):
+        e = entries[u]
+        if u not in files:
+            continue
+        w, h = float(e["w"]), float(e["h"])
+        rows = [r for c, x, y, bw, bh in e["boxes"]
+                for r in [box(index[c], x, y, x + bw, y + bh, w, h)] if r]
+        lay.add("val" if u in val else "train", files[u], rows, stem=u)
+        credits.append({"uuid": u, "licence": e["licence"], "url": e["url"]})
+    (folder / "credits.json").write_text(json.dumps(credits))
+    return lay.finish(names)
+
+
 def rf100(name: str, root: Path) -> tuple[Path, Path]:
     """(train.yaml, score.yaml) of the whole set, laid out by rf100.py."""
     sys.path.insert(0, str(HERE))
@@ -432,7 +697,9 @@ def rf100(name: str, root: Path) -> tuple[Path, Path]:
 
 
 MAKERS = {"bccd": bccd, "plantdoc": plantdoc, "gwhd": gwhd, "taco": taco,
-          "doclaynet": doclaynet, "caltech-camera-traps": caltech_camera_traps}
+          "doclaynet": doclaynet, "caltech-camera-traps": caltech_camera_traps,
+          "fashionpedia": fashionpedia, "ap10k": ap10k, "izembek": izembek,
+          "fathomnet": fathomnet}
 
 
 #: what a prefetch fetches, in two lanes at once: the quick ones (training
@@ -440,6 +707,10 @@ MAKERS = {"bccd": bccd, "plantdoc": plantdoc, "gwhd": gwhd, "taco": taco,
 QUICK = ["bccd", "taco", "plantdoc", *(f"rf100-{n}" for n in RF100_SETS)]
 BIG = ["gwhd", "doclaynet", "caltech-camera-traps", "lvis"]
 ORDER = QUICK + BIG
+#: added after the first run: fetched on their own (``--new``) until they train;
+#: the big downloads take the second lane
+NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet"]
+BIG += ["fashionpedia", "izembek", "fathomnet"]
 
 
 def _lock_path(key: str, root: Path) -> Path:
@@ -554,6 +825,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("keys", nargs="*")
     parser.add_argument("--all", action="store_true", help="every dataset, in training order")
+    parser.add_argument("--new", action="store_true", help="the datasets added after the first run")
     parser.add_argument("--skip", nargs="*", default=[], help="leave these out")
     parser.add_argument("--prefetch", action="store_true",
                         help="one at a time behind a lock, going on past a failure")
@@ -561,7 +833,8 @@ def main() -> int:
     parser.add_argument("--coco", default="~/datasets/coco")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
-    keys = [k for k in (ORDER if args.all else args.keys) if k not in args.skip]
+    chosen = ORDER if args.all else NEW if args.new else args.keys
+    keys = [k for k in chosen if k not in args.skip]
     root, coco = Path(args.root).expanduser(), Path(args.coco).expanduser()
     if args.prefetch:
         return prefetch(keys, root, coco)

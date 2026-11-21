@@ -28,7 +28,9 @@ const T = {
     noteSeg: "Masks also need MobileSAM's encoder (28 MB, once).",
     notePose: "Keypoints go on the boxes named \"person\" (every box when there is none).",
     noteLic: "This model follows its dataset's terms. Check them before commercial use.",
-    camErr: "Could not open the webcam: ", count: "{n} found", ms: "{0} ms", fps: "{0} fps",
+    camErr: "Could not open the webcam: ",
+    camDenied: "The camera is blocked: allow it in the address bar, then try again.", camNone: "No camera found.",
+    camBusy: "Another app is using the camera. Close it and try again.", camNoApi: "This browser cannot open a camera here (it needs https).", count: "{n} found", ms: "{0} ms", fps: "{0} fps",
     samDefault: "MobileSAM", poseDefault: "COCO people", epNow: "running on {0}",
   },
   ko: {
@@ -48,7 +50,9 @@ const T = {
     noteSeg: "마스크에는 MobileSAM 인코더(28 MB)도 한 번 받아요.",
     notePose: "키포인트는 \"person\" 상자에 붙어요(그런 이름이 없으면 모든 상자).",
     noteLic: "이 모델은 데이터셋 조건을 따라요. 상업용은 먼저 확인하세요.",
-    camErr: "웹캠을 열지 못했어요: ", count: "{n}개", ms: "{0} ms", fps: "{0} fps",
+    camErr: "웹캠을 열지 못했어요: ",
+    camDenied: "카메라가 막혀 있어요. 주소창에서 카메라를 허용한 뒤 다시 눌러 주세요.", camNone: "카메라를 찾지 못했어요.",
+    camBusy: "다른 앱이 카메라를 쓰고 있어요. 그 앱을 닫고 다시 눌러 주세요.", camNoApi: "이 브라우저에서는 여기서 카메라를 열 수 없어요(https 필요).", count: "{n}개", ms: "{0} ms", fps: "{0} fps",
     samDefault: "MobileSAM", poseDefault: "COCO 사람", epNow: "{0}에서 실행 중",
   },
 };
@@ -285,16 +289,37 @@ async function openFile(f) {
 }
 function drawPlain(c) { const o = $("out"); o.width = c.width; o.height = c.height; o.getContext("2d").drawImage(c, 0, 0); o.hidden = false; $("hello").hidden = true; }
 
+/* why a camera did not open, in words */
+function camWhy(e) {
+  const n = e && e.name;
+  return n === "NotAllowedError" || n === "SecurityError" ? t("camDenied")
+    : n === "NotFoundError" || n === "OverconstrainedError" ? t("camNone")
+    : n === "NotReadableError" || n === "AbortError" ? t("camBusy")
+    : t("camErr") + ((e && (e.message || e.name)) || e);
+}
+let camTicket = 0;
 async function camera() {
-  if (S.live && S.live.cam) { stopLive(); return; }
+  if ((S.live && S.live.cam) || S.camOpening) {
+    S.camOpening = false; camTicket++; stopLive();
+    $("cam").textContent = t("camOn"); $("cam").classList.remove("on"); return;
+  }
   stopLive();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast(t("camNoApi")); return; }
+  const ticket = ++camTicket; S.camOpening = true;
+  $("cam").textContent = t("camOff"); $("cam").classList.add("on");
+  let stream;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
-    const v = $("vid"); v.src = ""; v.srcObject = stream; await v.play();
-    startLive(v, true);
-    $("cam").textContent = t("camOff"); $("cam").classList.add("on");
-    navigator.mediaDevices.enumerateDevices().then((ds) => { $("flipCam").hidden = ds.filter((d) => d.kind === "videoinput").length < 2; }).catch(() => {});
-  } catch (e) { toast(t("camErr") + (e.message || e.name)); }
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch (e) {
+    if (ticket === camTicket) { S.camOpening = false; $("cam").textContent = t("camOn"); $("cam").classList.remove("on"); toast(camWhy(e)); }
+    return;
+  }
+  if (ticket !== camTicket) { stream.getTracks().forEach((tr) => tr.stop()); return; }   // stopped meanwhile
+  S.camOpening = false;
+  const v = $("vid"); v.removeAttribute("src"); v.srcObject = stream;
+  try { await v.play(); } catch (e) { stream.getTracks().forEach((tr) => tr.stop()); v.srcObject = null; $("cam").textContent = t("camOn"); $("cam").classList.remove("on"); toast(camWhy(e)); return; }
+  startLive(v, true);
+  navigator.mediaDevices.enumerateDevices().then((ds) => { $("flipCam").hidden = ds.filter((d) => d.kind === "videoinput").length < 2; }).catch(() => {});
 }
 function startLive(video, cam) {
   S.last = null; S.fps = 0;
@@ -306,7 +331,7 @@ function startLive(video, cam) {
     if (S.model && video.readyState >= 2) {
       const c = grab(video, true);
       if (c) {
-        try { await analyse(c, false); } catch (e) { console.error(e); }
+        try { await analyse(c, false); } catch (e) { console.error(e); toast(t("err") + (e.message || e)); stopLive(); return; }
         const now = performance.now(); S.fps = S.fps ? S.fps * 0.8 + 200 / (now - prev) : 1000 / (now - prev); prev = now;
       }
     } else if (video.readyState >= 2) { const c = grab(video, true); if (c) drawPlain(c); }
@@ -318,7 +343,7 @@ function stopLive() {
   const live = S.live; if (!live) return;
   live.stop = true; S.live = null;
   const v = live.video;
-  if (S.frame) { const c = document.createElement("canvas"); c.width = S.frame.width; c.height = S.frame.height; c.getContext("2d").drawImage(S.frame, 0, 0); S.last = { src: c }; if (S.model) analyse(c, true); }
+  if (S.frame) { const c = document.createElement("canvas"); c.width = S.frame.width; c.height = S.frame.height; c.getContext("2d").drawImage(S.frame, 0, 0); S.last = { src: c }; if (S.model) analyse(c, true).catch((e) => console.error(e)); }
   if (v.srcObject) { v.srcObject.getTracks().forEach((tr) => tr.stop()); v.srcObject = null; }
   v.pause(); if (v.src && v.src.startsWith("blob:")) URL.revokeObjectURL(v.src);
   $("cam").textContent = t("camOn"); $("cam").classList.remove("on"); $("flipCam").hidden = true;

@@ -108,7 +108,7 @@ const T = {
     introHead: "Models for public datasets", tryHead: "Try it",
     title: "Object detectors for <em>public datasets</em>, ready to run.",
     lead: "No PyTorch, no GPU. Install easydetect and name a model: it downloads once and runs on any CPU, an Intel NPU or a Raspberry Pi.",
-    ctaBrowse: "Browse models", ctaDocs: "Docs on GitHub", datasets: "datasets", models: "models", torch: "PyTorch needed",
+    ctaBrowse: "Browse models", ctaDocs: "Docs on GitHub", datasets: "datasets", models: "models",
     licShort: "Built on ed-s (Apache-2.0). Each model follows its dataset's terms: keep the credit, and check before commercial use.",
     browseTitle: "Models", browseSub: "ed-s · 320 px (with 8-bit) and 640 px · scored COCO's way on each val split",
     search: "Search a dataset, class or category (helmet, cell, fish…)", all: "All",
@@ -146,7 +146,7 @@ const T = {
     introHead: "공개 데이터셋 모델", tryHead: "바로 써 보기",
     title: "<em>공개 데이터셋</em>으로 학습한<br>바로 쓰는 물체 인식 모델",
     lead: "PyTorch도 GPU도 필요 없어요. easydetect를 깔고 모델 이름만 쓰면 돼요. 한 번 받아 두면 CPU, 인텔 NPU, 라즈베리파이에서 돌아가요.",
-    ctaBrowse: "모델 둘러보기", ctaDocs: "GitHub 문서", datasets: "데이터셋", models: "모델", torch: "PyTorch 필요",
+    ctaBrowse: "모델 둘러보기", ctaDocs: "GitHub 문서", datasets: "데이터셋", models: "모델",
     licShort: "ed-s 모델은 Apache-2.0이에요. 여기 모델은 공개 데이터셋으로 학습해서 그 데이터셋 조건을 따라요. 표기를 지키고, 상업용이면 먼저 확인해 주세요.",
     browseTitle: "모델", browseSub: "ed-s · 320 px(8비트 포함)와 640 px · 각 val을 COCO 방식으로 채점",
     search: "데이터셋 · 클래스 · 분야로 찾기 (helmet, cell, fish…)", all: "전체",
@@ -307,7 +307,7 @@ function renderFacts() {
   // a model is a dataset's detector, mask or keypoint model: its 320 and 640 px sizes count once
   const models = S.datasets.reduce((k, d) => k + d.tasks.length, 0);
   $("facts").innerHTML = `<div><b>${n || "—"}</b><span>${esc(t("datasets"))}</span></div>
-    <div><b>${models || "—"}</b><span>${esc(t("models"))}</span></div><div><b>0</b><span>${esc(t("torch"))}</span></div>`;
+    <div><b>${models || "—"}</b><span>${esc(t("models"))}</span></div>`;
 }
 function renderChips() {
   const count = new Map();

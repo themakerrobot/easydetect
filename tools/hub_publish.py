@@ -336,7 +336,9 @@ def front_readme(index: dict, repo: str = REPO) -> str:
     big = [k for k in sorted(index) if k.endswith("-640")]
     example = next((k for k in big if k.startswith("taco/")), (big or sorted(index))[0])
     small = next((k for k in sorted(index) if k.endswith("-320")), example)
-    datasets, models = len(_by_dataset(index)), len(index)
+    # a model is a dataset's detector, mask or keypoint model, its sizes counted once
+    datasets = len(_by_dataset(index))
+    models = len({(k.split("/", 1)[0], m.get("task", "detect")) for k, m in index.items()})
     return "\n".join([
         # each model follows its dataset's terms: not one licence for the repository
         "---", "license: other", "license_name: dataset-terms",

@@ -36,8 +36,10 @@ def _iou(a, b):
     return inter / np.maximum(area_a[:, None] + area_b[None] - inter, 1e-9)
 
 
-def pick(onnx: Path, data: str, limit: int | None = 2000, threads: int = 4) -> tuple[float, dict]:
-    """(best threshold, {threshold: (precision, recall, F1)})."""
+def pick(onnx: Path, data: str, limit: int | None = 2000, threads: int = 4,
+         device: str = "CPU") -> tuple[float, dict]:
+    """(best threshold, {threshold: (precision, recall, F1)}); ``device``
+    "CUDA" runs a float model on the GPU (an 8-bit one stays on the CPU)."""
     import cv2
     import onnxruntime as ort
 
@@ -45,7 +47,10 @@ def pick(onnx: Path, data: str, limit: int | None = 2000, threads: int = 4) -> t
 
     opt = ort.SessionOptions()
     opt.intra_op_num_threads = threads
-    s = ort.InferenceSession(str(onnx), opt, providers=["CPUExecutionProvider"])
+    from easydetect.predictor import ort_providers
+
+    s = ort.InferenceSession(str(onnx), opt,
+                             providers=ort_providers(device, ort.get_available_providers()))
     inp = s.get_inputs()[0]
     size = int(inp.shape[2])
     outs = [o.name for o in s.get_outputs()]

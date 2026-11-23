@@ -211,7 +211,7 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
     # an IR holds no class names: OpenVINO reads them beside it
     shutil.move(str(xml.with_suffix(".names.json")), folder / f"{name}.names.json")
 
-    conf, _ = pick(onnx, data, limit)
+    conf, _ = pick(onnx, data, limit, device=GPU)
     embed_metadata(onnx, {"easydetect.conf": f"{conf:.2f}"})
     score_data = score_data or data
     scores = {"onnx": score(onnx, score_data, limit, backend="onnxruntime", device=GPU)}

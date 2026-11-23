@@ -23,7 +23,8 @@ import json
 from pathlib import Path
 
 
-def score(path: Path, data: str, limit: int | None, backend: str | None = None) -> dict:
+def score(path: Path, data: str, limit: int | None, backend: str | None = None,
+          device: str = "CPU") -> dict:
     """mAP50-95 and mAP50 of one exported model on the val split, two ways:
     ``map``/``map50`` with each query's best class (what Pibo shows), and
     ``map_official``/``map50_official`` with the 300 best (query, class)
@@ -42,7 +43,7 @@ def score(path: Path, data: str, limit: int | None, backend: str | None = None) 
 
     ds = DetDataset(data, "val", 64, augment=False)
     files = ds.files[:limit] if limit else ds.files
-    model = Detector(str(path), device="CPU", verbose=False,
+    model = Detector(str(path), device=device, verbose=False,
                      **({"backend": backend} if backend else {}))
     model(np.zeros((32, 32, 3), np.uint8))
     predictor = model.predictor

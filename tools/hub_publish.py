@@ -43,6 +43,19 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+
+def _gpu() -> str:
+    """"CUDA" when onnxruntime here has it (onnxruntime-gpu), else "CPU": float
+    models and MobileSAM are scored there; 8-bit ones always on the CPU."""
+    try:
+        import onnxruntime as ort
+
+        return "CUDA" if "CUDAExecutionProvider" in ort.get_available_providers() else "CPU"
+    except ImportError:
+        return "CPU"
+
+
+GPU = _gpu()
 REPO = "leeyunjai/easydetect-hub"
 KEEP = ("model", "variant", "num_classes", "decoder_act", "qat", "queries", "denoising",
         "names", "imgsz", "epochs")
@@ -201,7 +214,7 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
     conf, _ = pick(onnx, data, limit)
     embed_metadata(onnx, {"easydetect.conf": f"{conf:.2f}"})
     score_data = score_data or data
-    scores = {"onnx": score(onnx, score_data, limit, backend="onnxruntime")}
+    scores = {"onnx": score(onnx, score_data, limit, backend="onnxruntime", device=GPU)}
     files = [f"{name}.pt", f"{name}.onnx", f"{name}.xml", f"{name}.bin", f"{name}.names.json"]
     if size <= 320:
         if int8_from:
@@ -227,13 +240,18 @@ def build(weights: Path, data: str, folder: Path, size: int, limit: int | None,
         runs = [("onnx", onnx)] + ([("int8", folder / f"{name}-int8.onnx")] if size <= 320 else [])
         for kind, path in runs:
             if task == "segment":
-                r = score_seg(str(path), str(beside), truth, limit, backend="onnxruntime")
+                # an 8-bit detector is scored on the CPU, as a Raspberry Pi runs
+                # it; MobileSAM's encoder and float models go on the GPU
+                r = score_seg(str(path), str(beside), truth, limit, backend="onnxruntime",
+                              device="CPU" if kind == "int8" else GPU, seg_device=GPU)
                 task_scores[kind] = r["mask_map50_95"]
             elif pose_data:
-                r = score_pose_data(str(path), str(beside), pose_data, limit)
+                r = score_pose_data(str(path), str(beside), pose_data, limit,
+                                    device="CPU" if kind == "int8" else GPU, pose_device=GPU)
                 task_scores[kind] = r["oks_ap"]
             else:
-                r = score_pose(str(path), str(beside), coco, limit)
+                r = score_pose(str(path), str(beside), coco, limit,
+                               device="CPU" if kind == "int8" else GPU)
                 task_scores[kind] = r["oks_ap"]
     thumbnail(onnx, score_data, folder / "sample.jpg", task=task)
     files.append("sample.jpg")

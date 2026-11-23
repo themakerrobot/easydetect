@@ -56,7 +56,11 @@ class BoxSegmenter:
         else:
             import onnxruntime as ort
 
-            providers = ["CPUExecutionProvider"]
+            from .predictor import ort_providers
+
+            # "CUDA"/"AUTO" put the encoder, the heavy part, on the GPU when this
+            # onnxruntime has one; "CPU" keeps both on the CPU
+            providers = ort_providers(device, ort.get_available_providers())
             self._encoder = ort.InferenceSession(str(encoder), providers=providers)
             self._decoder = ort.InferenceSession(str(decoder), providers=providers)
 

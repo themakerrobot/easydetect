@@ -259,7 +259,10 @@ class KeypointEstimator:
         else:
             import onnxruntime as ort
 
-            self._model = ort.InferenceSession(str(model), providers=["CPUExecutionProvider"])
+            from .predictor import ort_providers
+
+            self._model = ort.InferenceSession(
+                str(model), providers=ort_providers(device, ort.get_available_providers()))
 
     def _infer(self, crops: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         if self.backend == "onnxruntime":

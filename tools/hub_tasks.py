@@ -280,7 +280,8 @@ def seg_train(key: str, root: Path, epochs: int = 20, batch: int = 16,
 
 
 def score_seg(model: str, decoder: str, truth: str, limit: int | None = None,
-              device: str = "CPU", backend: str | None = None) -> dict:
+              device: str = "CPU", backend: str | None = None,
+              seg_device: str | None = None) -> dict:
     """Mask mAP50-95 and mAP50 on ``truth`` (a val.json of ``seg-data``),
     COCO's way: each picture's 100 most confident objects above 0.05, a mask
     each from the decoder in the box. Objects of a class the picture's
@@ -300,6 +301,8 @@ def score_seg(model: str, decoder: str, truth: str, limit: int | None = None,
     det = Detector(model, task="segment", device=device, verbose=False,
                    **({"backend": backend} if backend else {}))
     det.seg_model = decoder
+    if seg_device:                  # MobileSAM's encoder on a device of its own (a GPU)
+        det._ensure_segmenter(seg_device)
     ids = sorted(gt.imgs)[:limit] if limit else sorted(gt.imgs)
     found = []
     for k, image_id in enumerate(ids):
@@ -341,7 +344,7 @@ def score_pose(model: str, pose: str, coco: Path, limit: int | None = None,
 
 
 def score_pose_data(model: str, pose: str, data: str, limit: int | None = None,
-                    device: str = "CPU") -> dict:
+                    device: str = "CPU", pose_device: str | None = None) -> dict:
     """OKS AP on a keypoint dataset's val split (``data``, Ultralytics' pose
     format) the way it is used: the detector's boxes of the classes the
     keypoint model is for, a keypoint set each, every picture's misses and
@@ -352,7 +355,7 @@ def score_pose_data(model: str, pose: str, data: str, limit: int | None = None,
     from easydetect.data.keypoints import load_yolo
     from easydetect.pose import KeypointAP, KeypointEstimator, keypoint_rows
 
-    estimator = KeypointEstimator(pose, device=device)
+    estimator = KeypointEstimator(pose, device=pose_device or device)
     spec = estimator.spec
     images, people = load_yolo(data, "val", spec)
     detector = Detector(model, device=device, verbose=False)

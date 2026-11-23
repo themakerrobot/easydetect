@@ -10,6 +10,8 @@ official page (Nov 2026).
 
 from __future__ import annotations
 
+import re
+
 DATASETS = {
     "coco": {
         "title": "COCO 2017",
@@ -155,10 +157,42 @@ RF100 = {
 }
 
 
+#: RF100-VL's own categories, as the hub groups them
+RF100VL_CATEGORIES = {"Flora/Fauna": "Animals and environment",
+                      "Industrial": "Industry and electronics",
+                      "Lab Imaging": "Medical and microscopy", "Aerial": "Aerial and earth",
+                      "Document": "Documents and screens", "Sport": "People, safety and traffic",
+                      "Misc": "Other"}
+RF100VL = {
+    "license": "Apache-2.0 (as Roboflow100-VL's authors release it)",
+    "citation": "P. Robicheaux et al. Roboflow100-VL: A Multi-Domain Object Detection Benchmark "
+                "for Vision-Language Models. arXiv:2505.20612, 2025.",
+}
+
+
+def _rf100vl_name(key: str) -> str:
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from hub_data import RF100VL_SETS
+
+    return RF100VL_SETS[key]
+
+
 def lookup(key: str) -> dict:
-    """The entry for ``key``; ``rf100-<name>`` for any Roboflow 100 dataset."""
+    """The entry for ``key``; ``rf100-<name>`` for any Roboflow 100 dataset,
+    ``rf100vl-<name>`` for an RF100-VL one."""
     if key in DATASETS:
         return dict(DATASETS[key])
+    if key.startswith("rf100vl-"):
+        name = _rf100vl_name(key)
+        pretty = re.sub(r"[-_]+", " ", name).strip().capitalize()
+        return {"title": f"{pretty} (RF100-VL)", "license": RF100VL["license"],
+                "source": "https://github.com/roboflow/rf100-vl",
+                "attribution": f"{name} from Roboflow100-VL (Roboflow Universe), Apache-2.0 as "
+                               "its authors release it.",
+                "citation": RF100VL["citation"]}
     if key.startswith("rf100-"):
         name = key[len("rf100-"):]
         return {"title": f"Roboflow 100: {name}", "license": RF100["license"],
@@ -207,5 +241,11 @@ CATEGORIES = {
 
 
 def category(key: str) -> str:
+    if key.startswith("rf100vl-"):
+        import json
+        from pathlib import Path
+
+        cats = json.loads((Path(__file__).resolve().parent / "rf100vl.json").read_text())
+        return RF100VL_CATEGORIES.get(cats["category"].get(_rf100vl_name(key)), "Other")
     name = key[len("rf100-"):] if key.startswith("rf100-") else key
     return next((c for c, names in CATEGORIES.items() if name in names.split()), "Other")

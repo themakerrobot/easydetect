@@ -275,7 +275,7 @@ async function load() {
       d.variants.sort((a, b) => TASKS.indexOf(a.task) - TASKS.indexOf(b.task) || (a.imgsz || 0) - (b.imgsz || 0));
       d.tasks = TASKS.filter((k) => d.variants.some((v) => v.task === k));
       d.meta = (d.variants.find((v) => v.task === "detect") || d.variants[0]);
-      d.title = d.meta.title || d.id; d.name = prettyName(d.id, d.title); d.rf = d.id.startsWith("rf100-");
+      d.title = d.meta.title || d.id; d.name = prettyName(d.id, d.title); d.rf = d.id.startsWith("rf100-") ? "RF100" : d.id.startsWith("rf100vl-") ? "RF100-VL" : "";
       d.category = d.meta.category || "Other";
       d.classes = Object.values(d.meta.classes || {}).map(String);
       d.of = (task, size) => d.variants.find((v) => v.task === task && v.imgsz === size);
@@ -338,11 +338,11 @@ function renderGrid() {
     && (!words.length || words.every((w) => hay(d).includes(w))));
   list.sort(S.sort === "score" ? (a, b) => best(b) - best(a)
           : S.sort === "classes" ? (a, b) => b.classes.length - a.classes.length
-          : (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category) || a.rf - b.rf || a.name.localeCompare(b.name));
+          : (a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category) || (a.rf || "").localeCompare(b.rf || "") || a.name.localeCompare(b.name));
   $("grid").innerHTML = list.length ? list.map((d) => `
     <button type="button" class="card" data-id="${esc(d.id)}" aria-label="${esc(d.name)}">
       <div class="thumb"><img loading="lazy" alt="" src="${thumbOf(d, S.task)}" onerror="this.remove()">
-        <span class="badge">${esc(catName(d.category))}</span>${d.rf ? `<span class="badge r">RF100</span>` : ""}</div>
+        <span class="badge">${esc(catName(d.category))}</span>${d.rf ? `<span class="badge r">${d.rf}</span>` : ""}</div>
       <div class="body">
         <div><h3>${esc(d.name)}</h3><div class="names">${d.classes.length} ${esc(t("classes"))} · ${esc(d.classes.slice(0, 6).join(", "))}</div></div>
         <div class="scores">${sc(d.of(shown(), 320), 320)}${sc(d.of(shown(), 640), 640)}</div>
@@ -413,7 +413,7 @@ function drawDetail() {
   const sizes = d.variants.filter((x) => x.task === task);
   $("detail").innerHTML = `<div class="dl">
     <div class="ph"><div class="grow"><h2>${esc(d.name)}</h2>
-      <div class="k"><span class="badge">${esc(catName(d.category))}</span>${d.rf ? `<span>${esc(t("rf"))}</span>` : ""}<code>${esc(hub)}</code></div></div>
+      <div class="k"><span class="badge">${esc(catName(d.category))}</span>${d.rf ? `<span>${esc(d.rf === "RF100" ? t("rf") : "Roboflow100-VL")}</span>` : ""}<code>${esc(hub)}</code></div></div>
       ${d.tasks.length > 1 ? `<div class="row">${d.tasks.map((k) => `<button type="button" data-task="${k}" class="db${k === task ? " on" : ""}">${esc(t(k))}</button>`).join("")}</div>` : ""}
       ${sizes.length > 1 ? `<div class="row">${sizes.map((x) => `<button type="button" data-size="${x.imgsz}" class="db${x === v ? " on" : ""}">${x.imgsz} ${t("px")}</button>`).join("")}</div>` : ""}
       <button type="button" class="hbtn" id="close" aria-label="${esc(t("close"))}">✕</button></div>

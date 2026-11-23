@@ -26,6 +26,7 @@ import contextlib
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -141,6 +142,23 @@ def _clone(url: str, dest: Path) -> Path:
     _run(["git", "clone", "--depth", "1", url, dest])
     (dest / ".cloned").touch()
     return dest
+
+
+#: Roboflow100-VL (github.com/roboflow/rf100-vl, 2025): 100 more Roboflow
+#: Universe datasets, released by its authors under Apache-2.0. tools/rf100vl.json
+#: keeps each one's category and those left out (in Roboflow 100 too, already
+#: here on their own, or under terms of their own)
+RF100VL = json.loads((HERE / "rf100vl.json").read_text())
+RF100VL_URL = "https://huggingface.co/datasets/probicheaux/rf100-vl/resolve/main"
+RF100VL_TREE = "https://huggingface.co/api/datasets/probicheaux/rf100-vl/tree/main/data"
+
+
+def rf100vl_key(name: str) -> str:
+    return "rf100vl-" + re.sub(r"-+", "-", name).strip("-")
+
+
+#: hub key -> RF100-VL dataset name, for the ones trained here
+RF100VL_SETS = {rf100vl_key(n): n for n in sorted(RF100VL["category"]) if n not in RF100VL["skip"]}
 
 
 # ---------------------------------------------------------------- laying out
@@ -721,6 +739,90 @@ def fathomnet(folder: Path, workers: int = 16, classes: int = 60, min_boxes: int
     return lay.finish(names)
 
 
+def rf100vl_all(root: Path) -> Path:
+    """Every RF100-VL dataset of ``RF100VL_SETS`` laid out under
+    ``<root>/rf100vl/<name>/``, from its authors' parquet files (42 GB, the
+    pictures inside): a shard at a time, downloaded, written out per dataset
+    and split, then deleted. Train trains, valid picks the best epoch, test
+    scores (``score.yaml``), as Roboflow 100's do."""
+    import urllib.request
+
+    import pyarrow.parquet as pq
+
+    base = root / "rf100vl"
+    if (base / ".ready").exists():
+        return base
+    meta = json.loads(_fetch(f"{RF100VL_URL}/dataset_metadata.json",
+                             base / "dataset_metadata.json").read_text())
+    request = urllib.request.Request(RF100VL_TREE, headers={"User-Agent": "easydetect"})
+    with urllib.request.urlopen(request, timeout=120) as r:
+        shards = sorted(e["path"] for e in json.loads(r.read()) if e["path"].endswith(".parquet"))
+    wanted = set(RF100VL_SETS.values())
+    work = base / ".shards"
+    for n, shard in enumerate(shards, 1):
+        name = Path(shard).name
+        done = work / f"{name}.done"
+        if done.exists():
+            continue
+        split = name.split("-")[0]                      # train, valid or test
+        local = _fetch(f"{RF100VL_URL}/{shard}", work / name)
+        pf = pq.ParquetFile(local)
+        kept = 0
+        outlined = defaultdict(lambda: [0, 0])          # dataset: [boxes, with a polygon]
+        for g in range(pf.num_row_groups):
+            for row in pf.read_row_group(g).to_pylist():
+                if row["dataset_name"] not in wanted:
+                    continue
+                folder = base / row["dataset_name"]
+                images, labels = folder / "images" / split, folder / "labels" / split
+                images.mkdir(parents=True, exist_ok=True)
+                labels.mkdir(parents=True, exist_ok=True)
+                stem = row["image_id"]
+                suffix = Path(row["file_name"]).suffix.lower() or ".jpg"
+                picture = images / f"{stem}{suffix}"
+                if not picture.exists():
+                    tmp = picture.with_name(picture.name + ".part")
+                    tmp.write_bytes(row["image"]["bytes"])
+                    tmp.rename(picture)
+                w, h, a = float(row["width"]), float(row["height"]), row["annotations"]
+                rows = [r for c, (x, y, bw, bh) in zip(a["category_id"], a["bbox"], strict=True)
+                        for r in [box(int(c), x, y, x + bw, y + bh, w, h)] if r]
+                count = outlined[row["dataset_name"]]
+                count[0] += len(a["bbox"])
+                count[1] += sum(1 for p in (a.get("segmentation") or [])
+                                if p and any(len(q) >= 6 for q in p))
+                lines = [f"{c} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n" for c, cx, cy, bw, bh in rows]
+                (labels / f"{stem}.txt").write_text("".join(lines))
+                kept += 1
+        # which datasets outline their objects too: those could get a mask model
+        with open(work / "outlined.jsonl", "a") as f:
+            f.write(json.dumps({"shard": name, "outlined": outlined}) + "\n")
+        done.touch()
+        local.unlink(missing_ok=True)
+        local.with_name(local.name + ".ok").unlink(missing_ok=True)
+        print(f"rf100vl: shard {n}/{len(shards)} ({name}): {kept} pictures", flush=True)
+    by_name = {d["name"]: i for i, d in meta["datasets"].items()}
+    for name in sorted(wanted):
+        folder = base / name
+        if name not in by_name or not folder.exists():
+            print(f"rf100vl: {name} not in the files; left out", flush=True)
+            continue
+        cats = meta["categories"][by_name[name]]
+        cats = (cats.get("train") or next(iter(cats.values())))["categories"]
+        names = {int(c["id"]): str(c["name"]) for c in cats}
+        names = {i: names.get(i, f"class{i}") for i in range(max(names) + 1)}
+        have = {sp for sp in ("train", "valid", "test") if (folder / "images" / sp).is_dir()}
+        val = "valid" if "valid" in have else "test"
+        cfg = {"path": str(folder.resolve()), "train": "images/train", "val": f"images/{val}",
+               "names": names}
+        (folder / "data.yaml").write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
+        cfg["val"] = "images/test" if "test" in have else f"images/{val}"
+        (folder / "score.yaml").write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
+        (folder / ".ready").touch()
+    (base / ".ready").touch()
+    return base
+
+
 def rf100(name: str, root: Path) -> tuple[Path, Path]:
     """(train.yaml, score.yaml) of the whole set, laid out by rf100.py."""
     sys.path.insert(0, str(HERE))
@@ -744,9 +846,9 @@ BIG = ["gwhd", "doclaynet", "caltech-camera-traps", "lvis"]
 ORDER = QUICK + BIG
 #: added after the first run: fetched on their own (``--new``) until they train;
 #: the big downloads take the second lane
-NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet"]
+NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet", *RF100VL_SETS]
 QUICK += ["ap10k"]
-BIG += ["fashionpedia", "izembek", "fathomnet"]
+BIG += ["fashionpedia", "izembek", "fathomnet", *RF100VL_SETS]
 ORDER = QUICK + BIG
 
 
@@ -754,8 +856,18 @@ def _lock_path(key: str, root: Path) -> Path:
     return root / ".locks" / f"{key}.lock"
 
 
+def _folder(key: str, root: Path) -> Path:
+    if key.startswith("rf100vl-"):
+        return root / "rf100vl" / RF100VL_SETS[key]
+    if key.startswith("rf100-"):
+        return root / "rf100" / key[len("rf100-"):]
+    return root / key
+
+
 def is_ready(key: str, root: Path) -> bool:
     """Laid out already: training can start on it at once."""
+    if key.startswith("rf100vl-"):
+        return (_folder(key, root) / ".ready").exists()
     if key.startswith("rf100-"):
         return (root / "rf100" / key[len("rf100-"):] / "facts.json").exists()
     return (root / key / ".ready").exists()
@@ -769,8 +881,7 @@ def prefetch_running(root: Path) -> bool:
 def boxes_per_picture(key: str, root: Path) -> float:
     """Mean boxes a training picture (0 before it is laid out). Pictures with
     hundreds of boxes (cells, circuit parts) need far more GPU memory."""
-    folder = root / "rf100" / key[len("rf100-"):] if key.startswith("rf100-") else root / key
-    labels = list((folder / "labels" / "train").glob("*.txt"))
+    labels = list((_folder(key, root) / "labels" / "train").glob("*.txt"))
     if not labels:
         return 0.0
     return sum(sum(1 for line in f.read_text().splitlines() if line.strip())
@@ -817,6 +928,13 @@ def _locked(path: Path, what: str):
 
 def prepare(key: str, root: Path, coco: Path) -> tuple[Path, Path | None]:
     """(data.yaml to train on, data.yaml to score on when not the same)."""
+    if key.startswith("rf100vl-"):                  # one download lays out all of them
+        with _locked(_lock_path("rf100vl", root), "rf100vl"):
+            rf100vl_all(root)
+        folder = _folder(key, root)
+        if not (folder / ".ready").exists():
+            raise FileNotFoundError(f"{key}: not in RF100-VL's files")
+        return folder / "data.yaml", folder / "score.yaml"
     with _locked(_lock_path(key, root), key):
         if key.startswith("rf100-"):
             return rf100(key[len("rf100-"):], root)

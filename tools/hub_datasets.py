@@ -247,6 +247,15 @@ def lookup(key: str) -> dict:
 
 #: how easydetect-hub's front page groups them, in this order
 CATEGORIES = {
+    # first on the page: a few clear, everyday classes, quick to show what a
+    # detector does (a webcam and hands, cards, coins, animals, furniture);
+    # full keys, listed ahead of their own category
+    "Getting started": "rf100-furniture-ngpea rf100-animals-ij5d2 rf100-hand-gestures-jps7z "
+                       "rf100-uno-deck rf100-chess-pieces-mjzgj rf100-coins-1apki "
+                       "rf100-currency-v4f8j rf100-digits-t2eg6 rf100-soda-bottles "
+                       "rf100-aquarium-qlnqy rf100-road-signs-6ih4y rf100-mask-wearing-608pr "
+                       "rf100-apples-fvpl5 rf100-poker-cards-cxcvz rf100vl-fruitjes rf100vl-ball "
+                       "rf100vl-the-dreidel-project rf100vl-mahjong",
     "General objects": "coco openimages lvis",
     "Everyday objects": "fashionpedia chess-pieces-mjzgj coins-1apki currency-v4f8j "
                         "furniture-ngpea marbles "
@@ -286,6 +295,8 @@ CATEGORIES = {
 
 
 def category(key: str) -> str:
+    if key in CATEGORIES["Getting started"].split():
+        return "Getting started"
     if key.startswith("rf100vl-"):
         import json
         from pathlib import Path

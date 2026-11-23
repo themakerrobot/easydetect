@@ -136,6 +136,48 @@ DATASETS = {
         "note": "The survey pictures (8688 x 5792) are cut into 640 px squares, so a bird "
                 "keeps its size: run the model on squares of a big aerial picture too.",
     },
+    "coco-text": {
+        "title": "COCO-Text",
+        "license": "CC BY 4.0 (annotations); pictures from COCO, under the Flickr terms",
+        "source": "https://bgshih.github.io/cocotext/",
+        "attribution": "COCO-Text annotations, CC BY 4.0; pictures from COCO (Flickr terms).",
+        "citation": "A. Veit et al. COCO-Text: Dataset and Benchmark for Text Detection and "
+                    "Recognition in Natural Images. arXiv:1601.07140, 2016.",
+        "note": "Every word is boxed, legible or not, as one class: text.",
+    },
+    "ena24": {
+        "title": "ENA24 camera traps",
+        "license": "CDLA-Permissive-1.0",
+        "source": "https://lila.science/datasets/ena24detection",
+        "attribution": "ENA24-detection (LILA BC), CDLA-Permissive-1.0.",
+        "citation": "H. Yousif, R. Kays, Z. He. Dynamic Programming Selection of Object "
+                    "Proposals for Sequence-Level Animal Species Classification in the Wild. "
+                    "IEEE Transactions on Circuits and Systems for Video Technology, 2019.",
+    },
+    "boxes-on-bees": {
+        "title": "Boxes on Bees and Pollen",
+        "license": "CDLA-Permissive-1.0",
+        "source": "https://lila.science/datasets/boxes-on-bees-and-pollen/",
+        "attribution": "Boxes on Bees and Pollen (LILA BC), CDLA-Permissive-1.0.",
+        "citation": "Noninvasive bee tracking in videos: deep learning algorithms and cloud "
+                    "platform design specifications. Dataset, 2021.",
+    },
+    "bbbc038": {
+        "title": "BBBC038 nuclei (Data Science Bowl 2018)",
+        "license": "CC0 1.0",
+        "source": "https://bbbc.broadinstitute.org/BBBC038",
+        "attribution": "BBBC038v1 from the Broad Bioimage Benchmark Collection, CC0 1.0.",
+        "citation": "J. C. Caicedo et al. Nucleus segmentation across imaging experiments: the "
+                    "2018 Data Science Bowl. Nature Methods 16, 2019.",
+    },
+    "nuinsseg": {
+        "title": "NuInsSeg (H&E nuclei)",
+        "license": "CC BY 4.0",
+        "source": "https://zenodo.org/records/10518968",
+        "attribution": "NuInsSeg by A. Mahbod et al., CC BY 4.0.",
+        "citation": "A. Mahbod et al. NuInsSeg: A fully annotated dataset for nuclei instance "
+                    "segmentation in H&E-stained histological images. Scientific Data 11, 2024.",
+    },
     "fathomnet": {
         "title": "FathomNet (CC0 / CC BY part)",
         "license": "CC0 1.0 or CC BY 4.0, as listed with each picture and box",
@@ -215,7 +257,8 @@ CATEGORIES = {
                                   "soccer-players-5fuqs thermal-dogs-and-people-x6ejw smoke-uvylj "
                                   "road-signs-6ih4y road-traffic vehicles-q0x2v street-work "
                                   "truck-movement excavators-czvg9",
-    "Animals and environment": "ap10k caltech-camera-traps animals-ij5d2 bees-jt5in insects-mytwu "
+    "Animals and environment": "ap10k ena24 boxes-on-bees caltech-camera-traps animals-ij5d2 "
+                               "bees-jt5in insects-mytwu "
                                "pests-2xlvx thermal-cheetah-my4dp trail-camera shark-teeth-5atku "
                                "cloud-types taco",
     "Agriculture and plants": "gwhd plantdoc apples-fvpl5 cotton-20xz5 cotton-plant-disease "
@@ -224,11 +267,13 @@ CATEGORIES = {
                   "underwater-pipes-4ng4t peixos-fish fish-market-ggjso",
     "Aerial and earth": "izembek aerial-cows aerial-pool aerial-spheres solar-panels-taxvb "
                         "sedimentary-features-9eosf",
-    "Medical and microscopy": "bccd abdomen-mri acl-x-ray axial-mri bacteria-ptywi "
+    "Medical and microscopy": "bbbc038 nuinsseg bccd abdomen-mri acl-x-ray axial-mri "
+                              "bacteria-ptywi "
                               "bone-fracture-7fylg brain-tumor-m2pbp cavity-rs0uf cells-uyemf "
                               "gynecology-mri liver-disease mitosis-gjs3g parasites-1s07h phages "
                               "stomata-cells x-ray-rheumatology",
-    "Documents and screens": "doclaynet activity-diagrams-qdobr document-parts signatures-xc8up "
+    "Documents and screens": "coco-text doclaynet activity-diagrams-qdobr document-parts "
+                             "signatures-xc8up "
                              "paper-parts tweeter-posts tweeter-profile number-ops digits-t2eg6",
     "Industry and electronics": "4-fold-defect asbestos cable-damage cables-nl42k cell-towers "
                                 "corrosion-bi3q3 gauge-u2lwv printed-circuit-board "

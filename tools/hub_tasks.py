@@ -43,7 +43,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 #: datasets the hub has whose annotations outline objects / place keypoints
-SEG = ("coco", "taco", "lvis", "fashionpedia")
+SEG = ("coco", "taco", "lvis", "fashionpedia", "bbbc038", "nuinsseg")
 #: COCO's people take easydetect's keypoint network as it is; the others get
 #: one trained on their own keypoints (long_run's hub-pose-train)
 POSE = ("coco", "ap10k")
@@ -120,6 +120,17 @@ def _fashionpedia(folder: Path):
     return cats, splits
 
 
+def _saved(folder: Path):
+    """The masks hub_data.py wrote beside a layout (``seg-{train,val}.json``,
+    COCO polygons, each picture with its ``path``)."""
+    cats, splits = None, {}
+    for split in ("train", "val"):
+        ann = json.loads((folder / f"seg-{split}.json").read_text())
+        cats = cats or sorted(ann["categories"], key=lambda c: c["id"])
+        splits[split] = (ann["images"], ann["annotations"], lambda im: Path(im["path"]), None)
+    return cats, splits
+
+
 def sources(key: str, root: Path, coco: Path):
     """``(categories in class order, {split: (images, annotations, path_of, unknown_of)})``."""
     if key == "coco":
@@ -130,6 +141,8 @@ def sources(key: str, root: Path, coco: Path):
         return _lvis(root / "lvis", coco)
     if key == "fashionpedia":
         return _fashionpedia(root / "fashionpedia")
+    if (root / key / "seg-train.json").exists():
+        return _saved(root / key)
     raise KeyError(f"{key}: no masks on the hub's list (those with: {', '.join(SEG)})")
 
 

@@ -88,6 +88,13 @@ URLS = {
                     "izembek-lagoon-birds-metadata.zip",
     "izembek-images": "https://storage.googleapis.com/public-datasets-lila/izembek-lagoon-birds/",
     "fathomnet": "https://database.fathomnet.org/api/images/query",
+    "coco-text": "https://github.com/bgshih/cocotext/releases/download/dl/cocotext.v2.zip",
+    "ena24-images": "https://storage.googleapis.com/public-datasets-lila/ena24/ena24.zip",
+    "ena24-labels": "https://storage.googleapis.com/public-datasets-lila/ena24/ena24.json",
+    "boxes-on-bees": "https://storage.googleapis.com/public-datasets-lila/boxes-on-bees/"
+                     "boxes-on-bees-2021.zip",
+    "bbbc038": "https://data.broadinstitute.org/bbbc/BBBC038/stage1_train.zip",
+    "nuinsseg": "https://zenodo.org/api/records/10518968/files/NuInsSeg.zip/content",
 }
 
 
@@ -739,6 +746,173 @@ def fathomnet(folder: Path, workers: int = 16, classes: int = 60, min_boxes: int
     return lay.finish(names)
 
 
+def _split(keys: list, share: float = 0.1) -> set:
+    """The val part of ``keys``: a tenth, the same every time (seed 0)."""
+    keys = sorted(keys)
+    random.Random(0).shuffle(keys)
+    return set(keys[: max(1, round(len(keys) * share))])
+
+
+def coco_text(folder: Path, coco: Path) -> Path:
+    """Text in COCO's pictures (COCO-Text v2, CC BY 4.0): every word boxed,
+    legible or not, as one class; its own train and val sets."""
+    src = _unpack(URLS["coco-text"], folder / "cocotext.v2.zip", folder / "src")
+    ann = json.loads(next(src.rglob("cocotext.v2.json")).read_text())
+    per_image = defaultdict(list)
+    for a in ann["anns"].values():
+        per_image[a["image_id"]].append(a)
+    lay = Layout(folder)
+    for im in ann["imgs"].values():
+        path = next((p for p in (coco / "images" / part / f"{im['id']:012d}.jpg"
+                                 for part in ("train2017", "val2017")) if p.exists()), None)
+        if path is None:
+            continue
+        w, h = float(im["width"]), float(im["height"])
+        rows = [r for a in per_image[im["id"]]
+                for r in [box(0, a["bbox"][0], a["bbox"][1], a["bbox"][0] + a["bbox"][2],
+                              a["bbox"][1] + a["bbox"][3], w, h)] if r]
+        lay.add("val" if im["set"] == "val" else "train", path, rows)
+    return lay.finish(["text"])
+
+
+def ena24(folder: Path) -> Path:
+    """Animals in camera-trap pictures of eastern North America (LILA BC,
+    CDLA-Permissive): 23 classes, every picture boxed."""
+    images = _unpack(URLS["ena24-images"], folder / "ena24.zip", folder / "src")
+    ann = json.loads(_fetch(URLS["ena24-labels"], folder / "ena24.json").read_text())
+    files = {p.name: p for p in images.rglob("*.jpg")}
+    cats = sorted(ann["categories"], key=lambda c: c["id"])
+    index = {c["id"]: i for i, c in enumerate(cats)}
+    val = _split([im["id"] for im in ann["images"]])
+    lay = Layout(folder)
+    for split in ("train", "val"):
+        part = {"images": [im for im in ann["images"] if (im["id"] in val) == (split == "val")],
+                "annotations": ann["annotations"]}
+        _coco_like(lay, split, part, images, index,
+                   path_of=lambda im: files.get(Path(im["file_name"]).name, Path("/nonexistent")))
+    return lay.finish([c["name"] for c in cats])
+
+
+def boxes_on_bees(folder: Path) -> Path:
+    """Bees, with and without pollen, at hive entrances (LILA BC,
+    CDLA-Permissive), from Pascal VOC files."""
+    src = _unpack(URLS["boxes-on-bees"], folder / "boxes-on-bees-2021.zip", folder / "src")
+    xmls = sorted(src.rglob("*.xml"))
+    parsed = {}
+    for x in xmls:
+        root = ET.parse(x).getroot()
+        objects = [((o.findtext("name") or "").strip(),
+                    [float(o.find("bndbox").findtext(k)) for k in ("xmin", "ymin", "xmax", "ymax")])
+                   for o in root.iter("object") if o.find("bndbox") is not None]
+        w, h = float(root.findtext("size/width") or 0), float(root.findtext("size/height") or 0)
+        parsed[x] = (w, h, objects)
+    names = sorted({n for _, _, objs in parsed.values() for n, _ in objs if n})
+    val = _split([x.stem for x in xmls])
+    lay = Layout(folder)
+    for x, (w, h, objs) in parsed.items():
+        picture = next((p for p in (x.with_suffix(e) for e in (".jpg", ".JPG", ".png", ".jpeg"))
+                        if p.exists()), None)
+        if picture is None or not w or not h:
+            continue
+        rows = [r for n, b in objs if n in names for r in [box(names.index(n), *b, w, h)] if r]
+        lay.add("val" if x.stem in val else "train", picture, rows)
+    return lay.finish(names)
+
+
+def _outlines(labels, image_id: int, start: int) -> list[dict]:
+    """COCO annotations (polygon and box) for each object of an instance label
+    picture (0 background, one number an object)."""
+    import cv2
+    import numpy as np
+
+    anns = []
+    for k, value in enumerate(v for v in np.unique(labels) if v):
+        mask = (labels == value).astype(np.uint8)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        polys = [c.reshape(-1).astype(float).tolist() for c in contours if len(c) >= 3]
+        if not polys:
+            continue
+        ys, xs = np.nonzero(mask)
+        x0, y0 = float(xs.min()), float(ys.min())
+        anns.append({"id": start + k, "image_id": image_id, "category_id": 0, "iscrowd": 0,
+                     "segmentation": polys, "area": float(mask.sum()),
+                     "bbox": [x0, y0, float(xs.max()) + 1 - x0, float(ys.max()) + 1 - y0]})
+    return anns
+
+
+def _instances(folder: Path, pictures: list[tuple[Path, object]], name: str) -> Path:
+    """A one-class layout from pictures and their instance labels, and the same
+    objects as COCO polygons in ``seg-{train,val}.json`` for the mask model."""
+
+    val = _split([p.stem for p, _ in pictures])
+    seg = {s: {"images": [], "annotations": [], "categories": [{"id": 0, "name": name}]}
+           for s in ("train", "val")}
+    lay = Layout(folder)
+    next_id = 1
+    for i, (picture, labels_of) in enumerate(sorted(pictures, key=lambda t: str(t[0]))):
+        labels = labels_of() if callable(labels_of) else labels_of
+        if labels is None:
+            continue
+        h, w = labels.shape[:2]
+        split = "val" if picture.stem in val else "train"
+        anns = _outlines(labels, i, next_id)
+        next_id += len(anns) + 1
+        rows = [r for a in anns for r in [box(0, a["bbox"][0], a["bbox"][1],
+                                              a["bbox"][0] + a["bbox"][2],
+                                              a["bbox"][1] + a["bbox"][3], w, h)] if r]
+        lay.add(split, picture, rows, stem=f"{i:05d}")
+        seg[split]["images"].append({"id": i, "width": w, "height": h,
+                                     "file_name": picture.name, "path": str(picture.resolve())})
+        seg[split]["annotations"].extend(anns)
+    for split, d in seg.items():
+        (folder / f"seg-{split}.json").write_text(json.dumps(d))
+    return lay.finish([name])
+
+
+def bbbc038(folder: Path) -> Path:
+    """Nuclei in microscope pictures of many kinds (BBBC038, the 2018 Data
+    Science Bowl, CC0): one mask a nucleus, as boxes and polygons."""
+    import cv2
+    import numpy as np
+
+    src = _unpack(URLS["bbbc038"], folder / "stage1_train.zip", folder / "src")
+    pictures = []
+    for image_dir in sorted(p for p in src.rglob("images") if p.is_dir()):
+        picture = next(image_dir.glob("*.png"), None)
+        masks = sorted((image_dir.parent / "masks").glob("*.png"))
+        if picture is None or not masks:
+            continue
+
+        def labels_of(masks=masks):
+            first = cv2.imread(str(masks[0]), cv2.IMREAD_GRAYSCALE)
+            if first is None:
+                return None
+            out = np.zeros(first.shape, np.int32)
+            for k, m in enumerate(masks, 1):
+                one = cv2.imread(str(m), cv2.IMREAD_GRAYSCALE)
+                if one is not None:
+                    out[one > 0] = k
+            return out
+
+        pictures.append((picture, labels_of))
+    return _instances(folder, pictures, "nucleus")
+
+
+def nuinsseg(folder: Path) -> Path:
+    """Nuclei in H&E tissue of 31 human and mouse organs (NuInsSeg, CC BY
+    4.0): its instance label masks as boxes and polygons."""
+    import cv2
+
+    src = _unpack(URLS["nuinsseg"], folder / "NuInsSeg.zip", folder / "src")
+    pictures = []
+    for picture in sorted(src.rglob("tissue images/*.png")):
+        found = [p for p in (picture.parent.parent / "label masks").glob(picture.stem + ".*")]
+        if not found:
+            continue
+        pictures.append((picture, lambda f=found[0]: cv2.imread(str(f), cv2.IMREAD_UNCHANGED)))
+    return _instances(folder, pictures, "nucleus")
+
+
 def rf100vl_all(root: Path) -> Path:
     """Every RF100-VL dataset of ``RF100VL_SETS`` laid out under
     ``<root>/rf100vl/<name>/``, from its authors' parquet files (42 GB, the
@@ -852,7 +1026,8 @@ def rf100(name: str, root: Path) -> tuple[Path, Path]:
 MAKERS = {"bccd": bccd, "plantdoc": plantdoc, "gwhd": gwhd, "taco": taco,
           "doclaynet": doclaynet, "caltech-camera-traps": caltech_camera_traps,
           "fashionpedia": fashionpedia, "ap10k": ap10k, "izembek": izembek,
-          "fathomnet": fathomnet}
+          "fathomnet": fathomnet, "ena24": ena24, "boxes-on-bees": boxes_on_bees,
+          "bbbc038": bbbc038, "nuinsseg": nuinsseg}
 
 
 #: what a prefetch fetches, in two lanes at once: the quick ones (training
@@ -862,9 +1037,11 @@ BIG = ["gwhd", "doclaynet", "caltech-camera-traps", "lvis"]
 ORDER = QUICK + BIG
 #: added after the first run: fetched on their own (``--new``) until they train;
 #: the big downloads take the second lane
-NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet", *RF100VL_SETS]
-QUICK += ["ap10k"]
-BIG += ["fashionpedia", "izembek", "fathomnet", *RF100VL_SETS]
+#: the second batch: boxes on more subjects, and nuclei with masks
+MORE = ["coco-text", "bbbc038", "nuinsseg", "ena24", "boxes-on-bees"]
+NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, *MORE]
+QUICK += ["ap10k", "coco-text", "bbbc038", "nuinsseg"]
+BIG += ["fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, "ena24", "boxes-on-bees"]
 ORDER = QUICK + BIG
 
 
@@ -960,6 +1137,8 @@ def prepare(key: str, root: Path, coco: Path) -> tuple[Path, Path | None]:
         folder.mkdir(parents=True, exist_ok=True)
         if key == "lvis":
             return lvis(folder, coco), None
+        if key == "coco-text":
+            return coco_text(folder, coco), None
         return MAKERS[key](folder), None
 
 

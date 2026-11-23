@@ -262,13 +262,14 @@ LAB_FORM = [("lab-form-n320", ["lab-form"], ["coco-data"])]
 #: resumes (downloads, unpacking, training from last.pt), so after a power cut
 #: the same command carries on: python tools/long_run.py --only 'hub-*'
 sys.path.insert(0, str(HERE))
+from hub_data import MORE as HUB_MORE  # noqa: E402
 from hub_data import RF100_SETS, RF100VL_SETS  # noqa: E402
 
 HUB_ORDER = ["coco", "bccd", "construction-ppe", "taco", "plantdoc", "gwhd",
              *(f"rf100-{_n}" for _n in RF100_SETS),
              "doclaynet", "caltech-camera-traps", "lvis", "openimages",
              # added after the first run (hub_data.py --new fetches them beside it)
-             "ap10k", "fashionpedia", "izembek", "fathomnet", *RF100VL_SETS]
+             "ap10k", "fashionpedia", "izembek", "fathomnet", *HUB_MORE, *RF100VL_SETS]
 #: a training still improving at its last epochs goes on this much longer, once
 HUB_EXTEND = 1.5
 #: epochs and patience where the picture count does not decide them

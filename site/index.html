@@ -15,10 +15,8 @@
   <h1><a href="#"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="currentColor"/><rect x="7" y="10" width="18" height="14" rx="2.5" fill="none" stroke="white" stroke-width="2.4"/><rect x="7" y="6" width="10" height="5" rx="1.5" fill="white"/><circle cx="16" cy="17" r="2.2" fill="white"/></svg>easydetect hub</a></h1>
   <nav>
     <a class="navlink on" href="#models" data-t="navModels">모델</a>
-    <a class="navlink" href="try.html"><span class="wide" data-t="navTry">브라우저에서 해 보기</span><span class="narrow" data-t="navTryS">해 보기</span></a>
-    <a class="navlink ext-link" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener">GitHub <span class="ext">↗</span></a>
-    <a class="navlink ext-link" href="https://huggingface.co/leeyunjai/easydetect-hub" target="_blank" rel="noopener">Hugging Face <span class="ext">↗</span></a>
-    <a class="navlink ext-link" href="https://github.com/themakerrobot/easydetect-lab" target="_blank" rel="noopener">Lab <span class="ext">↗</span></a>
+    <a class="navlink" href="try.html"><span class="wide" data-t="navTry">웹에서 해 보기</span><span class="narrow" data-t="navTryS">해 보기</span></a>
+    <a class="navlink ext-link" href="https://themakerrobot.github.io/easydetect-lab/" target="_blank" rel="noopener"><span data-t="navLab">Lab 가이드</span> <span class="ext">↗</span></a>
   </nav>
   <span class="grow"></span>
   <button type="button" class="lang-toggle" id="lang">EN</button>
@@ -30,11 +28,6 @@
       <h2 data-t-html="title"></h2>
       <p class="lead" data-t="lead"></p>
       <div class="facts" id="facts"></div>
-      <div class="row">
-        <a class="db go" href="#models" data-t="ctaBrowse">모델 둘러보기</a>
-        <a class="db" href="try.html" data-t="ctaTry">브라우저에서 해 보기</a>
-        <a class="db" href="https://github.com/themakerrobot/easydetect" target="_blank" rel="noopener" data-t="ctaDocs">GitHub 문서</a>
-      </div>
       <p class="hint lic" data-t="licShort"></p>
     </div>
     <div class="try">
@@ -52,8 +45,8 @@
       </ul>
     </div>
     <div class="labgo">
-      <a class="db go" href="https://github.com/themakerrobot/easydetect-lab" target="_blank" rel="noopener" data-t="labStart">easydetect lab 시작하기</a>
-      <a class="db" href="https://github.com/themakerrobot/easydetect-lab/releases/latest" target="_blank" rel="noopener" data-t="labZip">오프라인 묶음 받기</a>
+      <a class="db go" href="https://themakerrobot.github.io/easydetect-lab/" target="_blank" rel="noopener" data-t="labStart">lab 가이드</a>
+      <a class="db" href="https://github.com/themakerrobot/easydetect-lab/releases/latest" target="_blank" rel="noopener" data-t="labZip">내려받기 · 릴리스 노트</a>
       <p class="hint" data-t="labNote"></p>
     </div>
   </section>
@@ -99,8 +92,8 @@ const CAT_KO = {
 
 const T = {
   en: {
-    navModels: "Models", navTry: "Try in the browser", navTryS: "Try it", ctaTry: "Try in the browser",
-    tryIt: "Try it in the browser", tryNote: "runs in this browser, nothing is uploaded",
+    navModels: "Models", navTry: "Try it on the web", navTryS: "Try it", navLab: "Lab guide",
+    tryIt: "Try it on the web", tryNote: "runs in this browser, nothing is uploaded",
     tryHere: "Try it here", tryBig: "Open the full page", miniCam: "▶ Webcam", miniCamOff: "■ Stop", miniFlip: "Switch camera", miniPic: "Picture",
     miniLoad: "Downloading", miniRt: "Starting", miniErr: "Could not load: ", miniFound: "{n} found", camErr: "Could not open the webcam: ",
     camDenied: "The camera is blocked: allow it in the address bar, then try again.", camNone: "No camera found.",
@@ -108,7 +101,7 @@ const T = {
     introHead: "Models for public datasets", tryHead: "Try it",
     title: "Object detectors for <em>public datasets</em>, ready to run.",
     lead: "No PyTorch, no GPU. Install easydetect and name a model: it downloads once and runs on any CPU, an Intel NPU or a Raspberry Pi.",
-    ctaBrowse: "Browse models", ctaDocs: "Docs on GitHub", datasets: "datasets", models: "models",
+    datasets: "datasets", models: "models",
     licShort: "Built on ed-s (Apache-2.0). Each model follows its dataset's terms: keep the credit, and check before commercial use.",
     browseTitle: "Models", browseSub: "ed-s · 320 px (with 8-bit) and 640 px · scored COCO's way on each val split",
     search: "Search a dataset, class or category (helmet, cell, fish…)", all: "All",
@@ -129,7 +122,7 @@ const T = {
     labS2: "Draw boxes, or let it label them for you",
     labS3: "Train: about 15 minutes on a laptop CPU for a class",
     labS4: "Export to ONNX or OpenVINO and run it anywhere",
-    labStart: "Start easydetect lab", labZip: "Offline bundle",
+    labStart: "Lab guide", labZip: "Download · release notes",
     labNote: "Works without the internet. A model trained on your own pictures is yours to use, products included. A model from here can be its starting point too: upload its .pt.",
     tAll: "All tasks", detect: "Detection", segment: "Segmentation", pose: "Keypoints",
     mDetect: "mAP50-95", mSegment: "mask mAP50-95", mPose: "OKS AP", boxScore: "box mAP50-95",
@@ -137,8 +130,8 @@ const T = {
     anyMask: "Any model draws masks with task=\"segment\" (MobileSAM, not trained or scored on this dataset).",
   },
   ko: {
-    navModels: "모델", navTry: "브라우저에서 해 보기", navTryS: "해 보기", ctaTry: "브라우저에서 해 보기",
-    tryIt: "브라우저에서 해 보기", tryNote: "이 브라우저에서만 돌아요. 아무것도 올라가지 않아요",
+    navModels: "모델", navTry: "웹에서 해 보기", navTryS: "해 보기", navLab: "Lab 가이드",
+    tryIt: "웹에서 해 보기", tryNote: "이 브라우저에서만 돌아요. 아무것도 올라가지 않아요",
     tryHere: "여기서 해 보기", tryBig: "큰 화면으로", miniCam: "▶ 웹캠", miniCamOff: "■ 멈추기", miniFlip: "카메라 바꾸기", miniPic: "사진",
     miniLoad: "받는 중", miniRt: "준비 중", miniErr: "불러오지 못했어요: ", miniFound: "{n}개", camErr: "웹캠을 열지 못했어요: ",
     camDenied: "카메라가 막혀 있어요. 주소창에서 카메라를 허용한 뒤 다시 눌러 주세요.", camNone: "카메라를 찾지 못했어요.",
@@ -146,7 +139,7 @@ const T = {
     introHead: "공개 데이터셋 모델", tryHead: "바로 써 보기",
     title: "<em>공개 데이터셋</em>으로 학습한<br>바로 쓰는 물체 인식 모델",
     lead: "PyTorch도 GPU도 필요 없어요. easydetect를 깔고 모델 이름만 쓰면 돼요. 한 번 받아 두면 CPU, 인텔 NPU, 라즈베리파이에서 돌아가요.",
-    ctaBrowse: "모델 둘러보기", ctaDocs: "GitHub 문서", datasets: "데이터셋", models: "모델",
+    datasets: "데이터셋", models: "모델",
     licShort: "ed-s 모델은 Apache-2.0이에요. 여기 모델은 공개 데이터셋으로 학습해서 그 데이터셋 조건을 따라요. 표기를 지키고, 상업용이면 먼저 확인해 주세요.",
     browseTitle: "모델", browseSub: "ed-s · 320 px(8비트 포함)와 640 px · 각 val을 COCO 방식으로 채점",
     search: "데이터셋 · 클래스 · 분야로 찾기 (helmet, cell, fish…)", all: "전체",
@@ -167,7 +160,7 @@ const T = {
     labS2: "상자를 그려요. 자동 라벨도 돼요",
     labS3: "학습해요. 수업용 설정은 노트북 CPU로 15분쯤",
     labS4: "ONNX·OpenVINO로 내보내서 어디서나 돌려요",
-    labStart: "easydetect lab 시작하기", labZip: "오프라인 묶음 받기",
+    labStart: "lab 가이드", labZip: "내려받기 · 릴리스 노트",
     labNote: "인터넷 없이도 돼요. 내 사진으로 학습한 모델은 상업용으로도 자유롭게 써요. 여기 모델의 .pt를 올려 시작 모델로 써도 돼요.",
     tAll: "모든 타입", detect: "감지", segment: "세그멘테이션", pose: "포즈",
     mDetect: "mAP50-95", mSegment: "마스크 mAP50-95", mPose: "OKS AP", boxScore: "상자 mAP50-95",

@@ -12,7 +12,7 @@ const HEAD = { segment: "mask_decoder.onnx", pose: "pose.onnx" };
 
 const T = {
   en: {
-    navModels: "Models", navTry: "Try in the browser", navTryS: "Try it", model: "Model", fromHub: "Hub models", fromMine: "My model",
+    navModels: "Models", navTry: "Try it on the web", navTryS: "Try it", navLab: "Lab guide", model: "Model", fromHub: "Hub models", fromMine: "My model",
     mineDrop: "Drop .onnx files here, or click to choose",
     mineHint: "A model exported from the lab or easydetect. For keypoints or masks, also choose the .pose.onnx / .mask_decoder.onnx beside it.",
     input: "Input", open: "Open a picture or video", camOn: "Turn on the webcam", camOff: "Stop the webcam", camSwap: "Switch camera",
@@ -34,7 +34,7 @@ const T = {
     samDefault: "MobileSAM", poseDefault: "COCO people", epNow: "running on {0}",
   },
   ko: {
-    navModels: "모델", navTry: "브라우저에서 해 보기", navTryS: "해 보기", model: "모델", fromHub: "허브 모델", fromMine: "내 모델",
+    navModels: "모델", navTry: "웹에서 해 보기", navTryS: "해 보기", navLab: "Lab 가이드", model: "모델", fromHub: "허브 모델", fromMine: "내 모델",
     mineDrop: ".onnx 파일을 끌어다 놓거나 눌러서 고르세요",
     mineHint: "lab이나 easydetect에서 내보낸 모델이에요. 포즈·세그 모델이면 옆에 있는 .pose.onnx / .mask_decoder.onnx도 같이 고르세요.",
     input: "입력", open: "사진 · 영상 열기", camOn: "웹캠 켜기", camOff: "웹캠 끄기", camSwap: "카메라 바꾸기",

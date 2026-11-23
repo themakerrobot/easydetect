@@ -95,6 +95,24 @@ URLS = {
                      "boxes-on-bees-2021.zip",
     "bbbc038": "https://data.broadinstitute.org/bbbc/BBBC038/stage1_train.zip",
     "nuinsseg": "https://zenodo.org/api/records/10518968/files/NuInsSeg.zip/content",
+    "pped": "https://zenodo.org/api/records/6551758/files/PPED_data.zip/content",
+    "loco-images": "https://go.mytum.de/239870",
+    "loco-labels": "https://raw.githubusercontent.com/tum-fml/loco/main/rgb/loco-all-v1.json",
+    "msu-apples": "https://zenodo.org/api/records/7925397/files/MSUAppleData.zip/content",
+    "swinepose": "https://zenodo.org/api/records/24221533/files/SwinePose_v2.0.zip/content",
+    "bbbc039-images": "https://data.broadinstitute.org/bbbc/BBBC039/images.zip",
+    "bbbc039-masks": "https://data.broadinstitute.org/bbbc/BBBC039/masks.zip",
+    "bbbc039-metadata": "https://data.broadinstitute.org/bbbc/BBBC039/metadata.zip",
+    "noaa-psnf-images": "https://storage.googleapis.com/public-datasets-lila/noaa-psnf/"
+                        "noaa_estuary_fish-images.zip",
+    "noaa-psnf-labels": "https://storage.googleapis.com/public-datasets-lila/noaa-psnf/"
+                        "noaa_estuary_fish-annotations-2023.08.19.zip",
+    "armbench": "https://huggingface.co/datasets/amazon/armbench-segmentation/resolve/main/"
+                "archive/armbench-segmentation-0.1.tar.gz",
+    "artf-clothes": "https://zenodo.org/api/records/14501499/files/"
+                    "artf-all-categories-resized_512x256.zip/content",
+    "everwatch": "https://zenodo.org/api/records/17317117/files/everwatch-dataset.zip/content",
+    "visa": "https://amazon-visual-anomaly.s3.us-west-2.amazonaws.com/VisA_20220922.tar",
 }
 
 
@@ -840,11 +858,12 @@ def _outlines(labels, image_id: int, start: int) -> list[dict]:
     return anns
 
 
-def _instances(folder: Path, pictures: list[tuple[Path, object]], name: str) -> Path:
+def _instances(folder: Path, pictures: list[tuple[Path, object]], name: str,
+               val: set | None = None) -> Path:
     """A one-class layout from pictures and their instance labels, and the same
-    objects as COCO polygons in ``seg-{train,val}.json`` for the mask model."""
-
-    val = _split([p.stem for p, _ in pictures])
+    objects as COCO polygons in ``seg-{train,val}.json`` for the mask model;
+    ``val``: the stems of the val pictures (a tenth, by default)."""
+    val = val if val is not None else _split([p.stem for p, _ in pictures])
     seg = {s: {"images": [], "annotations": [], "categories": [{"id": 0, "name": name}]}
            for s in ("train", "val")}
     lay = Layout(folder)
@@ -911,6 +930,386 @@ def nuinsseg(folder: Path) -> Path:
             continue
         pictures.append((picture, lambda f=found[0]: cv2.imread(str(f), cv2.IMREAD_UNCHANGED)))
     return _instances(folder, pictures, "nucleus")
+
+
+def _voc(folder: Path, xmls: list[Path], image_of, val: set) -> Path:
+    """A layout from Pascal VOC files: classes from the files themselves."""
+    parsed = {}
+    for x in xmls:
+        root = ET.parse(x).getroot()
+        w, h = float(root.findtext("size/width") or 0), float(root.findtext("size/height") or 0)
+        parsed[x] = (w, h, [((o.findtext("name") or "").strip(),
+                             [float(o.find("bndbox").findtext(k)) for k in
+                              ("xmin", "ymin", "xmax", "ymax")])
+                            for o in root.iter("object") if o.find("bndbox") is not None])
+    names = sorted({n for _, _, objs in parsed.values() for n, _ in objs if n})
+    lay = Layout(folder)
+    for x, (w, h, objs) in parsed.items():
+        picture = image_of(x)
+        if picture is None or not picture.exists() or not w or not h:
+            continue
+        rows = [r for n, b in objs if n in names for r in [box(names.index(n), *b, w, h)] if r]
+        lay.add("val" if x.stem in val else "train", picture, rows)
+    return lay.finish(names)
+
+
+def _seg_json(folder: Path, splits: dict) -> None:
+    """``seg-{split}.json`` beside a layout, for the mask model: ``splits``
+    {split: (images, annotations, path_of)} in COCO terms, polygons only."""
+    for split, (images, anns, path_of) in splits.items():
+        keep = [dict(im, path=str(path_of(im).resolve())) for im in images if path_of(im).exists()]
+        ids = {im["id"] for im in keep}
+        out = [a for a in anns if a["image_id"] in ids and isinstance(a.get("segmentation"), list)
+               and any(len(p) >= 6 for p in a["segmentation"])]
+        cats = sorted({a["category_id"] for a in anns})
+        (folder / f"seg-{split}.json").write_text(json.dumps(
+            {"images": keep, "annotations": out,
+             "categories": [{"id": c, "name": str(c)} for c in cats]}))
+
+
+def _seg_named(folder: Path, cats: list[dict]) -> None:
+    """The mask files' categories, named and in the layout's class order."""
+    for split in ("train", "val"):
+        f = folder / f"seg-{split}.json"
+        if f.exists():
+            d = json.loads(f.read_text())
+            index = {c["id"]: i for i, c in enumerate(cats)}
+            d["annotations"] = [dict(a, category_id=index[a["category_id"]])
+                                for a in d["annotations"] if a["category_id"] in index]
+            d["categories"] = [{"id": i, "name": c["name"]} for i, c in enumerate(cats)]
+            f.write_text(json.dumps(d))
+
+
+def pped(folder: Path) -> Path:
+    """Protective equipment in a chemical plant, photographed by its authors
+    (PPED, CC BY 4.0): Pascal VOC files and their own split."""
+    src = _unpack(URLS["pped"], folder / "PPED_data.zip", folder / "src")
+    base = next(p.parent for p in src.rglob("Annotations") if p.is_dir())
+    lists = base / "ImageSets" / "Main"
+    xmls = sorted((base / "Annotations").glob("*.xml"))
+    held = set()
+    for name in ("val.txt", "test.txt"):
+        if (lists / name).exists():
+            held |= set((lists / name).read_text().split())
+    val = held or _split([x.stem for x in xmls])
+    return _voc(folder, xmls, lambda x: base / "JPEGImages" / f"{x.stem}.jpg", val)
+
+
+def loco(folder: Path) -> Path:
+    """Logistics objects in warehouses (LOCO, TU Munich, CC0): forklifts,
+    pallets, pallet trucks, small load carriers, stillages. Val takes whole
+    recordings, as their frames are near-copies of each other."""
+    images = _unpack(URLS["loco-images"], folder / "dataset.zip", folder / "src")
+    ann = json.loads(_fetch(URLS["loco-labels"], folder / "loco-all-v1.json").read_text())
+    cats = sorted(ann["categories"], key=lambda c: c["id"])
+    index = {c["id"]: i for i, c in enumerate(cats)}
+
+    def path_of(im):
+        return images / im["path"].lstrip("/")
+
+    val_runs = _split(sorted({str(Path(im["path"]).parent) for im in ann["images"]}))
+    lay = Layout(folder)
+    for split in ("train", "val"):
+        part = {"images": [im for im in ann["images"]
+                           if (str(Path(im["path"]).parent) in val_runs) == (split == "val")],
+                "annotations": ann["annotations"]}
+        _coco_like(lay, split, part, images, index, path_of=path_of)
+    return lay.finish([c["name"] for c in cats])
+
+
+def msu_apples(folder: Path) -> Path:
+    """Apples in an orchard (MSUAppleData, CC BY 4.0): one class, its own
+    train and test sets, from VGG Image Annotator files."""
+    from PIL import Image
+
+    src = _unpack(URLS["msu-apples"], folder / "MSUAppleData.zip", folder / "src")
+    lay = Layout(folder)
+    for part, split in (("train", "train"), ("test", "val")):
+        notes = next(p for p in src.rglob(f"{part}/annotations.json") if "__MACOSX" not in str(p))
+        meta = json.loads(notes.read_text()).get("_via_img_metadata", {})
+        for entry in meta.values():
+            picture = notes.parent / entry["filename"]
+            if not picture.exists():
+                continue
+            with Image.open(picture) as im:
+                w, h = im.size
+            rows = []
+            for region in entry.get("regions", []):
+                a = region.get("shape_attributes", {})
+                if a.get("name") == "rect":
+                    r = box(0, a["x"], a["y"], a["x"] + a["width"], a["y"] + a["height"], w, h)
+                    if r:
+                        rows.append(r)
+            lay.add(split, picture, rows)
+    return lay.finish(["apple"])
+
+
+#: SwinePose names no lines between its keypoints: these, to draw a pig
+SWINE_SKELETON = [("nose", "front"), ("front", "hip"),
+                  ("front", "right_elbow"), ("right_elbow", "right_carpal"),
+                  ("right_carpal", "front_right_toe"), ("front", "left_elbow"),
+                  ("left_elbow", "left_carpal"), ("left_carpal", "front_left_toe"),
+                  ("hip", "right_stifle"), ("right_stifle", "right_tarsal"),
+                  ("right_tarsal", "rear_right_toe"), ("hip", "left_stifle"),
+                  ("left_stifle", "left_tarsal"), ("left_tarsal", "rear_left_toe")]
+
+
+def _flip_pairs(names: list[str]) -> list[int]:
+    """Each keypoint's mirror image: left and right swapped in its name."""
+    def mirror(n):
+        return (n.replace("left", "\0").replace("right", "left").replace("\0", "right"))
+    return [names.index(mirror(n)) if mirror(n) in names else i for i, n in enumerate(names)]
+
+
+def swinepose(folder: Path) -> Path:
+    """Pigs walking, seen from the side (SwinePose v2, CC BY 4.0): boxes, and
+    15 keypoints each in ``pose/`` with ``pose.yaml`` for the keypoint model.
+    Its pig-wise split: no pig is in both."""
+    src = _unpack(URLS["swinepose"], folder / "SwinePose_v2.0.zip", folder / "src")
+    notes = {split: json.loads(next(src.rglob(f"{name}_pigsplit.json")).read_text())
+             for split, name in (("train", "train"), ("val", "test"))}
+    images_dir = next(p for p in src.rglob("images") if p.is_dir())
+    cat = notes["train"]["categories"][0]
+    k = len(cat["keypoints"])
+    lay = Layout(folder)
+    pose = folder / "pose"
+    for split, ann in notes.items():
+        _coco_like(lay, split, ann, images_dir, {cat["id"]: 0})
+        for d in ("images", "labels"):
+            shutil.rmtree(pose / d / split, ignore_errors=True)
+            (pose / d / split).mkdir(parents=True)
+        per_image = defaultdict(list)
+        for a in ann["annotations"]:
+            per_image[a["image_id"]].append(a)
+        for im in ann["images"]:
+            picture = images_dir / im["file_name"]
+            if not picture.exists():
+                continue
+            w, h = float(im["width"]), float(im["height"])
+            lines = []
+            for a in per_image[im["id"]]:
+                r = box(0, a["bbox"][0], a["bbox"][1], a["bbox"][0] + a["bbox"][2],
+                        a["bbox"][1] + a["bbox"][3], w, h)
+                if not r:
+                    continue
+                kp = a["keypoints"]
+                pts = " ".join(f"{kp[3 * i] / w:.6f} {kp[3 * i + 1] / h:.6f} {int(kp[3 * i + 2])}"
+                               for i in range(k))
+                lines.append(f"0 {r[1]:.6f} {r[2]:.6f} {r[3]:.6f} {r[4]:.6f} {pts}")
+            os.symlink(picture.resolve(), pose / "images" / split / picture.name)
+            (pose / "labels" / split / f"{picture.stem}.txt").write_text(
+                "\n".join(lines) + ("\n" if lines else ""))
+    names = list(cat["keypoints"])
+    (folder / "pose.yaml").write_text(yaml.safe_dump({
+        "path": str(pose.resolve()), "train": "images/train", "val": "images/val",
+        "names": {0: cat["name"]}, "kpt_shape": [k, 3], "flip_idx": _flip_pairs(names),
+        "kpt_names": names,
+        "skeleton": [[names.index(a), names.index(b)] for a, b in SWINE_SKELETON],
+        "oks_sigmas": None}, allow_unicode=True, sort_keys=False))
+    return lay.finish([cat["name"]])
+
+
+def pose_yaml(key: str, root: Path) -> Path:
+    """The keypoint data.yaml of a hub dataset that trains a keypoint model."""
+    if key == "ap10k":
+        return ap10k_pose_yaml(root / key)
+    path = root / key / "pose.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"{key}: no keypoints laid out ({path})")
+    return path
+
+
+def bbbc039(folder: Path) -> Path:
+    """Nuclei in fluorescence pictures (BBBC039, CC0): its 16-bit pictures
+    stretched to 8 bits, each nucleus from its mask (drawn in four colours so
+    that neighbours differ), and its own split (validation and test hold out)."""
+    import cv2
+    import numpy as np
+
+    images = _unpack(URLS["bbbc039-images"], folder / "images.zip", folder / "src-images")
+    masks = _unpack(URLS["bbbc039-masks"], folder / "masks.zip", folder / "src-masks")
+    meta = _unpack(URLS["bbbc039-metadata"], folder / "metadata.zip", folder / "src-meta")
+    held = set()
+    for name in ("validation.txt", "test.txt"):
+        held |= {Path(n).stem for n in next(p for p in meta.rglob(name)
+                                             if "__MACOSX" not in p.parts).read_text().split()}
+    png = folder / "png"
+    png.mkdir(exist_ok=True)
+    pictures = []
+    def real(paths):                    # not macOS's ._ copies in __MACOSX
+        return (p for p in paths if "__MACOSX" not in p.parts and not p.name.startswith("._"))
+
+    for mask in sorted(real(masks.rglob("*.png"))):
+        tif = next(real(images.rglob(f"{mask.stem}.tif")), None)
+        if tif is None:
+            continue
+        out = png / f"{mask.stem}.png"
+        if not out.exists():
+            from PIL import Image
+
+            raw = cv2.imread(str(tif), cv2.IMREAD_UNCHANGED)
+            if raw is None:                    # a TIFF OpenCV does not read
+                with Image.open(tif) as im:
+                    raw = np.asarray(im)
+            raw = raw.astype(np.float32)
+            lo, hi = np.percentile(raw, (0.5, 99.8))
+            stretched = np.clip((raw - lo) / max(hi - lo, 1) * 255, 0, 255)
+            cv2.imwrite(str(out), stretched.astype(np.uint8))
+
+        def labels_of(mask=mask):
+            from PIL import Image
+
+            colour = np.asarray(Image.open(mask))[..., 0]
+            labels = np.zeros(colour.shape, np.int32)
+            for v in (c for c in np.unique(colour) if c):
+                n, parts = cv2.connectedComponents((colour == v).astype(np.uint8))
+                labels[parts > 0] = parts[parts > 0] + labels.max()
+            return labels
+
+        pictures.append((out, labels_of))
+    return _instances(folder, pictures, "nucleus", val=held)
+
+
+def noaa_psnf(folder: Path) -> Path:
+    """Fish and crabs in Puget Sound eelgrass and shores (NOAA, LILA BC,
+    CDLA-Permissive). Pictures with a box of fish-or-crab or unknown are left
+    out (they would teach the animal as absent); a tenth of the empty ones stay."""
+    images = _unpack(URLS["noaa-psnf-images"], folder / "images.zip", folder / "src")
+    labels = _unpack(URLS["noaa-psnf-labels"], folder / "labels.zip", folder / "src-labels")
+    ann = json.loads(next(labels.rglob("*.json")).read_text())
+    named = {c["id"]: c["name"] for c in ann["categories"]}
+    keep_cats = [i for i, n in sorted(named.items()) if n in ("fish", "crab")]
+    index = {c: i for i, c in enumerate(keep_cats)}
+    per_image = defaultdict(list)
+    for a in ann["annotations"]:
+        per_image[a["image_id"]].append(a)
+    files = {p.name: p for p in images.rglob("*.jpg")}
+    chosen = []
+    for im in ann["images"]:
+        anns = per_image[im["id"]]
+        if any(named.get(a["category_id"]) in ("fish_or_crab", "unknown") for a in anns):
+            continue
+        boxed = [a for a in anns if a.get("bbox") and a["category_id"] in index]
+        if not boxed and random.Random(im["id"]).random() >= 0.1:
+            continue
+        chosen.append(im)
+    val = _split([im["id"] for im in chosen])
+    lay = Layout(folder)
+    for split in ("train", "val"):
+        part = {"images": [im for im in chosen if (im["id"] in val) == (split == "val")],
+                "annotations": ann["annotations"]}
+        _coco_like(lay, split, part, images, index,
+                   path_of=lambda im: files.get(Path(im["file_name"]).name, Path("/nonexistent")))
+    return lay.finish([named[c] for c in keep_cats])
+
+
+def _coco_pair(folder: Path, splits: dict, names_from: dict, path_of) -> Path:
+    """A layout (and the mask files) from COCO files {split: annotations}."""
+    cats = sorted(names_from["categories"], key=lambda c: c["id"])
+    index = {c["id"]: i for i, c in enumerate(cats)}
+    lay = Layout(folder)
+    for split, ann in splits.items():
+        _coco_like(lay, split, ann, folder, index, path_of=path_of)
+    _seg_json(folder, {split: (ann["images"], ann["annotations"], path_of)
+                       for split, ann in splits.items()})
+    _seg_named(folder, cats)
+    return lay.finish([c["name"] for c in cats])
+
+
+def armbench(folder: Path) -> Path:
+    """Products in warehouse totes (Amazon ARMBench, CC BY 4.0): its
+    Mix-Object-Tote set, boxes and masks, its own train and validation."""
+    src = _unpack(URLS["armbench"], folder / "armbench-segmentation-0.1.tar.gz", folder / "src")
+    tote = next(p for p in src.rglob("mix-object-tote") if p.is_dir())
+    jsons = sorted(tote.rglob("*.json"))
+
+    def find(word):
+        hit = [p for p in jsons if word in p.name.lower() and "coco" in str(p).lower()] or \
+              [p for p in jsons if word in p.name.lower()]
+        if not hit:
+            raise FileNotFoundError(f"armbench: no {word} COCO file in {tote}")
+        return json.loads(hit[0].read_text())
+
+    splits = {"train": find("train"), "val": find("val")}
+    files = {p.name: p for p in tote.rglob("*.jpg")}
+    return _coco_pair(folder, splits, splits["train"],
+                      lambda im: files.get(Path(im["file_name"]).name, Path("/nonexistent")))
+
+
+def artf_clothes(folder: Path) -> Path:
+    """Clothes on tables and floors (aRTF Clothes, Ghent University, CC BY
+    4.0): T-shirts, towels, shorts and boxer shorts, boxes and masks, in its
+    own resized 512 x 256 release and train / val split."""
+    src = _unpack(URLS["artf-clothes"], folder / "artf.zip", folder / "src")
+    for inner in sorted(src.rglob("*.zip")):                # one zip a split inside
+        inner.with_name(inner.name + ".ok").touch()         # here already: nothing to fetch
+        _unpack(str(inner), inner, inner.with_suffix(""), keep=True)
+    notes = {p.parent.name.split("_")[0].replace("artf-", ""): p
+             for p in src.rglob("annotations.json")}
+    splits = {"train": json.loads(notes["train"].read_text()),
+              "val": json.loads(notes["val"].read_text())}
+    roots = {split: notes[split].parent for split in ("train", "val")}
+    path_of = {}
+    for split, ann in splits.items():
+        for im in ann["images"]:
+            path_of[id(im)] = roots[split] / im["file_name"]
+    return _coco_pair(folder, splits, splits["train"], lambda im: path_of.get(id(im), Path("/x")))
+
+
+def everwatch(folder: Path) -> Path:
+    """Wading birds from the air over the Everglades (EverWatch, CC0): its
+    1500 px crops, its own train and validation."""
+    src = _unpack(URLS["everwatch"], folder / "everwatch-dataset.zip", folder / "src")
+    base = next(p.parent for p in src.rglob("train_annotations.json"))
+    splits = {"train": json.loads((base / "train_annotations.json").read_text()),
+              "val": json.loads((base / "validation_annotations.json").read_text())}
+    cats = sorted(splits["train"]["categories"], key=lambda c: c["id"])
+    index = {c["id"]: i for i, c in enumerate(cats)}
+    lay = Layout(folder)
+    for split, ann in splits.items():
+        _coco_like(lay, split, ann, base, index, path_of=lambda im: base / im["file_name"])
+    return lay.finish([c["name"] for c in cats])
+
+
+def visa(folder: Path) -> Path:
+    """Defects on twelve kinds of product (Amazon VisA, CC BY 4.0): each
+    defect region of its masks a box and an outline, one class; its 1-class
+    split; a fifth of the flawless pictures train beside the flawed ones."""
+    import csv
+
+    import cv2
+    import numpy as np
+
+    src = _unpack(URLS["visa"], folder / "VisA_20220922.tar", folder / "src")
+    table = next(src.rglob("1cls.csv"))
+    root = table.parent.parent
+    pictures, val = [], set()
+    with open(table, newline="") as f:
+        for i, row in enumerate(csv.DictReader(f)):
+            picture = root / row["image"]
+            if not picture.exists():
+                continue
+            flawed = row.get("label", "").strip().lower() == "anomaly" and row.get("mask")
+            if row["split"].strip() == "train" and not flawed and random.Random(i).random() >= 0.2:
+                continue
+            mask = root / row["mask"] if flawed else None
+            stem = f"{row['object']}_{picture.stem}"
+
+            def labels_of(mask=mask, picture=picture):
+                if mask is None:
+                    h, w = cv2.imread(str(picture), cv2.IMREAD_GRAYSCALE).shape
+                    return np.zeros((h, w), np.int32)
+                m = cv2.imread(str(mask), cv2.IMREAD_GRAYSCALE)
+                return None if m is None else cv2.connectedComponents((m > 0).astype("uint8"))[1]
+
+            link = folder / "named" / f"{stem}{picture.suffix.lower()}"
+            link.parent.mkdir(exist_ok=True)
+            if not link.exists():
+                os.symlink(picture.resolve(), link)
+            pictures.append((link, labels_of))
+            if row["split"].strip() != "train":
+                val.add(link.stem)
+    return _instances(folder, pictures, "defect", val=val)
 
 
 def rf100vl_all(root: Path) -> Path:
@@ -1027,7 +1426,10 @@ MAKERS = {"bccd": bccd, "plantdoc": plantdoc, "gwhd": gwhd, "taco": taco,
           "doclaynet": doclaynet, "caltech-camera-traps": caltech_camera_traps,
           "fashionpedia": fashionpedia, "ap10k": ap10k, "izembek": izembek,
           "fathomnet": fathomnet, "ena24": ena24, "boxes-on-bees": boxes_on_bees,
-          "bbbc038": bbbc038, "nuinsseg": nuinsseg}
+          "bbbc038": bbbc038, "nuinsseg": nuinsseg, "pped": pped, "loco": loco,
+          "msu-apples": msu_apples, "swinepose": swinepose, "bbbc039": bbbc039,
+          "noaa-psnf": noaa_psnf, "armbench": armbench, "artf-clothes": artf_clothes,
+          "everwatch": everwatch, "visa": visa}
 
 
 #: what a prefetch fetches, in two lanes at once: the quick ones (training
@@ -1038,10 +1440,15 @@ ORDER = QUICK + BIG
 #: added after the first run: fetched on their own (``--new``) until they train;
 #: the big downloads take the second lane
 #: the second batch: boxes on more subjects, and nuclei with masks
-MORE = ["coco-text", "bbbc038", "nuinsseg", "ena24", "boxes-on-bees"]
+MORE = ["coco-text", "bbbc038", "nuinsseg", "ena24", "boxes-on-bees",
+        # the third: protective equipment, logistics, teaching sets, masks and keypoints
+        "pped", "loco", "msu-apples", "swinepose", "bbbc039", "artf-clothes", "visa",
+        "noaa-psnf", "everwatch", "armbench"]
 NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, *MORE]
-QUICK += ["ap10k", "coco-text", "bbbc038", "nuinsseg"]
-BIG += ["fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, "ena24", "boxes-on-bees"]
+QUICK += ["ap10k", "coco-text", "bbbc038", "nuinsseg", "msu-apples", "swinepose", "bbbc039",
+          "artf-clothes"]
+BIG += ["fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, "ena24", "boxes-on-bees", "pped",
+        "loco", "visa", "noaa-psnf", "everwatch", "armbench"]
 ORDER = QUICK + BIG
 
 

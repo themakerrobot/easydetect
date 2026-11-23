@@ -678,7 +678,8 @@ def step_lab_form(root: Path, args) -> None:
 
 
 #: hub datasets too big to share the GPU with another training
-HUB_HEAVY = ("doclaynet", "caltech-camera-traps", "lvis", "openimages", "izembek", "fathomnet")
+HUB_HEAVY = ("doclaynet", "caltech-camera-traps", "lvis", "openimages", "izembek", "fathomnet",
+             "armbench", "noaa-psnf")
 
 
 #: boxes a picture above which a dataset trains alone (it needs far more memory)
@@ -828,9 +829,9 @@ def step_hub_task(root: Path, args, task: str, key: str, size: str) -> None:
     elif key == "coco":                    # COCO's keypoint network, trained already
         extra = ["--head", str(downloads.download_pose("s")), "--coco", args.coco]
     else:                                  # the one hub-pose-train made, scored on its data
-        from hub_data import ap10k_pose_yaml
+        from hub_data import pose_yaml
 
-        data_yaml = ap10k_pose_yaml(Path(args.hub_root).expanduser() / key)
+        data_yaml = pose_yaml(key, Path(args.hub_root).expanduser())
         extra = ["--head", str(root / "hub" / f"{key}-pose" / "pose.onnx"),
                  "--pose-data", str(data_yaml)]
     _run([PY, "-u", str(HERE / "hub_publish.py"), "--weights", str(weights), "--data", str(data),
@@ -843,19 +844,19 @@ HUB_POSE_TRAIN = (120, 128)
 
 
 def step_hub_pose_train(root: Path, args, key: str) -> None:
-    """A keypoint network on ``key``'s own keypoints (AP-10K's animals), from
+    """A keypoint network on ``key``'s own keypoints (AP-10K's animals, pigs), from
     ed-s's backbone, with the dataset's keypoint names, flip pairs, skeleton
     and OKS sigmas inside: ``<root>/hub/<key>-pose/pose.onnx``."""
     import math
 
     import yaml
-    from hub_data import ap10k_pose_yaml
+    from hub_data import pose_yaml
 
     from easydetect.data.keypoints import KeypointDataset
     from easydetect.pose import KeypointSpec
     from easydetect.pose_trainer import train_keypoints
 
-    data = ap10k_pose_yaml(Path(args.hub_root).expanduser() / key)
+    data = pose_yaml(key, Path(args.hub_root).expanduser())
     cfg = yaml.safe_load(data.read_text())
     names = cfg["names"]
     spec = KeypointSpec(cfg["kpt_names"] or [f"kp{i}" for i in range(cfg["kpt_shape"][0])],

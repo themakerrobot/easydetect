@@ -43,10 +43,11 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 #: datasets the hub has whose annotations outline objects / place keypoints
-SEG = ("coco", "taco", "lvis", "fashionpedia", "bbbc038", "nuinsseg")
+SEG = ("coco", "taco", "lvis", "fashionpedia", "bbbc038", "nuinsseg", "bbbc039", "artf-clothes",
+       "visa", "armbench")
 #: COCO's people take easydetect's keypoint network as it is; the others get
 #: one trained on their own keypoints (long_run's hub-pose-train)
-POSE = ("coco", "ap10k")
+POSE = ("coco", "ap10k", "swinepose")
 #: train pictures the decoder learns from: it starts from MobileSAM and only
 #: its small decoder trains, on embeddings cached at 2 MB a picture
 TRAIN_PICTURES = 10000

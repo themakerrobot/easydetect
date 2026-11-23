@@ -178,6 +178,90 @@ DATASETS = {
         "citation": "A. Mahbod et al. NuInsSeg: A fully annotated dataset for nuclei instance "
                     "segmentation in H&E-stained histological images. Scientific Data 11, 2024.",
     },
+    "pped": {
+        "title": "PPED (protective equipment)",
+        "license": "CC BY 4.0",
+        "source": "https://zenodo.org/records/6551758",
+        "attribution": "Personal Protective Equipment Dataset (PPED), CC BY 4.0.",
+        "citation": "Personal Protective Equipment Dataset (PPED). Zenodo, 2022.  "
+                    "doi:10.5281/zenodo.6551758.",
+        "note": "Photographed by its authors in a chemical plant.",
+    },
+    "loco": {
+        "title": "LOCO (logistics objects)",
+        "license": "CC0 1.0",
+        "source": "https://github.com/tum-fml/loco",
+        "attribution": "LOCO, Chair of Materials Handling, Material Flow, Logistics, TU Munich,  "
+                       "CC0 1.0.",
+        "citation": "C. Mayershofer, D.-M. Holm, B. Molter, J. Fottner. LOCO: Logistics Objects  "
+                    "in Context. ICMLA 2020.",
+    },
+    "msu-apples": {
+        "title": "MSU apples",
+        "license": "CC BY 4.0",
+        "source": "https://zenodo.org/records/7925397",
+        "attribution": "MSUAppleData (Michigan State University), CC BY 4.0.",
+        "citation": "MSUAppleData: an apple dataset with 'Gala' and 'Blondee' two varieties.  "
+                    "Zenodo, 2023. doi:10.5281/zenodo.7925397.",
+    },
+    "swinepose": {
+        "title": "SwinePose (pigs)",
+        "license": "CC BY 4.0",
+        "source": "https://zenodo.org/records/24221533",
+        "attribution": "SwinePose v2.0, CC BY 4.0.",
+        "citation": "SwinePose: A Lateral-View Benchmark Dataset for Pig Pose Estimation and  "
+                    "Gait Analysis. Zenodo, 2026. doi:10.5281/zenodo.19358699.",
+        "note": "Keypoints: SwinePose's 15 points a pig; the lines between them are  "
+                "easydetect's.",
+    },
+    "bbbc039": {
+        "title": "BBBC039 nuclei (fluorescence)",
+        "license": "CC0 1.0",
+        "source": "https://bbbc.broadinstitute.org/BBBC039",
+        "attribution": "BBBC039v1 from the Broad Bioimage Benchmark Collection, CC0 1.0.",
+        "citation": "J. C. Caicedo et al. Evaluation of Deep Learning Strategies for Nucleus  "
+                    "Segmentation in Fluorescence Images. Cytometry Part A, 2019.",
+    },
+    "artf-clothes": {
+        "title": "aRTF Clothes",
+        "license": "CC BY 4.0",
+        "source": "https://zenodo.org/records/14501499",
+        "attribution": "aRTF Clothes dataset (Ghent University), CC BY 4.0.",
+        "citation": "T. Lips, V.-L. De Gusseme, F. wyffels. Learning Keypoints for Robotic Cloth  "
+                    "Manipulation using Synthetic Data. IEEE RA-L, 2024.",
+    },
+    "visa": {
+        "title": "VisA (product defects)",
+        "license": "CC BY 4.0",
+        "source": "https://github.com/amazon-science/spot-diff",
+        "attribution": "Visual Anomaly (VisA) dataset, Amazon, CC BY 4.0.",
+        "citation": "Y. Zou et al. SPot-the-Difference Self-Supervised Pre-training for Anomaly  "
+                    "Detection and Segmentation. ECCV 2022.",
+        "note": "One class, defect: each defect region of its masks a box and an outline.",
+    },
+    "noaa-psnf": {
+        "title": "NOAA Puget Sound nearshore fish",
+        "license": "CDLA-Permissive-1.0",
+        "source": "https://lila.science/datasets/noaa-puget-sound-nearshore-fish",
+        "attribution": "NOAA Puget Sound Nearshore Fish (LILA BC), CDLA-Permissive-1.0.",
+        "citation": "NOAA Fisheries. Puget Sound Nearshore Fish dataset. LILA BC, 2023.",
+    },
+    "everwatch": {
+        "title": "EverWatch (wading birds from the air)",
+        "license": "CC0 1.0",
+        "source": "https://zenodo.org/records/17317117",
+        "attribution": "EverWatch airborne bird imagery (University of Florida), CC0 1.0.",
+        "citation": "EverWatch airborne bird imagery dataset for detection and species  "
+                    "classification. Zenodo, 2025. doi:10.5281/zenodo.17317117.",
+    },
+    "armbench": {
+        "title": "ARMBench (products in totes)",
+        "license": "CC BY 4.0",
+        "source": "https://huggingface.co/datasets/amazon/armbench-segmentation",
+        "attribution": "ARMBench object segmentation, Amazon, CC BY 4.0.",
+        "citation": "C. Mitash et al. ARMBench: An Object-centric Benchmark Dataset for Robotic  "
+                    "Manipulation. ICRA 2023. arXiv:2303.16382.",
+    },
     "fathomnet": {
         "title": "FathomNet (CC0 / CC BY part)",
         "license": "CC0 1.0 or CC BY 4.0, as listed with each picture and box",
@@ -250,47 +334,49 @@ CATEGORIES = {
     # first on the page: a few clear, everyday classes, quick to show what a
     # detector does (a webcam and hands, cards, coins, animals, furniture);
     # full keys, listed ahead of their own category
-    "Getting started": "rf100-furniture-ngpea rf100-animals-ij5d2 rf100-hand-gestures-jps7z "
-                       "rf100-uno-deck rf100-chess-pieces-mjzgj rf100-coins-1apki "
-                       "rf100-currency-v4f8j rf100-digits-t2eg6 rf100-soda-bottles "
-                       "rf100-aquarium-qlnqy rf100-road-signs-6ih4y rf100-mask-wearing-608pr "
-                       "rf100-apples-fvpl5 rf100-poker-cards-cxcvz rf100vl-fruitjes rf100vl-ball "
-                       "rf100vl-the-dreidel-project rf100vl-mahjong",
+    "Getting started": "rf100-furniture-ngpea rf100-animals-ij5d2 rf100-hand-gestures-jps7z  "
+                       "rf100-uno-deck rf100-chess-pieces-mjzgj rf100-coins-1apki  "
+                       "rf100-currency-v4f8j rf100-digits-t2eg6 rf100-soda-bottles  "
+                       "rf100-aquarium-qlnqy rf100-road-signs-6ih4y rf100-mask-wearing-608pr  "
+                       "rf100-apples-fvpl5 rf100-poker-cards-cxcvz rf100vl-fruitjes  "
+                       "rf100vl-ball rf100vl-the-dreidel-project rf100vl-mahjong msu-apples  "
+                       "artf-clothes",
     "General objects": "coco openimages lvis",
-    "Everyday objects": "fashionpedia chess-pieces-mjzgj coins-1apki currency-v4f8j "
-                        "furniture-ngpea marbles "
-                        "poker-cards-cxcvz soda-bottles uno-deck valentines-chocolate "
-                        "washroom-rf1fa wine-labels pills-sxdht lettuce-pallets",
-    "People, safety and traffic": "construction-ppe construction-safety-gsnvb mask-wearing-608pr "
-                                  "hand-gestures-jps7z sign-language-sokdr people-in-paintings "
-                                  "soccer-players-5fuqs thermal-dogs-and-people-x6ejw smoke-uvylj "
-                                  "road-signs-6ih4y road-traffic vehicles-q0x2v street-work "
-                                  "truck-movement excavators-czvg9",
-    "Animals and environment": "ap10k ena24 boxes-on-bees caltech-camera-traps animals-ij5d2 "
-                               "bees-jt5in insects-mytwu "
-                               "pests-2xlvx thermal-cheetah-my4dp trail-camera shark-teeth-5atku "
+    "Everyday objects": "fashionpedia chess-pieces-mjzgj coins-1apki currency-v4f8j  "
+                        "furniture-ngpea marbles poker-cards-cxcvz soda-bottles uno-deck  "
+                        "valentines-chocolate washroom-rf1fa wine-labels pills-sxdht  "
+                        "lettuce-pallets",
+    "People, safety and traffic": "pped construction-ppe construction-safety-gsnvb  "
+                                  "mask-wearing-608pr hand-gestures-jps7z sign-language-sokdr  "
+                                  "people-in-paintings soccer-players-5fuqs  "
+                                  "thermal-dogs-and-people-x6ejw smoke-uvylj road-signs-6ih4y  "
+                                  "road-traffic vehicles-q0x2v street-work truck-movement  "
+                                  "excavators-czvg9",
+    "Animals and environment": "swinepose ap10k ena24 boxes-on-bees caltech-camera-traps  "
+                               "animals-ij5d2 bees-jt5in insects-mytwu pests-2xlvx  "
+                               "thermal-cheetah-my4dp trail-camera shark-teeth-5atku  "
                                "cloud-types taco",
-    "Agriculture and plants": "gwhd plantdoc apples-fvpl5 cotton-20xz5 cotton-plant-disease "
+    "Agriculture and plants": "gwhd plantdoc apples-fvpl5 cotton-20xz5 cotton-plant-disease  "
                               "grass-weeds leaf-disease-nsdsr peanuts-sd4kf weed-crop-aerial",
-    "Underwater": "fathomnet aquarium-qlnqy coral-lwptl underwater-objects-5v7p8 "
+    "Underwater": "noaa-psnf fathomnet aquarium-qlnqy coral-lwptl underwater-objects-5v7p8  "
                   "underwater-pipes-4ng4t peixos-fish fish-market-ggjso",
-    "Aerial and earth": "izembek aerial-cows aerial-pool aerial-spheres solar-panels-taxvb "
-                        "sedimentary-features-9eosf",
-    "Medical and microscopy": "bbbc038 nuinsseg bccd abdomen-mri acl-x-ray axial-mri "
-                              "bacteria-ptywi "
-                              "bone-fracture-7fylg brain-tumor-m2pbp cavity-rs0uf cells-uyemf "
-                              "gynecology-mri liver-disease mitosis-gjs3g parasites-1s07h phages "
-                              "stomata-cells x-ray-rheumatology",
-    "Documents and screens": "coco-text doclaynet activity-diagrams-qdobr document-parts "
-                             "signatures-xc8up "
-                             "paper-parts tweeter-posts tweeter-profile number-ops digits-t2eg6",
-    "Industry and electronics": "4-fold-defect asbestos cable-damage cables-nl42k cell-towers "
-                                "corrosion-bi3q3 gauge-u2lwv printed-circuit-board "
-                                "secondary-chains wall-damage circuit-elements circuit-voltages "
-                                "radio-signal",
-    "Games and video": "apex-videogame csgo-videogame farcry6-videogame "
-                       "halo-infinite-angel-videogame team-fight-tactics avatar-recognition-nuexe "
-                       "robomasters-285km",
+    "Aerial and earth": "everwatch izembek aerial-cows aerial-pool aerial-spheres  "
+                        "solar-panels-taxvb sedimentary-features-9eosf",
+    "Medical and microscopy": "bbbc039 bbbc038 nuinsseg bccd abdomen-mri acl-x-ray axial-mri  "
+                              "bacteria-ptywi bone-fracture-7fylg brain-tumor-m2pbp  "
+                              "cavity-rs0uf cells-uyemf gynecology-mri liver-disease  "
+                              "mitosis-gjs3g parasites-1s07h phages stomata-cells  "
+                              "x-ray-rheumatology",
+    "Documents and screens": "coco-text doclaynet activity-diagrams-qdobr document-parts  "
+                             "signatures-xc8up paper-parts tweeter-posts tweeter-profile  "
+                             "number-ops digits-t2eg6",
+    "Industry and electronics": "loco armbench visa 4-fold-defect asbestos cable-damage  "
+                                "cables-nl42k cell-towers corrosion-bi3q3 gauge-u2lwv  "
+                                "printed-circuit-board secondary-chains wall-damage  "
+                                "circuit-elements circuit-voltages radio-signal",
+    "Games and video": "apex-videogame csgo-videogame farcry6-videogame  "
+                       "halo-infinite-angel-videogame team-fight-tactics  "
+                       "avatar-recognition-nuexe robomasters-285km",
 }
 
 

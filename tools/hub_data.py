@@ -757,15 +757,29 @@ def rf100vl_all(root: Path) -> Path:
     request = urllib.request.Request(RF100VL_TREE, headers={"User-Agent": "easydetect"})
     with urllib.request.urlopen(request, timeout=120) as r:
         shards = sorted(e["path"] for e in json.loads(r.read()) if e["path"].endswith(".parquet"))
+    import time
+
     wanted = set(RF100VL_SETS.values())
     work = base / ".shards"
+    missed = []
     for n, shard in enumerate(shards, 1):
         name = Path(shard).name
         done = work / f"{name}.done"
         if done.exists():
             continue
         split = name.split("-")[0]                      # train, valid or test
-        local = _fetch(f"{RF100VL_URL}/{shard}", work / name)
+        local = None
+        for attempt in range(6):        # Hugging Face turns a long run of downloads away a while
+            try:
+                local = _fetch(f"{RF100VL_URL}/{shard}", work / name)
+                break
+            except subprocess.CalledProcessError:
+                wait = 300 * (attempt + 1)
+                print(f"rf100vl: {name} refused; again in {wait // 60} minutes", flush=True)
+                time.sleep(wait)
+        if local is None:
+            missed.append(name)
+            continue
         pf = pq.ParquetFile(local)
         kept = 0
         outlined = defaultdict(lambda: [0, 0])          # dataset: [boxes, with a polygon]
@@ -801,6 +815,8 @@ def rf100vl_all(root: Path) -> Path:
         local.unlink(missing_ok=True)
         local.with_name(local.name + ".ok").unlink(missing_ok=True)
         print(f"rf100vl: shard {n}/{len(shards)} ({name}): {kept} pictures", flush=True)
+    if missed:                          # laid out only whole: the next try fetches these
+        raise RuntimeError(f"rf100vl: {len(missed)} files would not come ({', '.join(missed)})")
     by_name = {d["name"]: i for i, d in meta["datasets"].items()}
     for name in sorted(wanted):
         folder = base / name

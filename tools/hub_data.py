@@ -111,6 +111,7 @@ URLS = {
                 "archive/armbench-segmentation-0.1.tar.gz",
     "artf-clothes": "https://zenodo.org/api/records/14501499/files/"
                     "artf-all-categories-resized_512x256.zip/content",
+    "everwatch": "https://zenodo.org/api/records/17317117/files/everwatch-dataset.zip/content",
     "visa": "https://amazon-visual-anomaly.s3.us-west-2.amazonaws.com/VisA_20220922.tar",
 }
 
@@ -1315,6 +1316,21 @@ def artf_clothes(folder: Path) -> Path:
     return _coco_pair(folder, splits, splits["train"], lambda im: path_of.get(id(im), Path("/x")))
 
 
+def everwatch(folder: Path) -> Path:
+    """Wading birds from the air over the Everglades (EverWatch, CC0): its
+    1500 px crops, its own train and validation."""
+    src = _unpack(URLS["everwatch"], folder / "everwatch-dataset.zip", folder / "src")
+    base = next(p.parent for p in src.rglob("train_annotations.json"))
+    splits = {"train": json.loads((base / "train_annotations.json").read_text()),
+              "val": json.loads((base / "validation_annotations.json").read_text())}
+    cats = sorted(splits["train"]["categories"], key=lambda c: c["id"])
+    index = {c["id"]: i for i, c in enumerate(cats)}
+    lay = Layout(folder)
+    for split, ann in splits.items():
+        _coco_like(lay, split, ann, base, index, path_of=lambda im: base / im["file_name"])
+    return lay.finish([c["name"] for c in cats])
+
+
 def visa(folder: Path) -> Path:
     """Defects on twelve kinds of product (Amazon VisA, CC BY 4.0): each
     defect region of its masks a box and an outline, one class; its 1-class
@@ -1473,7 +1489,7 @@ MAKERS = {"bccd": bccd, "plantdoc": plantdoc, "gwhd": gwhd, "taco": taco,
           "bbbc038": bbbc038, "nuinsseg": nuinsseg, "pped": pped, "loco": loco,
           "msu-apples": msu_apples, "swinepose": swinepose, "bbbc039": bbbc039,
           "noaa-psnf": noaa_psnf, "armbench": armbench, "artf-clothes": artf_clothes,
-          "visa": visa}
+          "everwatch": everwatch, "visa": visa}
 
 
 #: what a prefetch fetches, in two lanes at once: the quick ones (training
@@ -1487,12 +1503,12 @@ ORDER = QUICK + BIG
 MORE = ["coco-text", "bbbc038", "nuinsseg", "ena24", "boxes-on-bees",
         # the third: protective equipment, logistics, teaching sets, masks and keypoints
         "pped", "loco", "msu-apples", "swinepose", "bbbc039", "artf-clothes", "visa",
-        "noaa-psnf", "armbench"]
+        "noaa-psnf", "everwatch", "armbench"]
 NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, *MORE]
 QUICK += ["ap10k", "coco-text", "bbbc038", "nuinsseg", "msu-apples", "swinepose", "bbbc039",
           "artf-clothes"]
 BIG += ["fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, "ena24", "boxes-on-bees", "pped",
-        "loco", "visa", "noaa-psnf", "armbench"]
+        "loco", "visa", "noaa-psnf", "everwatch", "armbench"]
 ORDER = QUICK + BIG
 
 

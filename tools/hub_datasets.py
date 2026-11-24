@@ -246,6 +246,14 @@ DATASETS = {
         "attribution": "NOAA Puget Sound Nearshore Fish (LILA BC), CDLA-Permissive-1.0.",
         "citation": "NOAA Fisheries. Puget Sound Nearshore Fish dataset. LILA BC, 2023.",
     },
+    "everwatch": {
+        "title": "EverWatch (wading birds from the air)",
+        "license": "CC0 1.0",
+        "source": "https://zenodo.org/records/17317117",
+        "attribution": "EverWatch airborne bird imagery (University of Florida), CC0 1.0.",
+        "citation": "EverWatch airborne bird imagery dataset for detection and species  "
+                    "classification. Zenodo, 2025. doi:10.5281/zenodo.17317117.",
+    },
     "armbench": {
         "title": "ARMBench (products in totes)",
         "license": "CC BY 4.0",
@@ -352,7 +360,7 @@ CATEGORIES = {
                               "grass-weeds leaf-disease-nsdsr peanuts-sd4kf weed-crop-aerial",
     "Underwater": "noaa-psnf fathomnet aquarium-qlnqy coral-lwptl underwater-objects-5v7p8  "
                   "underwater-pipes-4ng4t peixos-fish fish-market-ggjso",
-    "Aerial and earth": "izembek aerial-cows aerial-pool aerial-spheres  "
+    "Aerial and earth": "everwatch izembek aerial-cows aerial-pool aerial-spheres  "
                         "solar-panels-taxvb sedimentary-features-9eosf",
     "Medical and microscopy": "bbbc039 bbbc038 nuinsseg bccd abdomen-mri acl-x-ray axial-mri  "
                               "bacteria-ptywi bone-fracture-7fylg brain-tumor-m2pbp  "

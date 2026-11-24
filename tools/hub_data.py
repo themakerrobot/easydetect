@@ -148,23 +148,43 @@ def _fetch(url: str, dest: Path) -> Path:
 
 
 def _unzip(archive: Path, dest: Path) -> None:
-    """unzip, or Python's zipfile where unzip gives up on a large archive; a
-    broken one is deleted so the next try downloads it again."""
+    """unzip; where it stops, Python's zipfile a file at a time, leaving out
+    the few whose contents are damaged (bad CRC). Many damaged, or no archive
+    at all: deleted, so the next try downloads it again."""
     import zipfile
 
     try:
         _run(["unzip", "-q", "-o", archive, "-d", dest])
         return
     except subprocess.CalledProcessError as exc:
-        print(f"{archive.name}: unzip stopped ({exc.returncode}); trying Python's zipfile",
-              flush=True)
+        print(f"{archive.name}: unzip stopped ({exc.returncode}); going through it with "
+              "Python's zipfile", flush=True)
+    bad, total = [], 0
     try:
         with zipfile.ZipFile(archive) as z:
-            z.extractall(dest)
+            for info in z.infolist():
+                total += 1
+                try:
+                    z.extract(info, dest)
+                except (zipfile.BadZipFile, zlib_error()) as exc:
+                    bad.append(info.filename)
+                    (dest / info.filename).unlink(missing_ok=True)
+                    print(f"{archive.name}: left out {info.filename} ({exc})", flush=True)
     except (zipfile.BadZipFile, EOFError, OSError):
+        bad.append("(the archive)")
+    if bad and (bad[-1] == "(the archive)" or len(bad) > max(10, total // 100)):
         archive.unlink(missing_ok=True)
         archive.with_name(archive.name + ".ok").unlink(missing_ok=True)
-        raise
+        raise RuntimeError(f"{archive.name}: damaged ({len(bad)} of {total} files); "
+                           "deleted, the next try downloads it again")
+    if bad:
+        print(f"{archive.name}: {len(bad)} of {total} files damaged and left out", flush=True)
+
+
+def zlib_error() -> type:
+    import zlib
+
+    return zlib.error
 
 
 def _unpack(url: str, archive: Path, dest: Path, keep: bool = False) -> Path:
@@ -1635,9 +1655,16 @@ def main() -> int:
     root, coco = Path(args.root).expanduser(), Path(args.coco).expanduser()
     if args.prefetch:
         return prefetch(keys, root, coco)
-    for key in keys:
-        print(prepare(key, root, coco), flush=True)
-    return 0
+    failed = []
+    for key in keys:                            # one failing does not stop the rest
+        try:
+            print(prepare(key, root, coco), flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"{key}: not ready ({exc})", flush=True)
+            failed.append(key)
+    if failed:
+        print(f"not ready: {', '.join(failed)}", flush=True)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

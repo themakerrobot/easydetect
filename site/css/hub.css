@@ -169,23 +169,28 @@ dialog::backdrop{background:rgba(26,25,22,.45)}
   .kpis{grid-template-columns:repeat(3,1fr)}
 }
 
-/* dark screens: the same tokens, a dark sheet (as in easydetect lab) */
-@media (prefers-color-scheme:dark){
-  :root{
-    color-scheme:dark;
-    --paper:#1A1916; --line-d:#8A7F6C; --pen-blue:#2C7A9C; --pen-blue-d:#8DC6DF; --pen-red:#EE8A63;
-    --bg:var(--paper); --panel:#23211D; --panel2:#2A2824;
-    --line:#7A7164; --line-soft:#3A3732;
-    --ink:#EDE8DF; --ink2:#D2CBBF; --ink3:#ABA294;
-    --acc-soft:#1D3441; --ok:#6CC08F; --ok-soft:#1C2E23;
-    --shadow:0 1px 0 rgba(0,0,0,.4);
-    --toast-bg:#E8E2D6; --toast-ink:#23211D;
-  }
-  body{background-image:radial-gradient(rgba(141,198,223,.06) 1px,transparent 1px)}
-  .db.go:hover{background:#23698A;border-color:#23698A}
-  .navlink:hover{border-bottom-color:#4A453D}
-  dialog::backdrop{background:rgba(0,0,0,.6)}
+/* dark sheet: the same tokens (as in easydetect lab). js/theme.js sets
+   data-theme from the visitor's choice, or from the system when none. */
+:root[data-theme=dark]{
+  color-scheme:dark;
+  --paper:#1A1916; --line-d:#8A7F6C; --pen-blue:#2C7A9C; --pen-blue-d:#8DC6DF; --pen-red:#EE8A63;
+  --bg:var(--paper); --panel:#23211D; --panel2:#2A2824;
+  --line:#7A7164; --line-soft:#3A3732;
+  --ink:#EDE8DF; --ink2:#D2CBBF; --ink3:#ABA294;
+  --acc-soft:#1D3441; --ok:#6CC08F; --ok-soft:#1C2E23;
+  --shadow:0 1px 0 rgba(0,0,0,.4);
+  --toast-bg:#E8E2D6; --toast-ink:#23211D;
 }
+[data-theme=dark] body{background-image:radial-gradient(rgba(141,198,223,.06) 1px,transparent 1px)}
+[data-theme=dark] .db.go:hover{background:#23698A;border-color:#23698A}
+[data-theme=dark] .navlink:hover{border-bottom-color:#4A453D}
+[data-theme=dark] dialog::backdrop{background:rgba(0,0,0,.6)}
+
+/* light / dark switch next to the language button */
+.theme-toggle{display:inline-grid;place-items:center;min-width:0;width:34px;height:30px;padding:0;margin-right:6px}
+.theme-toggle svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.theme-toggle .sun,[data-theme=dark] .theme-toggle .moon{display:none}
+[data-theme=dark] .theme-toggle .sun{display:block}
 
 /* task row above the categories: detection, segmentation, keypoints */
 .chips.tasks{margin-top:12px;padding-bottom:10px;border-bottom:1px solid var(--line-soft)}
@@ -238,6 +243,14 @@ dialog::backdrop{background:rgba(26,25,22,.45)}
 @media (max-width:700px){
   .navlink .wide{display:none}
   .navlink .narrow{display:inline}
+  header .navlink{padding:7px 9px}
+  header .lang-toggle{flex-shrink:0;white-space:nowrap;min-width:0;padding:7px 9px;margin-right:0}
+  header .theme-toggle{width:34px;padding:0}
+}
+/* the narrowest phones: the logo alone stands for the name */
+@media (max-width:420px){
+  header h1 .brand{display:none}
+  header h1{padding-right:2px}
 }
 #hubBox,#mineBox{display:flex;flex-direction:column;gap:8px}
 .mini{border:1px solid var(--line-soft);border-radius:10px;padding:10px 12px;background:var(--panel2);display:flex;flex-direction:column;gap:8px}

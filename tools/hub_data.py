@@ -130,10 +130,41 @@ def _fetch(url: str, dest: Path) -> Path:
     if ok.exists():
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _run(["wget", "-c", "--progress=dot:giga", "--tries=50", "--waitretry=30",
-          "--retry-connrefused", "-O", dest, url])
+    import time
+
+    for n in range(6):              # a server that refuses for a while (Zenodo)
+        try:
+            _run(["wget", "-c", "--progress=dot:giga", "--tries=50", "--waitretry=30",
+                  "--retry-connrefused", "-O", dest, url])
+            break
+        except subprocess.CalledProcessError:
+            if n == 5:
+                raise
+            print(f"{dest.name}: the server refused; again in {5 * (n + 1)} minutes",
+                  flush=True)
+            time.sleep(300 * (n + 1))
     ok.touch()
     return dest
+
+
+def _unzip(archive: Path, dest: Path) -> None:
+    """unzip, or Python's zipfile where unzip gives up on a large archive; a
+    broken one is deleted so the next try downloads it again."""
+    import zipfile
+
+    try:
+        _run(["unzip", "-q", "-o", archive, "-d", dest])
+        return
+    except subprocess.CalledProcessError as exc:
+        print(f"{archive.name}: unzip stopped ({exc.returncode}); trying Python's zipfile",
+              flush=True)
+    try:
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(dest)
+    except (zipfile.BadZipFile, EOFError, OSError):
+        archive.unlink(missing_ok=True)
+        archive.with_name(archive.name + ".ok").unlink(missing_ok=True)
+        raise
 
 
 def _unpack(url: str, archive: Path, dest: Path, keep: bool = False) -> Path:
@@ -148,7 +179,7 @@ def _unpack(url: str, archive: Path, dest: Path, keep: bool = False) -> Path:
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
     if archive.name.endswith(".zip"):
-        _run(["unzip", "-q", "-o", archive, "-d", tmp])
+        _unzip(archive, tmp)
     else:
         _run(["tar", "-xf", archive, "-C", tmp])
     shutil.rmtree(dest, ignore_errors=True)
@@ -1224,16 +1255,25 @@ def armbench(folder: Path) -> Path:
     jsons = sorted(tote.rglob("*.json"))
 
     def find(word):
-        hit = [p for p in jsons if word in p.name.lower() and "coco" in str(p).lower()] or \
-              [p for p in jsons if word in p.name.lower()]
-        if not hit:
-            raise FileNotFoundError(f"armbench: no {word} COCO file in {tote}")
-        return json.loads(hit[0].read_text())
+        named = [p for p in jsons if word in p.name.lower()]
+        for p in sorted(named, key=lambda p: "coco" not in str(p).lower()):
+            ann = json.loads(p.read_text())
+            if isinstance(ann, dict) and "images" in ann and "annotations" in ann:
+                return ann
+        raise FileNotFoundError(f"armbench: no {word} COCO file in {tote} "
+                                f"(looked at {[str(p.relative_to(tote)) for p in named][:8]})")
 
     splits = {"train": find("train"), "val": find("val")}
-    files = {p.name: p for p in tote.rglob("*.jpg")}
-    return _coco_pair(folder, splits, splits["train"],
-                      lambda im: files.get(Path(im["file_name"]).name, Path("/nonexistent")))
+    files = {}
+    for p in tote.rglob("*.jpg"):
+        files.setdefault(p.name, p)
+        files.setdefault(p.stem, p)
+
+    def path_of(im):
+        name = Path(im["file_name"])
+        return files.get(name.name) or files.get(name.stem) or Path("/nonexistent")
+
+    return _coco_pair(folder, splits, splits["train"], path_of)
 
 
 def artf_clothes(folder: Path) -> Path:

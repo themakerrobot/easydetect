@@ -28,15 +28,17 @@
     <div class="side">
       <h2 data-t-html="title"></h2>
       <p class="lead" data-t="lead"></p>
-      <div class="facts" id="facts"></div>
-      <p class="hint lic" data-t="licShort"></p>
+      <div class="factrow">
+        <div class="facts" id="facts"></div>
+        <p class="hint lic" data-t="licShort"></p>
+      </div>
       <div class="lab">
-        <h3 data-t="labTitle">나만의 사물 인식 모델 만들기</h3>
-        <p data-t="labLead"></p>
-        <div class="labgo">
-          <a class="db go" href="https://themakerrobot.github.io/easydetect-lab/" target="_blank" rel="noopener" data-t="labStart">lab 가이드</a>
+        <div>
+          <h3 data-t="labTitle">나만의 사물 인식 모델 만들기</h3>
+          <p data-t="labLead"></p>
           <p class="hint" data-t="labNote"></p>
         </div>
+        <a class="db go" href="https://themakerrobot.github.io/easydetect-lab/" target="_blank" rel="noopener" data-t="labStart">lab 가이드</a>
       </div>
     </div>
     <div class="try">
@@ -94,9 +96,9 @@ const T = {
     camBusy: "Another app is using the camera. Close it and try again.", camNoApi: "This browser cannot open a camera here (it needs https).",
     introHead: "Models for public datasets", tryHead: "Try it",
     title: "Object detectors for <em>public datasets</em>, ready to run.",
-    lead: "No PyTorch, no GPU. Install easydetect and name a model: it downloads once and runs on any CPU, an Intel NPU or a Raspberry Pi.",
+    lead: "No PyTorch, no GPU: name a model and run it on a CPU, an Intel NPU or a Raspberry Pi.",
     datasets: "datasets", models: "models",
-    licShort: "Built on ed-s (Apache-2.0). Each model follows its dataset's terms: keep the credit, and check before commercial use.",
+    licShort: "ed-s is Apache-2.0. Each model follows its dataset's terms: check before commercial use.",
     browseTitle: "Models", browseSub: "ed-s · 320 px (with 8-bit) and 640 px · scored COCO's way on each val split",
     search: "Search a dataset, class or category (helmet, cell, fish…)", all: "All",
     sortName: "By category", sortScore: "Best score", sortClasses: "Most classes", classes: "classes",
@@ -111,9 +113,9 @@ const T = {
     rf: "Roboflow 100", cWebcam: "straight from a webcam", cList: "what is here, with scores",
     cFile: "a file you downloaded: its path", cHub: "online, a hub name works too (downloads once)",
     labTitle: "Make your own object detector",
-    labLead: "No model for what you need? Upload pictures, draw boxes and train it in easydetect lab, all in your browser.",
+    labLead: "Nothing here for you? Make one from your own pictures in easydetect lab.",
     labStart: "Lab guide",
-    labNote: "Works offline. A model trained on your own pictures is yours to use, products included.",
+    labNote: "Works offline. What you train is yours to use, products included.",
     tAll: "All tasks", detect: "Detection", segment: "Segmentation", pose: "Keypoints",
     mDetect: "mAP50-95", mSegment: "mask mAP50-95", mPose: "OKS AP", boxScore: "box mAP50-95",
     fHead: "with {0} beside it, one folder", cBeside: "{0} next to it, in the same folder",
@@ -128,9 +130,9 @@ const T = {
     camBusy: "다른 앱이 카메라를 쓰고 있어요. 그 앱을 닫고 다시 눌러 주세요.", camNoApi: "이 브라우저에서는 여기서 카메라를 열 수 없어요(https 필요).",
     introHead: "공개 데이터셋 모델", tryHead: "바로 써 보기",
     title: "<em>공개 데이터셋</em>으로 학습한<br>바로 쓰는 물체 인식 모델",
-    lead: "PyTorch도 GPU도 필요 없어요. easydetect를 깔고 모델 이름만 쓰면 돼요. 한 번 받아 두면 CPU, 인텔 NPU, 라즈베리파이에서 돌아가요.",
+    lead: "PyTorch·GPU 없이 모델 이름만 쓰면 돼요. CPU, 인텔 NPU, 라즈베리파이에서 돌아가요.",
     datasets: "데이터셋", models: "모델",
-    licShort: "ed-s 모델은 Apache-2.0이에요. 여기 모델은 공개 데이터셋으로 학습해서 그 데이터셋 조건을 따라요. 표기를 지키고, 상업용이면 먼저 확인해 주세요.",
+    licShort: "ed-s는 Apache-2.0이에요. 각 모델은 데이터셋 조건을 따르니 상업용이면 먼저 확인해 주세요.",
     browseTitle: "모델", browseSub: "ed-s · 320 px(8비트 포함)와 640 px · 각 val을 COCO 방식으로 채점",
     search: "데이터셋 · 클래스 · 분야로 찾기 (helmet, cell, fish…)", all: "전체",
     sortName: "분야순", sortScore: "점수순", sortClasses: "클래스 많은 순", classes: "클래스",
@@ -145,9 +147,9 @@ const T = {
     rf: "Roboflow 100", cWebcam: "웹캠으로 바로", cList: "목록과 점수",
     cFile: "받아 둔 파일이면 그 경로", cHub: "인터넷이 되면 hub 이름으로도 돼요 (한 번만 받아요)",
     labTitle: "나만의 사물 인식 모델 만들기",
-    labLead: "원하는 모델이 없으면 easydetect lab에서 사진 올리고, 상자 그리고, 학습까지 브라우저에서 해요.",
+    labLead: "원하는 모델이 없으면 lab에서 내 사진으로 만들어요.",
     labStart: "lab 가이드",
-    labNote: "인터넷 없이도 돼요. 내 사진으로 학습한 모델은 상업용으로도 자유롭게 써요.",
+    labNote: "인터넷 없이 되고, 만든 모델은 상업용으로도 자유롭게 써요.",
     tAll: "모든 타입", detect: "감지", segment: "세그멘테이션", pose: "포즈",
     mDetect: "mAP50-95", mSegment: "마스크 mAP50-95", mPose: "OKS AP", boxScore: "상자 mAP50-95",
     fHead: "{0}와 함께 받아요. 한 폴더에 두세요", cBeside: "{0}가 같은 폴더에 있어야 해요",

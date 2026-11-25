@@ -36,16 +36,20 @@ header nav .navlink{height:100%;padding-top:0;padding-bottom:0;align-items:cente
 
 /* ── intro: what this is, and the three lines to run one ── */
 .intro{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:32px;padding:28px 30px}
-.intro h2{font-size:28px;line-height:1.35;font-weight:800;color:var(--ink);margin-bottom:12px;letter-spacing:-.01em}
+.intro h2{font-size:28px;line-height:1.35;font-weight:800;color:var(--ink);margin-bottom:8px;letter-spacing:-.01em}
 .intro h2 em{font-style:normal;color:var(--acc-ink)}
 .lead{font-size:15px;color:var(--ink2);line-height:1.75;max-width:34em}
-.facts{display:flex;gap:32px;margin-top:22px}
+.facts{display:flex;gap:32px;margin-top:14px}
 .facts div{display:flex;flex-direction:column}
-.facts b{font-size:28px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.2}
+.facts b{font-size:26px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.2}
 .facts span{font-size:12.5px;color:var(--ink3)}
 .intro .row{margin-top:22px;flex-wrap:wrap;gap:8px}
 .intro .row .db{padding:9px 16px;font-size:14px}
-.lic{margin-top:16px;font-size:12px}
+.intro .lead{line-height:1.65}
+/* the counts and the licence line side by side */
+.factrow{display:flex;align-items:center;gap:24px;margin-top:14px}
+.factrow .facts{margin-top:0;flex:none}
+.lic{margin:0;font-size:12px;line-height:1.55}
 .try{display:flex;flex-direction:column;min-width:0}
 .try .pb-label{font-size:12px;margin-bottom:8px}
 
@@ -64,12 +68,13 @@ header nav .navlink{height:100%;padding-top:0;padding-bottom:0;align-items:cente
 .browse{margin-top:12px}
 
 /* lab: making a model from your own pictures, under the facts in the intro */
-.lab{margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft)}
-.lab h3{font-size:16px;font-weight:800;color:var(--ink);margin-bottom:4px}
-.lab p{font-size:13.5px;color:var(--ink2);line-height:1.6}
-.labgo{display:flex;align-items:center;gap:12px;margin-top:10px}
-.labgo .db{padding:8px 16px;font-size:14px;flex:none}
-.labgo .hint{margin:0;font-size:12.5px}
+.lab{margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);
+  display:flex;align-items:center;gap:16px}
+.lab > div{flex:1;min-width:0}
+.lab h3{font-size:16px;font-weight:800;color:var(--ink);margin-bottom:2px}
+.lab p{font-size:13.5px;color:var(--ink2);line-height:1.55}
+.lab .hint{margin-top:2px;font-size:12.5px;color:var(--ink3)}
+.lab .db{padding:8px 16px;font-size:14px;flex:none}
 .browse > .ph{font-size:14px;padding:12px 16px}
 .browse > .pb{padding:16px}
 .browse > .ph .sub{font-weight:400;color:var(--ink3);font-size:12.5px}
@@ -153,6 +158,8 @@ dialog::backdrop{background:rgba(26,25,22,.45)}
   .page{padding:8px}
   header{padding:0 10px}
   .intro h2{font-size:22px}
+  .factrow{flex-direction:column;align-items:flex-start;gap:10px}
+  .lab{flex-direction:column;align-items:flex-start;gap:10px}
   .intro{padding:16px}
   .tools{grid-template-columns:1fr 120px}
   .tools .inp{font-size:16px}

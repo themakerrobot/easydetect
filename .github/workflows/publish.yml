@@ -38,7 +38,8 @@ jobs:
             https://huggingface.co/leeyunjai/easydetect/resolve/main/mobile_sam/encoder.onnx
           echo "062e4e0b13e357c235c7be6f17d1fd809f1653490424c409e3122c06c18a9eef  easydetect/assets/mobile_sam_encoder.onnx" | sha256sum -c
       - run: pip install build
-      - run: python -m build
+      # both from the source tree: a wheel built from the sdist would miss the encoder
+      - run: python -m build --sdist --wheel
       - name: The wheel carries the encoder
         run: python -c "import glob,zipfile; w=glob.glob('dist/*.whl')[0]; assert 'easydetect/assets/mobile_sam_encoder.onnx' in zipfile.ZipFile(w).namelist(), w"
       - uses: pypa/gh-action-pypi-publish@release/v1

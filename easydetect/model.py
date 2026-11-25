@@ -38,8 +38,6 @@ from .utils.checkpoint import load_checkpoint
 
 #: What a Detector can add to its boxes: nothing, a mask each, or a person's keypoints.
 TASKS = ("detect", "segment", "pose")
-#: MobileSAM's encoder as the hub's zips of mask models carry it, beside the detector
-SAM_ENCODER = "mobile_sam_encoder.onnx"
 
 _TORCH_HINT = (
     'this needs PyTorch, which inference does not: pip install "easydetect[train]" '
@@ -269,11 +267,8 @@ class Detector:
             decoder = self.seg_model
             if decoder is None:
                 decoder = downloads.beside(self.model_name, "mask_decoder.onnx")
-            # MobileSAM's encoder in the same folder (the hub's zip has it):
-            # nothing to download, so it runs offline from the first picture
-            encoder = downloads.beside(self.model_name, SAM_ENCODER)
             self.segmenter = default_segmenter(device=device or self.device, backend=backend,
-                                               decoder=decoder, encoder=encoder)
+                                               decoder=decoder)
         return self.segmenter
 
     def _ensure_pose(self, device: str | None = None):

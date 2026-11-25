@@ -31,8 +31,16 @@ jobs:
           assert asked == version, f"asked for {asked!r} but pyproject says {version!r}"
           print("publishing", version)
           PY
+      - name: MobileSAM's encoder into the wheel (task="segment" offline)
+        run: |
+          mkdir -p easydetect/assets
+          curl -fsSL --retry 5 -o easydetect/assets/mobile_sam_encoder.onnx \
+            https://huggingface.co/leeyunjai/easydetect/resolve/main/mobile_sam/encoder.onnx
+          echo "062e4e0b13e357c235c7be6f17d1fd809f1653490424c409e3122c06c18a9eef  easydetect/assets/mobile_sam_encoder.onnx" | sha256sum -c
       - run: pip install build
       - run: python -m build
+      - name: The wheel carries the encoder
+        run: python -c "import glob,zipfile; w=glob.glob('dist/*.whl')[0]; assert 'easydetect/assets/mobile_sam_encoder.onnx' in zipfile.ZipFile(w).namelist(), w"
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           # A tag run after a manual publish of the same version is a no-op

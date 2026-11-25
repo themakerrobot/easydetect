@@ -67,6 +67,9 @@ easydetect = "easydetect.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["easydetect"]
+# MobileSAM's encoder (task="segment"), put there by the publish workflow:
+# ignored by git (*.onnx), carried by the wheel all the same
+artifacts = ["easydetect/assets/*.onnx"]
 
 [tool.hatch.build.targets.sdist]
 include = ["easydetect", "tools", "tests", "README.md", "LICENSE", "NOTICE", "pyproject.toml"]

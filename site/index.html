@@ -75,9 +75,6 @@
 const REPO = "leeyunjai/easydetect-hub";
 const HF = "https://huggingface.co";
 const RAW = `${HF}/${REPO}/resolve/main`;
-/* MobileSAM's encoder, which every mask model shares: its zip carries it so it
-   runs offline (easydetect finds it beside the model) */
-const SAM_ENCODER = { name: "mobile_sam_encoder.onnx", url: `${HF}/leeyunjai/easydetect/resolve/main/mobile_sam/encoder.onnx`, size: 27996384 };
 const $ = (id) => document.getElementById(id);
 
 const ORDER = ["Getting started", "General objects", "Everyday objects", "People, safety and traffic", "Animals and environment",
@@ -369,7 +366,7 @@ function headOf(d, v) {
 }
 function fileCard(kind, files, label, sub, main) {
   const { v, sizes } = current;
-  const total = files.reduce((n, f) => n + (f === SAM_ENCODER.name ? SAM_ENCODER.size : sizes[f] || 0), 0);
+  const total = files.reduce((n, f) => n + (sizes[f] || 0), 0);
   return `<a class="file${main ? " main" : ""}" href="${RAW}/${v.key}/${files[0]}?download=true" data-files="${esc(files.join(" "))}" download>
     <span class="ic">${esc(kind)}</span><span><b>${esc(label)}</b><small>${esc(sub)}${files.length > 1 ? " · " + esc(t("fHead")) : ""}${total ? " · " + fmtSize(total) : ""}</small></span></a>`;
 }
@@ -378,7 +375,7 @@ function drawFiles() {
   const have = new Set(v.files || []); const has = (f) => !have.size || have.has(f);
   const box = $("files"); if (!box) return;
   // a mask or keypoint model is its detector and the network beside it: both come
-  const head = headOf(d, v) ? [headOf(d, v), ...(v.task === "segment" ? [SAM_ENCODER.name] : [])] : [];
+  const head = headOf(d, v) ? [headOf(d, v)] : [];
   const sub = (s) => s;
   box.innerHTML = [
     has(`${n}.onnx`) ? fileCard("ONNX", [`${n}.onnx`, ...head], t("fOnnx"), sub(t("fOnnxS")), true) : "",
@@ -638,7 +635,7 @@ async function fetchFiles(files, card) {
     document.body.append(x); x.click(); x.remove(); return;
   }
   if (zipping) return; zipping = true;
-  const total = files.reduce((n, f) => n + (f === SAM_ENCODER.name ? SAM_ENCODER.size : sizes[f] || 0), 0); let before = 0;
+  const total = files.reduce((n, f) => n + (sizes[f] || 0), 0); let before = 0;
   // the files come in whole before the zip can be saved: the card shows how far
   const small = card && card.querySelector("small"), was = small && small.textContent;
   const show = (pct) => {
@@ -652,7 +649,7 @@ async function fetchFiles(files, card) {
     for (const f of files) {
       let data;
       try {
-        data = await grab(f === SAM_ENCODER.name ? SAM_ENCODER.url : `${RAW}/${v.key}/${f}`,
+        data = await grab(`${RAW}/${v.key}/${f}`,
           (got) => show(total ? Math.min(99, Math.round(100 * (before + got) / total)) : 0));
       } catch (err) {
         if (!f.endsWith(".names.json")) throw err;  // older models: the names from the list

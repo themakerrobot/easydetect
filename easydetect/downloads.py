@@ -366,10 +366,24 @@ def download_sized_checkpoint(name: str, imgsz: int, queries: int | None) -> Pat
     return _asset(name, f"{name}-{int(imgsz)}.pt", required=False)
 
 
+#: MobileSAM's encoder, the same for every mask model, inside the package (the
+#: wheel carries it), so task="segment" runs offline once easydetect is installed
+PACKAGED_SAM_ENCODER = Path(__file__).resolve().parent / "assets" / "mobile_sam_encoder.onnx"
+
+
+def sam_encoder() -> Path:
+    """MobileSAM's encoder: the package's own, or (an install from source)
+    fetched once into the cache."""
+    if PACKAGED_SAM_ENCODER.is_file():
+        return PACKAGED_SAM_ENCODER
+    return _asset("mobile_sam", "encoder.onnx")
+
+
 def download_segmenter() -> tuple[Path, Path]:
-    """Fetch MobileSAM's ``encoder.onnx`` and ``decoder.onnx`` (task="segment")."""
+    """MobileSAM's encoder (``sam_encoder``) and its ``decoder.onnx``,
+    fetched once (task="segment" with no mask decoder of its own)."""
     try:
-        return _asset("mobile_sam", "encoder.onnx"), _asset("mobile_sam", "decoder.onnx")
+        return sam_encoder(), _asset("mobile_sam", "decoder.onnx")
     except DownloadError as exc:
         raise ModelNotFoundError(
             f"the segmenter (mobile_sam/) is not on the mirror yet ({exc}). Build it with "

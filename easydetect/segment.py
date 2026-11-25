@@ -206,13 +206,12 @@ def upscale_logits(low: np.ndarray, image_size: tuple[int, int],
 def default_segmenter(device: str = "CPU", backend: str | None = None,
                       decoder: str | Path | None = None,
                       encoder: str | Path | None = None) -> BoxSegmenter:
-    """The mirror's MobileSAM, downloaded once into the cache; ``decoder``, a
-    mask decoder fine-tuned on your own masks, in place of MobileSAM's;
-    ``encoder``, MobileSAM's encoder already on disk. Both given: nothing is
-    downloaded."""
-    if encoder is None or decoder is None:
-        from .downloads import download_segmenter
+    """MobileSAM: its encoder from the package, its decoder downloaded once
+    into the cache; ``decoder``, a mask decoder fine-tuned on your own masks
+    (a hub -seg model's), in place of MobileSAM's — then nothing is downloaded."""
+    from .downloads import download_segmenter, sam_encoder
 
-        mirror_encoder, mirror_decoder = download_segmenter()
-        encoder, decoder = encoder or mirror_encoder, decoder or mirror_decoder
-    return BoxSegmenter(encoder, decoder, device=device, backend=backend)
+    if decoder is None:
+        mirror_encoder, decoder = download_segmenter()
+        encoder = encoder or mirror_encoder
+    return BoxSegmenter(encoder or sam_encoder(), decoder, device=device, backend=backend)

@@ -358,7 +358,8 @@ def score_pose(model: str, pose: str, coco: Path, limit: int | None = None,
 
 
 def score_pose_data(model: str, pose: str, data: str, limit: int | None = None,
-                    device: str = "CPU", pose_device: str | None = None) -> dict:
+                    device: str = "CPU", pose_device: str | None = None,
+                    backend: str | None = "onnxruntime") -> dict:
     """OKS AP on a keypoint dataset's val split (``data``, Ultralytics' pose
     format) the way it is used: the detector's boxes of the classes the
     keypoint model is for, a keypoint set each, every picture's misses and
@@ -372,7 +373,9 @@ def score_pose_data(model: str, pose: str, data: str, limit: int | None = None,
     estimator = KeypointEstimator(pose, device=pose_device or device)
     spec = estimator.spec
     images, people = load_yolo(data, "val", spec)
-    detector = Detector(model, device=device, verbose=False)
+    # onnxruntime: "CUDA" is one of its devices, not OpenVINO's
+    detector = Detector(model, device=device, verbose=False,
+                        **({"backend": backend} if backend else {}))
     ap = KeypointAP(sigmas=spec.sigmas)
     ids = sorted(images)[:limit] if limit else sorted(images)
     k = len(spec)

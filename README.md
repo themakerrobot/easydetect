@@ -166,7 +166,7 @@ Raspberry Pi 4B, 4 threads, the model alone, same scoring:
 | ed-n 320, 100 queries | OpenVINO | 122 ms | 0.322 |
 | ed-s 320, 100 queries | OpenVINO | 347 ms | 0.381 |
 | ed-s 320, float | ONNX Runtime | 396 ms | 0.381 |
-| **ed-s 320, QAT 8-bit (Pibo's default)** | ONNX Runtime | **318 ms** | **0.376** |
+| **ed-s 320, QAT 8-bit (Pibo's default)** | **ONNX Runtime** | **318 ms** | **0.376** |
 | ed-s 640, QAT 8-bit (Pibo, accuracy first) | ONNX Runtime | 1,058 ms | 0.454 |
 | YOLO11s 320 | ONNX Runtime | 300 ms | 0.365 |
 
@@ -198,7 +198,7 @@ Not here: classification, oriented boxes, multi-GPU training.
 - 설치: `pip install easydetect`(추론) · `pip install "easydetect[train]"`(학습)
 - 사용: `Detector("ed-s")("photo.jpg")`, 학습은 `model.train(data="data.yaml")`
 - 라이선스: 코드·COCO 가중치 Apache-2.0(상용 가능). hub 모델은 데이터셋 조건을 따름
-- 파이보 기본 모델: ed-s 320 QAT 8비트, 파이보 4B 318 ms, COCO 0.376 (YOLO11s 300 ms, 0.365)
+- **파이보 기본 모델: ed-s 320 QAT 8비트, 파이보 4B 318 ms, COCO 0.376** (YOLO11s 300 ms, 0.365)
 - 내 사진으로 만들기: [easydetect lab](https://github.com/themakerrobot/easydetect-lab)
 
 ## Credits

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>easydetect hub</title>
-<meta name="description" content="Ready-to-run object detectors for over a hundred public datasets. No PyTorch, no GPU: pip install easydetect and name a model.">
+<meta name="description" content="Ready-to-run object detectors for over a hundred public datasets: pip install easydetect and name a model.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231F5F7A'/%3E%3Crect x='7' y='10' width='18' height='14' rx='2.5' fill='none' stroke='white' stroke-width='2.4'/%3E%3Crect x='7' y='6' width='10' height='5' rx='1.5' fill='white'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='white'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="css/themaker-ui.css">
@@ -96,7 +96,7 @@ const T = {
     camBusy: "Another app is using the camera. Close it and try again.", camNoApi: "This browser cannot open a camera here (it needs https).",
     introHead: "Models for public datasets", tryHead: "Try it",
     title: "Object detectors for <em>public datasets</em>, ready to run.",
-    lead: "No PyTorch, no GPU: name a model and run it on a CPU, an Intel NPU or a Raspberry Pi.",
+    lead: "Name a model and run it: on a CPU, a GPU, an Intel NPU or a Raspberry Pi.",
     datasets: "datasets", models: "models",
     licShort: "ed-s is Apache-2.0. Each model follows its dataset's terms: check before commercial use.",
     browseTitle: "Models", browseSub: "ed-s · 320 px (with 8-bit) and 640 px · scored COCO's way on each val split",
@@ -108,7 +108,7 @@ const T = {
     copy: "Copy", copied: "Copied", savedN: "{n} files: keep them in one folder", score: "mAP50-95", int8: "8-bit", conf: "Threshold",
     download: "Download", useIt: "Use it", licNote: "Check this licence before commercial use, and keep the credit below.",
     licence: "Licence of the data", wLicence: "The model", wModel: "ed-s (Apache-2.0) trained on this dataset: it follows the data's terms above.", wFrom: "ed-s starts from", source: "Source", credit: "Credit", cite: "Cite", note: "Note",
-    classesAll: "Classes", onHF: "Files on Hugging Face", px: "px", noTorch: "no PyTorch", close: "Close",
+    classesAll: "Classes", onHF: "Files on Hugging Face", px: "px", close: "Close",
     fOnnx: "ONNX", fOnnxS: "any CPU", fInt8: "ONNX 8-bit", fInt8S: "Raspberry Pi", fOv: "OpenVINO", fOvS: "Intel CPU · GPU · NPU", fPt: "PyTorch", fPtS: "to fine-tune",
     rf: "Roboflow 100", cWebcam: "straight from a webcam", cList: "what is here, with scores",
     cFile: "a file you downloaded: its path", cHub: "online, a hub name works too (downloads once)",
@@ -130,7 +130,7 @@ const T = {
     camBusy: "다른 앱이 카메라를 쓰고 있어요. 그 앱을 닫고 다시 눌러 주세요.", camNoApi: "이 브라우저에서는 여기서 카메라를 열 수 없어요(https 필요).",
     introHead: "공개 데이터셋 모델", tryHead: "바로 써 보기",
     title: "<em>공개 데이터셋</em>으로 학습한<br>바로 쓰는 물체 인식 모델",
-    lead: "PyTorch·GPU 없이 모델 이름만 쓰면 돼요. CPU, 인텔 NPU, 라즈베리파이에서 돌아가요.",
+    lead: "모델 이름만 쓰면 바로 돌아가요. CPU, GPU, 인텔 NPU, 라즈베리파이 어디서나요.",
     datasets: "데이터셋", models: "모델",
     licShort: "ed-s는 Apache-2.0이에요. 각 모델은 데이터셋 조건을 따르니 상업용이면 먼저 확인해 주세요.",
     browseTitle: "모델", browseSub: "ed-s · 320 px(8비트 포함)와 640 px · 각 val을 COCO 방식으로 채점",
@@ -142,7 +142,7 @@ const T = {
     copy: "복사", copied: "복사했어요", savedN: "파일 {n}개예요. 한 폴더에 두세요", score: "mAP50-95", int8: "8비트", conf: "확신 기준",
     download: "내려받기", useIt: "사용법", licNote: "상업용이면 이 라이선스를 먼저 확인해 주세요. 아래 표기도 지켜 주세요.",
     licence: "데이터 라이선스", wLicence: "모델", wModel: "ed-s(Apache-2.0)를 이 데이터셋으로 학습했어요. 위 데이터 조건을 따라요.", wFrom: "ed-s의 출발:", source: "출처", credit: "표기", cite: "인용", note: "참고",
-    classesAll: "클래스", onHF: "Hugging Face에서 파일 보기", px: "px", noTorch: "PyTorch 없이", close: "닫기",
+    classesAll: "클래스", onHF: "Hugging Face에서 파일 보기", px: "px", close: "닫기",
     fOnnx: "ONNX", fOnnxS: "모든 CPU", fInt8: "ONNX 8비트", fInt8S: "라즈베리파이", fOv: "OpenVINO", fOvS: "인텔 CPU · GPU · NPU", fPt: "PyTorch", fPtS: "이어서 학습",
     rf: "Roboflow 100", cWebcam: "웹캠으로 바로", cList: "목록과 점수",
     cFile: "받아 둔 파일이면 그 경로", cHub: "인터넷이 되면 hub 이름으로도 돼요 (한 번만 받아요)",
@@ -230,7 +230,7 @@ function pythonCode(hub, file, task = "detect", head = HEAD[task]) {
 }
 function heroTerm() {
   term("hero-term", [
-    [t("python"), `# pip install -U easydetect  (${t("noTorch")})\n` + pythonCode("hub:taco/ed-s-640", "taco-ed-s-640.onnx")],
+    [t("python"), "# pip install -U easydetect\n" + pythonCode("hub:taco/ed-s-640", "taco-ed-s-640.onnx")],
     [t("cli"), `pip install -U easydetect\n\n# ${t("cWebcam")}\n` + fileFirst("easydetect predict model=taco-ed-s-640.onnx source=0", "easydetect predict model=hub:taco/ed-s-640 source=0")
       + `\n\n# ${t("cList")}\neasydetect hub search=plant`],
     [t("pi"), `pip install easydetect\n\nfrom easydetect import Detector\n` + fileFirst(`model = Detector("coco-ed-s-320-int8.onnx", backend="onnxruntime")`, `model = Detector("hub:coco/ed-s-320-int8", backend="onnxruntime")`)

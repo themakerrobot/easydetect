@@ -30,24 +30,18 @@
       <p class="lead" data-t="lead"></p>
       <div class="facts" id="facts"></div>
       <p class="hint lic" data-t="licShort"></p>
+      <div class="lab">
+        <h3 data-t="labTitle">나만의 사물 인식 모델 만들기</h3>
+        <p data-t="labLead"></p>
+        <div class="labgo">
+          <a class="db go" href="https://themakerrobot.github.io/easydetect-lab/" target="_blank" rel="noopener" data-t="labStart">lab 가이드</a>
+          <p class="hint" data-t="labNote"></p>
+        </div>
+      </div>
     </div>
     <div class="try">
       <div class="pb-label" data-t="tryHead">바로 써 보기</div>
       <div class="term" id="hero-term"></div>
-    </div>
-  </section>
-
-  <section class="pan lab">
-    <div class="side">
-      <h3 data-t="labTitle">나만의 사물 인식 모델 만들기</h3>
-      <p class="lead" data-t="labLead"></p>
-      <ul class="labsteps">
-        <li data-t="labS1"></li><li data-t="labS2"></li><li data-t="labS3"></li><li data-t="labS4"></li>
-      </ul>
-    </div>
-    <div class="labgo">
-      <a class="db go" href="https://themakerrobot.github.io/easydetect-lab/" target="_blank" rel="noopener" data-t="labStart">lab 가이드</a>
-      <p class="hint" data-t="labNote"></p>
     </div>
   </section>
 
@@ -117,13 +111,9 @@ const T = {
     rf: "Roboflow 100", cWebcam: "straight from a webcam", cList: "what is here, with scores",
     cFile: "a file you downloaded: its path", cHub: "online, a hub name works too (downloads once)",
     labTitle: "Make your own object detector",
-    labLead: "No model for what you need? Make it in easydetect lab, in your browser, from your own pictures.",
-    labS1: "Upload pictures, a video or a zip",
-    labS2: "Draw boxes, or let it label them for you",
-    labS3: "Train: about 15 minutes on a laptop CPU for a class",
-    labS4: "Export to ONNX or OpenVINO and run it anywhere",
+    labLead: "No model for what you need? Upload pictures, draw boxes and train it in easydetect lab, all in your browser.",
     labStart: "Lab guide",
-    labNote: "Works without the internet. A model trained on your own pictures is yours to use, products included. A model from here can be its starting point too: upload its .pt.",
+    labNote: "Works offline. A model trained on your own pictures is yours to use, products included.",
     tAll: "All tasks", detect: "Detection", segment: "Segmentation", pose: "Keypoints",
     mDetect: "mAP50-95", mSegment: "mask mAP50-95", mPose: "OKS AP", boxScore: "box mAP50-95",
     fHead: "with {0} beside it, one folder", cBeside: "{0} next to it, in the same folder",
@@ -155,13 +145,9 @@ const T = {
     rf: "Roboflow 100", cWebcam: "웹캠으로 바로", cList: "목록과 점수",
     cFile: "받아 둔 파일이면 그 경로", cHub: "인터넷이 되면 hub 이름으로도 돼요 (한 번만 받아요)",
     labTitle: "나만의 사물 인식 모델 만들기",
-    labLead: "원하는 모델이 없으면 easydetect lab에서 내 사진으로 직접 만들어요. 브라우저에서 다 돼요.",
-    labS1: "사진·영상·zip을 올려요",
-    labS2: "상자를 그려요. 자동 라벨도 돼요",
-    labS3: "학습해요. 수업용 설정은 노트북 CPU로 15분쯤",
-    labS4: "ONNX·OpenVINO로 내보내서 어디서나 돌려요",
+    labLead: "원하는 모델이 없으면 easydetect lab에서 사진 올리고, 상자 그리고, 학습까지 브라우저에서 해요.",
     labStart: "lab 가이드",
-    labNote: "인터넷 없이도 돼요. 내 사진으로 학습한 모델은 상업용으로도 자유롭게 써요. 여기 모델의 .pt를 올려 시작 모델로 써도 돼요.",
+    labNote: "인터넷 없이도 돼요. 내 사진으로 학습한 모델은 상업용으로도 자유롭게 써요.",
     tAll: "모든 타입", detect: "감지", segment: "세그멘테이션", pose: "포즈",
     mDetect: "mAP50-95", mSegment: "마스크 mAP50-95", mPose: "OKS AP", boxScore: "상자 mAP50-95",
     fHead: "{0}와 함께 받아요. 한 폴더에 두세요", cBeside: "{0}가 같은 폴더에 있어야 해요",

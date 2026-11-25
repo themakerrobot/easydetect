@@ -188,6 +188,7 @@ function fmtSize(n) {
 }
 let toastTimer;
 function toast(s) { const e = $("toast"); e.textContent = s; e.classList.add("on");
+  const top = $("detail").open ? $("detail") : document.body; if (e.parentNode !== top) top.append(e);
   clearTimeout(toastTimer); toastTimer = setTimeout(() => e.classList.remove("on"), 1600); }
 async function copy(text) {
   try { await navigator.clipboard.writeText(text); }
@@ -583,7 +584,7 @@ $("detail").addEventListener("click", (e) => {
   if (e.target.closest("#miniCam")) return miniCam();
   if (e.target.closest("#miniFlip")) { miniFacing = miniFacing === "user" ? "environment" : "user"; miniStop(); return miniCam(); }
   const a = e.target.closest("a[data-files]");
-  if (a) { e.preventDefault(); fetchFiles(a.dataset.files.split(" ")); }
+  if (a) { e.preventDefault(); fetchFiles(a.dataset.files.split(" "), a); }
 });
 
 /* Hugging Face sends big files (.onnx, .bin, .pt) as downloads but shows small
@@ -627,7 +628,7 @@ async function grab(url, onBytes) {
   return out;
 }
 let zipping = false;
-async function fetchFiles(files) {
+async function fetchFiles(files, card) {
   const { d, v, sizes } = current;
   if (files.length === 1) {
     const x = document.createElement("a"); x.href = `${RAW}/${v.key}/${files[0]}?download=true`; x.download = files[0];
@@ -635,13 +636,21 @@ async function fetchFiles(files) {
   }
   if (zipping) return; zipping = true;
   const total = files.reduce((n, f) => n + (sizes[f] || 0), 0); let before = 0;
+  // the files come in whole before the zip can be saved: the card shows how far
+  const small = card && card.querySelector("small"), was = small && small.textContent;
+  const show = (pct) => {
+    if (!card) return;
+    card.classList.add("busy"); card.style.setProperty("--p", `${pct}%`);
+    small.textContent = t("zipping").replace("{p}", pct);
+  };
+  show(0);
   try {
     const entries = [];
     for (const f of files) {
       let data;
       try {
-        data = await grab(`${RAW}/${v.key}/${f}`, (got) => toast(t("zipping")
-          .replace("{p}", total ? Math.min(99, Math.round(100 * (before + got) / total)) : "…")));
+        data = await grab(`${RAW}/${v.key}/${f}`,
+          (got) => show(total ? Math.min(99, Math.round(100 * (before + got) / total)) : 0));
       } catch (err) {
         if (!f.endsWith(".names.json")) throw err;  // older models: the names from the list
         data = new TextEncoder().encode(JSON.stringify(d.meta.classes || {}));
@@ -651,7 +660,10 @@ async function fetchFiles(files) {
     save(zipStore(entries), files[0].replace(/\.(onnx|xml)$/, "") + ".zip");
     toast(t("zipped").replace("{n}", files.length));
   } catch { toast(t("zipFail")); }
-  finally { zipping = false; }
+  finally {
+    zipping = false;
+    if (card) { card.classList.remove("busy"); card.style.removeProperty("--p"); small.textContent = was; }
+  }
 }
 $("detail").addEventListener("close", () => { miniStop(true); current = null; history.replaceState(null, "", location.pathname + location.search); });
 document.addEventListener("keydown", (e) => {

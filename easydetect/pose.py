@@ -246,7 +246,10 @@ class KeypointEstimator:
         decodes finer than the network's half-pixel bins."""
         from .predictor import installed
 
-        self.backend = backend or ("openvino" if installed("openvino") else "onnxruntime")
+        # "CUDA" is onnxruntime's; OpenVINO has no such device
+        cuda = str(device).upper().startswith("CUDA")
+        self.backend = backend or ("openvino" if installed("openvino") and not cuda
+                                   else "onnxruntime")
         self.batch = batch
         self.flip, self.subpixel = flip, subpixel
         #: the keypoint set this model places (its names, flip pairs, skeleton)

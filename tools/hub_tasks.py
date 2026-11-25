@@ -370,7 +370,7 @@ def score_pose_data(model: str, pose: str, data: str, limit: int | None = None,
     from easydetect.data.keypoints import load_yolo
     from easydetect.pose import KeypointAP, KeypointEstimator, keypoint_rows
 
-    estimator = KeypointEstimator(pose, device=pose_device or device)
+    estimator = KeypointEstimator(pose, device=pose_device or device, backend=backend)
     spec = estimator.spec
     images, people = load_yolo(data, "val", spec)
     # onnxruntime: "CUDA" is one of its devices, not OpenVINO's

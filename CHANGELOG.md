@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.18
+
+- task="segment" runs offline once easydetect is installed: MobileSAM's
+  encoder, the same for every mask model, is inside the package. A model with
+  its own mask decoder (a hub `-seg` model) downloads nothing else.
+- Keypoint and mask networks on a GPU: device="CUDA" runs them on ONNX
+  Runtime (OpenVINO has no CUDA device), as it does the detector.
 ## 0.7.17
 
 - easydetect hub's files are named after their dataset too

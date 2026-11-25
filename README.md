@@ -288,6 +288,18 @@ model runs as fast as the original of the same size and queries):
 | ed-n | 190 ms | **122 ms** | 479 ms |
 | ed-s | 508 ms | 347 ms | 1,323 ms |
 
+Pibo's own models, as the robot runs them: ONNX Runtime, 4 threads, a
+Raspberry Pi 4B, the model alone (median of 15 to 30 runs). COCO mAP50-95 is
+scored the original authors' way here (the 300 best query and class pairs),
+which reads higher than the table above: the same float ed-s at 320 is 0.381
+there and 0.388 here.
+
+| Pibo's model | Pi 4B | COCO mAP50-95 |
+| --- | --- | --- |
+| ed-s 320, float | 396 ms | 0.388 |
+| **ed-s 320, QAT 8-bit (the default)** | **318 ms** | **0.384** |
+| ed-s 640, QAT 8-bit (accuracy first) | 1,058 ms | 0.463 |
+
 * **Fine-tune at the size you will run.** ed-n at 320: 0.100 → 0.322;
   ed-s at 320: 0.239 → 0.381. At 640 the original weights stay better.
 * **Against YOLO at the same size:** ed-n is ahead of both YOLO n models at

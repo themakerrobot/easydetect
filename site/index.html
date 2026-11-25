@@ -105,7 +105,7 @@ const T = {
     none: "No model matches. Try another word.", err: "Could not read the list from Hugging Face.", open: "Open it there",
     foot: "The models here start from ed-s, which is Apache-2.0 (easydetect's code and starting weights, from D-FINE, PP-HGNetV2 and MobileSAM). Each is ed-s trained on a public dataset and follows that dataset's terms: keep its credit, and check the dataset's and its pictures' terms before commercial use.",
     python: "Python", cli: "Command line", pi: "Raspberry Pi", npu: "Intel NPU", tune: "Fine-tune", folder: "Download all",
-    copy: "Copy", copied: "Copied", savedN: "{n} files: keep them in one folder", score: "mAP50-95", int8: "8-bit", conf: "Threshold",
+    copy: "Copy", copied: "Copied", zipping: "Getting the files… {p}%", zipped: "A zip of {n} files: unzip them into one folder", zipFail: "The download stopped. Try again", score: "mAP50-95", int8: "8-bit", conf: "Threshold",
     download: "Download", useIt: "Use it", licNote: "Check this licence before commercial use, and keep the credit below.",
     licence: "Licence of the data", wLicence: "The model", wModel: "ed-s (Apache-2.0) trained on this dataset: it follows the data's terms above.", wFrom: "ed-s starts from", source: "Source", credit: "Credit", cite: "Cite", note: "Note",
     classesAll: "Classes", onHF: "Files on Hugging Face", px: "px", close: "Close",
@@ -118,7 +118,7 @@ const T = {
     labNote: "Works offline. What you train is yours to use, products included.",
     tAll: "All tasks", detect: "Detection", segment: "Segmentation", pose: "Keypoints",
     mDetect: "mAP50-95", mSegment: "mask mAP50-95", mPose: "OKS AP", boxScore: "box mAP50-95",
-    fHead: "with {0} beside it, one folder", cBeside: "{0} next to it, in the same folder",
+    fHead: "zip with the file it needs", cBeside: "{0} next to it, in the same folder",
     anyMask: "Any model draws masks with task=\"segment\" (MobileSAM, not trained or scored on this dataset).",
   },
   ko: {
@@ -139,7 +139,7 @@ const T = {
     none: "맞는 모델이 없어요. 다른 말로 찾아보세요.", err: "Hugging Face에서 목록을 못 읽었어요.", open: "거기서 보기",
     foot: "여기 모델은 ed-s에서 출발해요. ed-s(easydetect 코드와 시작 가중치, D-FINE·PP-HGNetV2·MobileSAM 기반)는 Apache-2.0이에요. 각 모델은 공개 데이터셋으로 학습해서 그 데이터셋 조건을 따라요. 모델과 함께 데이터셋 표기를 지키고, 상업용이면 데이터셋과 사진의 조건을 먼저 확인해 주세요.",
     python: "파이썬", cli: "명령줄", pi: "라즈베리파이", npu: "인텔 NPU", tune: "이어서 학습", folder: "폴더 받기",
-    copy: "복사", copied: "복사했어요", savedN: "파일 {n}개예요. 한 폴더에 두세요", score: "mAP50-95", int8: "8비트", conf: "확신 기준",
+    copy: "복사", copied: "복사했어요", zipping: "파일 받는 중… {p}%", zipped: "파일 {n}개를 zip으로 받았어요. 한 폴더에 풀어 주세요", zipFail: "받기가 멈췄어요. 다시 해 주세요", score: "mAP50-95", int8: "8비트", conf: "확신 기준",
     download: "내려받기", useIt: "사용법", licNote: "상업용이면 이 라이선스를 먼저 확인해 주세요. 아래 표기도 지켜 주세요.",
     licence: "데이터 라이선스", wLicence: "모델", wModel: "ed-s(Apache-2.0)를 이 데이터셋으로 학습했어요. 위 데이터 조건을 따라요.", wFrom: "ed-s의 출발:", source: "출처", credit: "표기", cite: "인용", note: "참고",
     classesAll: "클래스", onHF: "Hugging Face에서 파일 보기", px: "px", close: "닫기",
@@ -152,7 +152,7 @@ const T = {
     labNote: "인터넷 없이 되고, 만든 모델은 상업용으로도 자유롭게 써요.",
     tAll: "모든 타입", detect: "감지", segment: "세그멘테이션", pose: "포즈",
     mDetect: "mAP50-95", mSegment: "마스크 mAP50-95", mPose: "OKS AP", boxScore: "상자 mAP50-95",
-    fHead: "{0}와 함께 받아요. 한 폴더에 두세요", cBeside: "{0}가 같은 폴더에 있어야 해요",
+    fHead: "필요한 파일까지 zip 하나로", cBeside: "{0}가 같은 폴더에 있어야 해요",
     anyMask: "어느 모델이든 task=\"segment\"로 범용 마스크를 만들 수 있어요(MobileSAM, 이 데이터셋으로 학습·채점 안 함).",
   },
 };
@@ -367,7 +367,7 @@ function fileCard(kind, files, label, sub, main) {
   const { v, sizes } = current;
   const total = files.reduce((n, f) => n + (sizes[f] || 0), 0);
   return `<a class="file${main ? " main" : ""}" href="${RAW}/${v.key}/${files[0]}?download=true" data-files="${esc(files.join(" "))}" download>
-    <span class="ic">${esc(kind)}</span><span><b>${esc(label)}</b><small>${esc(sub)}${total ? " · " + fmtSize(total) : ""}</small></span></a>`;
+    <span class="ic">${esc(kind)}</span><span><b>${esc(label)}</b><small>${esc(sub)}${files.length > 1 ? " · " + esc(t("fHead")) : ""}${total ? " · " + fmtSize(total) : ""}</small></span></a>`;
 }
 function drawFiles() {
   const { d, v } = current; const n = stemOf(d, v);
@@ -375,7 +375,7 @@ function drawFiles() {
   const box = $("files"); if (!box) return;
   // a mask or keypoint model is its detector and the network beside it: both come
   const head = headOf(d, v) ? [headOf(d, v)] : [];
-  const sub = (s) => head.length ? `${s} · ${t("fHead").replace("{0}", head[0])}` : s;
+  const sub = (s) => s;
   box.innerHTML = [
     has(`${n}.onnx`) ? fileCard("ONNX", [`${n}.onnx`, ...head], t("fOnnx"), sub(t("fOnnxS")), true) : "",
     has(`${n}-int8.onnx`) && v.score_int8 != null ? fileCard("INT8", [`${n}-int8.onnx`, ...head], t("fInt8"), sub(t("fInt8S"))) : "",
@@ -593,25 +593,65 @@ function save(blob, name) {
   const x = document.createElement("a"); x.href = u; x.download = name; document.body.append(x); x.click(); x.remove();
   setTimeout(() => URL.revokeObjectURL(u), 30000);
 }
-async function fetchFiles(files) {
-  const { d, v } = current;
-  for (const [i, f] of files.entries()) {
-    if (i) await new Promise((r) => setTimeout(r, 700));
-    const url = `${RAW}/${v.key}/${f}`;
-    if (/\.(xml|json)$/.test(f)) {
-      try {
-        const r = await fetch(url);
-        if (r.ok) { save(await r.blob(), f); continue; }
-      } catch {}
-      if (f.endsWith(".names.json")) {           // older models: the names from the list
-        save(new Blob([JSON.stringify(d.meta.classes || {})], { type: "application/json" }), f);
-        continue;
-      }
-    }
-    const x = document.createElement("a"); x.href = url + "?download=true"; x.download = f;
-    document.body.append(x); x.click(); x.remove();
+/* several files (a detector and the network beside it, or OpenVINO's three)
+   come as one zip: a browser lets a page start one download per click */
+const CRC = (() => { const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(entries) {               // [{name, data: Uint8Array}] -> Blob, stored (no compression)
+  const enc = new TextEncoder(), parts = [], dir = []; let offset = 0;
+  for (const { name, data } of entries) {
+    const n = enc.encode(name), crc = crc32(data), size = data.length;
+    const h = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [8, 0, 2], [14, crc, 4], [18, size, 4], [22, size, 4], [26, n.length, 2]]
+      .forEach(([o, val, w]) => w === 4 ? h.setUint32(o, val, true) : h.setUint16(o, val, true));
+    parts.push(h, n, data);
+    const c = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [16, crc, 4], [20, size, 4], [24, size, 4], [28, n.length, 2], [42, offset, 4]]
+      .forEach(([o, val, w]) => w === 4 ? c.setUint32(o, val, true) : c.setUint16(o, val, true));
+    dir.push(c, n);
+    offset += 30 + n.length + size;
   }
-  if (files.length > 1) toast(t("savedN").replace("{n}", files.length));
+  const dirSize = dir.reduce((k, x) => k + x.byteLength, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [8, entries.length, 2], [10, entries.length, 2], [12, dirSize, 4], [16, offset, 4]]
+    .forEach(([o, val, w]) => w === 4 ? e.setUint32(o, val, true) : e.setUint16(o, val, true));
+  return new Blob([...parts, ...dir, e], { type: "application/zip" });
+}
+async function grab(url, onBytes) {
+  const r = await fetch(url); if (!r.ok) throw new Error(r.status);
+  const reader = r.body.getReader(), chunks = []; let got = 0;
+  for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; onBytes(got); }
+  const out = new Uint8Array(got); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
+let zipping = false;
+async function fetchFiles(files) {
+  const { d, v, sizes } = current;
+  if (files.length === 1) {
+    const x = document.createElement("a"); x.href = `${RAW}/${v.key}/${files[0]}?download=true`; x.download = files[0];
+    document.body.append(x); x.click(); x.remove(); return;
+  }
+  if (zipping) return; zipping = true;
+  const total = files.reduce((n, f) => n + (sizes[f] || 0), 0); let before = 0;
+  try {
+    const entries = [];
+    for (const f of files) {
+      let data;
+      try {
+        data = await grab(`${RAW}/${v.key}/${f}`, (got) => toast(t("zipping")
+          .replace("{p}", total ? Math.min(99, Math.round(100 * (before + got) / total)) : "…")));
+      } catch (err) {
+        if (!f.endsWith(".names.json")) throw err;  // older models: the names from the list
+        data = new TextEncoder().encode(JSON.stringify(d.meta.classes || {}));
+      }
+      before += data.length; entries.push({ name: f, data });
+    }
+    save(zipStore(entries), files[0].replace(/\.(onnx|xml)$/, "") + ".zip");
+    toast(t("zipped").replace("{n}", files.length));
+  } catch { toast(t("zipFail")); }
+  finally { zipping = false; }
 }
 $("detail").addEventListener("close", () => { miniStop(true); current = null; history.replaceState(null, "", location.pathname + location.search); });
 document.addEventListener("keydown", (e) => {

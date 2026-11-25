@@ -289,10 +289,8 @@ model runs as fast as the original of the same size and queries):
 | ed-s | 508 ms | 347 ms | 1,323 ms |
 
 Pibo's own models, as the robot runs them: ONNX Runtime, 4 threads, a
-Raspberry Pi 4B, the model alone (median of 15 to 30 runs). COCO mAP50-95 is
-scored the original authors' way here (the 300 best query and class pairs),
-which reads higher than the table above: the same float ed-s at 320 is 0.381
-there and 0.388 here.
+Raspberry Pi 4B, the model alone (median of 15 to 30 runs); COCO mAP50-95 the
+original authors' way (the 300 best query and class pairs):
 
 | Pibo's model | Pi 4B | COCO mAP50-95 |
 | --- | --- | --- |

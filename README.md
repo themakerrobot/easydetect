@@ -120,7 +120,7 @@ pip install -r requirements.txt     # easydetect[train] from PyPI, and the web s
 python run.py                       # http://<this machine>:8080
 ```
 
-![easydetect lab](https://raw.githubusercontent.com/themakerrobot/easydetect-lab/main/docs/lab.jpg)
+![easydetect lab](https://raw.githubusercontent.com/themakerrobot/easydetect-lab/main/docs/lab-en.jpg)
 
 ## Models
 

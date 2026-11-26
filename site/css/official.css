@@ -1,0 +1,48 @@
+/* the hub as a product page: the same kit, THE MAKER site's sheet instead of a worksheet's.
+   Tokens only, laid over hub.css; nothing here is new markup's but .proof,
+   .ver and the footer columns. */
+:root{                       /* THE MAKER's site: canvas, lines and ink */
+  --paper:#F5F6FA; --bg:#F5F6FA; --panel:#FFFFFF; --panel2:#F5F6FA;
+  --line-d:#E3E6EE; --line:#CFD4DF; --line-soft:#E3E6EE;
+  --ink:#1F2430; --ink2:#3A4150; --ink3:#6B7385;
+  --acc-soft:#E8F1F6;
+  --shadow:0 1px 2px rgba(16,24,40,.05);
+}
+:root[data-theme=dark]{
+  --paper:#0F1216; --bg:#0F1216; --panel:#161A20; --panel2:#1B2028;
+  --line-d:#2A313B; --line:#353D48; --line-soft:#242A33;
+  --ink:#E8ECF1; --ink2:#C3CAD3; --ink3:#8E98A5;
+  --acc-soft:#16303D;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+body,[data-theme=dark] body{background-image:none;background-color:var(--bg)}
+header{border-bottom:1px solid var(--line-soft);box-shadow:var(--shadow)}
+.pan,.card{border:1px solid var(--line-soft);box-shadow:var(--shadow);border-radius:14px}
+.card:hover{border-color:var(--line);box-shadow:0 6px 18px rgba(16,24,40,.08)}
+.db{border-radius:8px}
+.intro h2{letter-spacing:-.02em}
+.ver{font:600 11px/1 var(--mono);color:var(--ink3);border:1px solid var(--line);border-radius:999px;
+  padding:4px 8px;margin-left:2px}
+/* the proof strip: what someone choosing a library checks first */
+.proof{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.proof span{font-size:12.5px;color:var(--ink3)}
+.proof b{margin-right:6px}
+.proof b{color:var(--ink);font-variant-numeric:tabular-nums;margin-right:4px}
+/* a footer with who makes it */
+footer.site{display:grid;grid-template-columns:1.4fr repeat(3,1fr);gap:24px;padding:28px 24px 36px;margin-top:24px;
+  border-top:1px solid var(--line-soft);background:var(--panel);font-size:13px;color:var(--ink3)}
+footer.site b{display:block;color:var(--ink);font-size:13px;margin-bottom:8px}
+footer.site a{display:block;color:var(--ink2);text-decoration:none;margin:4px 0}
+footer.site a:hover{color:var(--acc-ink)}
+footer.site .brand-line{font-size:15px;font-weight:800;color:var(--ink);margin-bottom:6px}
+@media (max-width:700px){footer.site{grid-template-columns:1fr 1fr}footer.site > div:first-child{grid-column:1/-1}}
+/* made by THE MAKER: its mascot, beside the version and in the footer */
+.maker{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--ink3);
+  text-decoration:none;margin-left:10px;padding-left:12px;border-left:1px solid var(--line-soft)}
+.maker img{width:20px;height:auto}
+.maker b{color:var(--ink2);font-weight:800;letter-spacing:.01em}
+.maker:hover b{color:var(--acc-ink)}
+footer.site .brand-line{display:flex;align-items:center;gap:8px}
+footer.site .brand-line img{width:26px;height:auto}
+@media (max-width:700px){.maker{display:none}}
+.proof i{font-style:normal}

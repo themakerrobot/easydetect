@@ -1333,15 +1333,19 @@ def everwatch(folder: Path) -> Path:
 
 def visa(folder: Path) -> Path:
     """Defects on twelve kinds of product (Amazon VisA, CC BY 4.0): each
-    defect region of its masks a box and an outline, one class; its 1-class
-    split; a fifth of the flawless pictures train beside the flawed ones."""
+    defect region of its masks a box and an outline, one class. Its
+    supervised split (2cls_highshot: defects in train and test); its 1-class
+    split has none in train, so without that file a tenth of the pictures, at
+    random, are val. A fifth of the flawless training pictures are kept."""
     import csv
 
     import cv2
     import numpy as np
 
     src = _unpack(URLS["visa"], folder / "VisA_20220922.tar", folder / "src")
-    table = next(src.rglob("1cls.csv"))
+    table = next(iter(sorted(src.rglob("2cls_highshot.csv"))), None)
+    own = table is None
+    table = table or next(src.rglob("1cls.csv"))
     root = table.parent.parent
     pictures, val = [], set()
     with open(table, newline="") as f:
@@ -1350,7 +1354,8 @@ def visa(folder: Path) -> Path:
             if not picture.exists():
                 continue
             flawed = row.get("label", "").strip().lower() == "anomaly" and row.get("mask")
-            if row["split"].strip() == "train" and not flawed and random.Random(i).random() >= 0.2:
+            training = own or row["split"].strip() == "train"
+            if training and not flawed and random.Random(i).random() >= 0.2:
                 continue
             mask = root / row["mask"] if flawed else None
             stem = f"{row['object']}_{picture.stem}"
@@ -1367,8 +1372,10 @@ def visa(folder: Path) -> Path:
             if not link.exists():
                 os.symlink(picture.resolve(), link)
             pictures.append((link, labels_of))
-            if row["split"].strip() != "train":
+            if not own and row["split"].strip() != "train":
                 val.add(link.stem)
+    if own:
+        val = _split([link.stem for link, _ in pictures])
     return _instances(folder, pictures, "defect", val=val)
 
 

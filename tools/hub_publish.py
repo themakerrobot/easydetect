@@ -148,7 +148,10 @@ def thumbnail(onnx: Path, data: str, out: Path, look: int = 200, task: str = "de
     model = Detector(str(onnx), task=task, verbose=False)
     clear, clearest, busy, most, calm, fewest = None, -1.0, None, -1, None, None
     for f in DetDataset(data, "val", 64, augment=False).files[:look]:
-        result = model(str(f), verbose=False)[0]
+        try:
+            result = model(str(f), verbose=False)[0]
+        except Exception:  # noqa: BLE001  (a damaged picture is not a sample)
+            continue
         found = len(result.boxes)
         score = _sample_score(result, task)
         if score is not None and score > clearest:

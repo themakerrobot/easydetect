@@ -1638,6 +1638,25 @@ def prefetch(keys: list[str], root: Path, coco: Path) -> int:
     return 0
 
 
+def drop_unreadable(key: str, root: Path) -> int:
+    """Take out of a laid-out dataset the pictures OpenCV cannot read (a
+    damaged file in the source): their links and labels. How many went."""
+    import cv2
+
+    folder = _folder(key, root)
+    gone = 0
+    for split in ("train", "val"):
+        for link in sorted((folder / "images" / split).iterdir()):
+            if cv2.imread(str(link)) is not None:
+                continue
+            link.unlink()
+            for ext in (".txt", ".unknown"):
+                (folder / "labels" / split / f"{link.stem}{ext}").unlink(missing_ok=True)
+            gone += 1
+    print(f"{key}: {gone} unreadable pictures taken out", flush=True)
+    return gone
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("keys", nargs="*")
@@ -1646,6 +1665,8 @@ def main() -> int:
     parser.add_argument("--skip", nargs="*", default=[], help="leave these out")
     parser.add_argument("--prefetch", action="store_true",
                         help="one at a time behind a lock, going on past a failure")
+    parser.add_argument("--drop-unreadable", action="store_true",
+                        help="take the pictures OpenCV cannot read out of these laid-out datasets")
     parser.add_argument("--root", default="~/datasets/hub")
     parser.add_argument("--coco", default="~/datasets/coco")
     args = parser.parse_args()
@@ -1653,6 +1674,10 @@ def main() -> int:
     chosen = ORDER if args.all else NEW if args.new else args.keys
     keys = [k for k in chosen if k not in args.skip]
     root, coco = Path(args.root).expanduser(), Path(args.coco).expanduser()
+    if args.drop_unreadable:
+        for key in keys:
+            drop_unreadable(key, root)
+        return 0
     if args.prefetch:
         return prefetch(keys, root, coco)
     failed = []

@@ -50,6 +50,8 @@ def score(path: Path, data: str, limit: int | None, backend: str | None = None,
     pibo, official, times = Evaluator(ds.nc), Evaluator(ds.nc), []
     for i, f in enumerate(files):
         img = imread(str(f))
+        if img is None:                  # a damaged picture: left out of both
+            continue
         lab = ds._load_labels(f)
         # a class unknown in this picture (Open Images) is neither right nor wrong
         known = ds._known(i, lab).numpy() if ds.unknown_classes else None

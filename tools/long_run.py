@@ -679,7 +679,8 @@ def step_lab_form(root: Path, args) -> None:
 
 #: hub datasets too big to share the GPU with another training
 HUB_HEAVY = ("doclaynet", "caltech-camera-traps", "lvis", "openimages", "izembek", "fathomnet",
-             "armbench", "noaa-psnf")
+             "armbench", "noaa-psnf",
+             "channel-islands", "island-conservation", "publaynet")
 
 
 #: boxes a picture above which a dataset trains alone (it needs far more memory)

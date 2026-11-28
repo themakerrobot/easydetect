@@ -93,6 +93,18 @@ URLS = {
     "ena24-labels": "https://storage.googleapis.com/public-datasets-lila/ena24/ena24.json",
     "boxes-on-bees": "https://storage.googleapis.com/public-datasets-lila/boxes-on-bees/"
                      "boxes-on-bees-2021.zip",
+    "channel-islands-meta": "https://storage.googleapis.com/public-datasets-lila/"
+                            "channel-islands-camera-traps/channel-islands-camera-traps.json.zip",
+    "channel-islands-images": "https://storage.googleapis.com/public-datasets-lila/"
+                              "channel-islands-camera-traps/"
+                              "channel-islands-camera-traps-images.zip",
+    "island-conservation-meta": "https://storage.googleapis.com/public-datasets-lila/"
+                                "islandconservationcameratraps/"
+                                "island_conservation_camera_traps_1.02.zip",
+    "island-conservation-images": "https://storage.googleapis.com/public-datasets-lila/"
+                                  "islandconservationcameratraps/"
+                                  "island_conservation_camera_traps.zip",
+    "publaynet": "https://huggingface.co/datasets/jordanparker6/publaynet",
     "bbbc038": "https://data.broadinstitute.org/bbbc/BBBC038/stage1_train.zip",
     "nuinsseg": "https://zenodo.org/api/records/10518968/files/NuInsSeg.zip/content",
     "pped": "https://zenodo.org/api/records/6551758/files/PPED_data.zip/content",
@@ -1316,9 +1328,55 @@ def artf_clothes(folder: Path) -> Path:
     return _coco_pair(folder, splits, splits["train"], lambda im: path_of.get(id(im), Path("/x")))
 
 
+def _tiled(lay: Layout, split: str, items, tiles: Path, tile: int = 640,
+           empty: float = 0.05) -> None:
+    """Big pictures of small objects cut into ``tile`` px squares, so the
+    objects keep their size: ``items`` are (picture, [(class, x0, y0, x1, y1)]
+    in pixels). A box goes with the square holding at least half of it; the
+    squares with none are kept at the rate ``empty``. The squares are written
+    once into ``tiles`` (``<stem>.json`` notes what each holds)."""
+    import cv2
+
+    tiles.mkdir(parents=True, exist_ok=True)
+
+    def starts(n: int) -> list[int]:
+        return sorted(set(list(range(0, max(n - tile, 0), tile)) + [max(n - tile, 0)]))
+
+    for picture, boxes in items:
+        note = tiles / f"{picture.stem}.json"
+        if not note.exists():
+            img = cv2.imread(str(picture))
+            if img is None:
+                continue
+            h, w = img.shape[:2]
+            rng, made = random.Random(picture.stem), []
+            for y0 in starts(h):
+                for x0 in starts(w):
+                    rows = []
+                    for c, bx0, by0, bx1, by1 in boxes:
+                        ix = min(bx1, x0 + tile) - max(bx0, x0)
+                        iy = min(by1, y0 + tile) - max(by0, y0)
+                        if ix > 0 and iy > 0 and ix * iy >= 0.5 * (bx1 - bx0) * (by1 - by0):
+                            r = box(c, bx0 - x0, by0 - y0, bx1 - x0, by1 - y0,
+                                    min(tile, w - x0), min(tile, h - y0))
+                            if r:
+                                rows.append(r)
+                    if not rows and rng.random() >= empty:
+                        continue
+                    name = f"{picture.stem}_{x0}_{y0}.jpg"
+                    cv2.imwrite(str(tiles / name), img[y0:y0 + tile, x0:x0 + tile],
+                                [cv2.IMWRITE_JPEG_QUALITY, 92])
+                    made.append([name, rows])
+            note.write_text(json.dumps(made))
+        for name, rows in json.loads(note.read_text()):
+            lay.add(split, tiles / name, [tuple(r) for r in rows])
+
+
 def everwatch(folder: Path) -> Path:
     """Wading birds from the air over the Everglades (EverWatch, CC0): its
-    1500 px crops, its own train and validation."""
+    1500 px crops cut into 640 px squares (a bird there is a few dozen
+    pixels, too small once a whole crop is shrunk to 640 or 320), its own
+    train and validation."""
     src = _unpack(URLS["everwatch"], folder / "everwatch-dataset.zip", folder / "src")
     base = next(p.parent for p in src.rglob("train_annotations.json"))
     splits = {"train": json.loads((base / "train_annotations.json").read_text()),
@@ -1327,8 +1385,149 @@ def everwatch(folder: Path) -> Path:
     index = {c["id"]: i for i, c in enumerate(cats)}
     lay = Layout(folder)
     for split, ann in splits.items():
-        _coco_like(lay, split, ann, base, index, path_of=lambda im: base / im["file_name"])
+        per_image = defaultdict(list)
+        for a in ann["annotations"]:
+            if a.get("bbox") and a["category_id"] in index:
+                x, y, w, h = a["bbox"]
+                per_image[a["image_id"]].append((index[a["category_id"]], x, y, x + w, y + h))
+        items = [(base / im["file_name"], per_image[im["id"]]) for im in ann["images"]
+                 if (base / im["file_name"]).exists()]
+        _tiled(lay, split, items, folder / "tiles" / split)
     return lay.finish([c["name"] for c in cats])
+
+
+def _camera_traps(folder: Path, meta_key: str, images_key: str, empty: float = 0.05) -> Path:
+    """A LILA BC camera-trap set (COCO Camera Traps, CDLA-Permissive): the
+    pictures with boxes, ``empty`` of the empty ones; no "empty" or person
+    class (the people's pictures are not released), no full-frame stand-in
+    boxes; a picture whose animal is named but not boxed is left out. Val is a
+    tenth of the camera locations, so a sequence never falls on both sides."""
+    meta = _unpack(URLS[meta_key], folder / "meta.zip", folder / "src-meta")
+    ann = json.loads(next(meta.rglob("*.json")).read_text())
+    images = _unpack(URLS[images_key], folder / "images.zip", folder / "src")
+    named = {c["id"]: c["name"].strip() for c in ann["categories"]}
+    drop = {i for i, n in named.items() if n.lower() in ("empty", "human", "person", "blank")}
+    kept = sorted((i for i in named if i not in drop), key=lambda i: named[i].lower())
+    index = {i: k for k, i in enumerate(kept)}
+    by_image = {im["id"]: im for im in ann["images"]}
+    boxes, unboxed, people = defaultdict(list), set(), set()
+    for a in ann["annotations"]:
+        c, im = a["category_id"], by_image.get(a["image_id"])
+        if im is None:
+            continue
+        if c in drop:
+            if named[c].lower() != "empty":
+                people.add(a["image_id"])
+            continue
+        b = a.get("bbox")
+        if not b:
+            unboxed.add(a["image_id"])
+        elif not (b[2] >= 0.98 * im.get("width", 1e9) and b[3] >= 0.98 * im.get("height", 1e9)):
+            boxes[a["image_id"]].append(a)
+    # where the pictures sit inside the zip
+    first = next(iter(ann["images"]))["file_name"]
+    base = next((d for d in [images, *sorted(p for p in images.iterdir() if p.is_dir())]
+                 if (d / first).exists()), images)
+    val_at = _split(sorted({str(im.get("location", "")) for im in ann["images"]}))
+    lay = Layout(folder)
+    for im in ann["images"]:
+        i = im["id"]
+        if i in unboxed or i in people:
+            continue
+        if not boxes[i] and random.Random(str(i)).random() >= empty:
+            continue
+        path = base / im["file_name"]
+        if not path.exists():
+            continue
+        w, h = float(im["width"]), float(im["height"])
+        rows = [r for a in boxes[i]
+                for r in [box(index[a["category_id"]], a["bbox"][0], a["bbox"][1],
+                              a["bbox"][0] + a["bbox"][2], a["bbox"][1] + a["bbox"][3], w, h)]
+                if r]
+        split = "val" if str(im.get("location", "")) in val_at else "train"
+        lay.add(split, path, rows, stem=str(i).replace("/", "_"))
+    return lay.finish([named[i] for i in kept])
+
+
+def channel_islands(folder: Path) -> Path:
+    """Foxes, skunks, rodents and birds on the California Channel Islands
+    (LILA BC, CDLA-Permissive)."""
+    return _camera_traps(folder, "channel-islands-meta", "channel-islands-images")
+
+
+def island_conservation(folder: Path) -> Path:
+    """Animals on islands of seven countries, from invasive-species work
+    (LILA BC, CDLA-Permissive)."""
+    return _camera_traps(folder, "island-conservation-meta", "island-conservation-images")
+
+
+#: PubLayNet's five classes (its COCO category ids 1 to 5)
+PUBLAYNET = ["text", "title", "list", "table", "figure"]
+
+
+def publaynet(folder: Path, train_shards: int = 20, val_shards: int = 2) -> Path:
+    """Document page layout (PubLayNet: annotations CDLA-Permissive by IBM, the
+    pages from PubMed Central's open-access commercial-use set, each under its
+    article's licence), from a Parquet copy on Hugging Face: ``train_shards``
+    of its 208 training shards (about 1,600 pages each) and ``val_shards`` of
+    its validation ones."""
+    import io
+    import time
+    import urllib.request
+
+    import pyarrow.parquet as pq
+    from PIL import Image
+
+    repo = URLS["publaynet"].split("/datasets/")[1]
+    request = urllib.request.Request(
+        f"https://huggingface.co/api/datasets/{repo}/tree/main/data",
+        headers={"User-Agent": "easydetect"})
+    with urllib.request.urlopen(request, timeout=120) as r:
+        names = sorted(e["path"] for e in json.loads(r.read()) if e["path"].endswith(".parquet"))
+    chosen = ([("train", n) for n in names if Path(n).name.startswith("train-")][:train_shards]
+              + [("val", n) for n in names if Path(n).name.startswith("validation-")][:val_shards])
+    pages, work = folder / "pages", folder / ".shards"
+    lay = Layout(folder)
+    for split, shard in chosen:
+        name = Path(shard).name
+        note = work / f"{name}.json"
+        if not note.exists():
+            local = None
+            for attempt in range(6):
+                try:
+                    local = _fetch(f"https://huggingface.co/datasets/{repo}/resolve/main/{shard}",
+                                   work / name)
+                    break
+                except subprocess.CalledProcessError:
+                    time.sleep(300 * (attempt + 1))
+            if local is None:
+                print(f"publaynet: {name} could not be fetched; left out", flush=True)
+                continue
+            (pages / split).mkdir(parents=True, exist_ok=True)
+            made, pf = [], pq.ParquetFile(local)
+            for g in range(pf.num_row_groups):
+                for row in pf.read_row_group(g).to_pylist():
+                    data = row["image"]["bytes"]
+                    img = Image.open(io.BytesIO(data))
+                    w, h = img.size
+                    picture = pages / split / f"{row['id']}.{(img.format or 'jpeg').lower()}"
+                    picture.write_bytes(data)
+                    anns = row["annotations"]
+                    if isinstance(anns, dict):              # columns rather than rows
+                        anns = [dict(zip(anns, v, strict=True))
+                                for v in zip(*anns.values(), strict=True)]
+                    rows = [r for a in anns if 1 <= int(a["category_id"]) <= len(PUBLAYNET)
+                            for r in [box(int(a["category_id"]) - 1, a["bbox"][0], a["bbox"][1],
+                                          a["bbox"][0] + a["bbox"][2],
+                                          a["bbox"][1] + a["bbox"][3], w, h)]
+                            if r]
+                    made.append([picture.name, rows])
+            note.write_text(json.dumps(made))
+            local.unlink(missing_ok=True)
+            local.with_name(local.name + ".ok").unlink(missing_ok=True)
+        for picture, rows in json.loads(note.read_text()):
+            lay.add(split, pages / split / picture, [tuple(r) for r in rows])
+    return lay.finish(PUBLAYNET)
 
 
 def visa(folder: Path) -> Path:
@@ -1496,7 +1695,9 @@ MAKERS = {"bccd": bccd, "plantdoc": plantdoc, "gwhd": gwhd, "taco": taco,
           "bbbc038": bbbc038, "nuinsseg": nuinsseg, "pped": pped, "loco": loco,
           "msu-apples": msu_apples, "swinepose": swinepose, "bbbc039": bbbc039,
           "noaa-psnf": noaa_psnf, "armbench": armbench, "artf-clothes": artf_clothes,
-          "everwatch": everwatch, "visa": visa}
+          "everwatch": everwatch, "visa": visa,
+          "channel-islands": channel_islands, "island-conservation": island_conservation,
+          "publaynet": publaynet}
 
 
 #: what a prefetch fetches, in two lanes at once: the quick ones (training
@@ -1510,12 +1711,15 @@ ORDER = QUICK + BIG
 MORE = ["coco-text", "bbbc038", "nuinsseg", "ena24", "boxes-on-bees",
         # the third: protective equipment, logistics, teaching sets, masks and keypoints
         "pped", "loco", "msu-apples", "swinepose", "bbbc039", "artf-clothes", "visa",
-        "noaa-psnf", "everwatch", "armbench"]
+        "noaa-psnf", "everwatch", "armbench",
+        # the fourth: more camera traps, and document layout
+        "channel-islands", "island-conservation", "publaynet"]
 NEW = ["ap10k", "fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, *MORE]
 QUICK += ["ap10k", "coco-text", "bbbc038", "nuinsseg", "msu-apples", "swinepose", "bbbc039",
           "artf-clothes"]
 BIG += ["fashionpedia", "izembek", "fathomnet", *RF100VL_SETS, "ena24", "boxes-on-bees", "pped",
-        "loco", "visa", "noaa-psnf", "everwatch", "armbench"]
+        "loco", "visa", "noaa-psnf", "everwatch", "armbench", "channel-islands",
+        "island-conservation", "publaynet"]
 ORDER = QUICK + BIG
 
 

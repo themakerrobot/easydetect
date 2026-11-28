@@ -145,6 +145,32 @@ DATASETS = {
                     "Recognition in Natural Images. arXiv:1601.07140, 2016.",
         "note": "Every word is boxed, legible or not, as one class: text.",
     },
+    "channel-islands": {
+        "title": "Channel Islands camera traps",
+        "license": "CDLA-Permissive-1.0",
+        "source": "https://lila.science/datasets/channel-islands-camera-traps/",
+        "attribution": "Channel Islands Camera Traps, The Nature Conservancy (LILA BC), "
+                       "CDLA-Permissive-1.0.",
+        "citation": "The Nature Conservancy. Channel Islands Camera Traps. LILA BC.",
+    },
+    "island-conservation": {
+        "title": "Island Conservation camera traps",
+        "license": "CDLA-Permissive-1.0",
+        "source": "https://lila.science/datasets/island-conservation-camera-traps/",
+        "attribution": "Island Conservation Camera Traps (LILA BC), CDLA-Permissive-1.0.",
+        "citation": "Island Conservation. Island Conservation Camera Traps. LILA BC.",
+    },
+    "publaynet": {
+        "title": "PubLayNet (document layout)",
+        "license": "CDLA-Permissive-1.0 (annotations); pages: PMC Open Access, each article's",
+        "source": "https://github.com/ibm-aur-nlp/PubLayNet",
+        "attribution": "PubLayNet annotations by IBM, CDLA-Permissive-1.0; page images from the "
+                       "PubMed Central Open Access commercial-use subset, under each "
+                       "article's licence.",
+        "citation": "X. Zhong, J. Tang, A. Jimeno Yepes. PubLayNet: largest dataset ever for "
+                    "document layout analysis. ICDAR 2019. arXiv:1908.07836.",
+        "note": "20 of its 208 training shards (about 32,000 pages) and 2 validation shards.",
+    },
     "ena24": {
         "title": "ENA24 camera traps",
         "license": "CDLA-Permissive-1.0",
@@ -353,6 +379,7 @@ CATEGORIES = {
                                   "road-traffic vehicles-q0x2v street-work truck-movement  "
                                   "excavators-czvg9",
     "Animals and environment": "swinepose ap10k ena24 boxes-on-bees caltech-camera-traps  "
+                               "channel-islands island-conservation  "
                                "animals-ij5d2 bees-jt5in insects-mytwu pests-2xlvx  "
                                "thermal-cheetah-my4dp trail-camera shark-teeth-5atku  "
                                "cloud-types taco",
@@ -367,7 +394,8 @@ CATEGORIES = {
                               "cavity-rs0uf cells-uyemf gynecology-mri liver-disease  "
                               "mitosis-gjs3g parasites-1s07h phages stomata-cells  "
                               "x-ray-rheumatology",
-    "Documents and screens": "coco-text doclaynet activity-diagrams-qdobr document-parts  "
+    "Documents and screens": "coco-text doclaynet publaynet activity-diagrams-qdobr  "
+                             "document-parts  "
                              "signatures-xc8up paper-parts tweeter-posts tweeter-profile  "
                              "number-ops digits-t2eg6",
     "Industry and electronics": "loco armbench visa 4-fold-defect asbestos cable-damage  "
